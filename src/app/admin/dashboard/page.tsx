@@ -148,23 +148,25 @@ export default function TodayPage() {
           } catch (error) {
             console.error('Failed to fetch revenue data:', error);
           }
+
+          // Get recent bookings for the current tenant (moved inside the tenant scope)
+          try {
+            const { data, error } = await supabase
+              .from('bookings')
+              .select('*')
+              .eq('tenant_id', userTenant.tenant_id)
+              .order('start_at', { ascending: false })
+              .limit(10);
+
+            console.log('Dashboard: Fetching bookings for tenant:', userTenant.tenant_id);
+            console.log('Dashboard: Found bookings:', data?.length || 0);
+            if (error) console.error('Dashboard: Bookings error:', error);
+            
+            if (data) setBookings(data);
+          } catch (error) {
+            console.error('Failed to fetch bookings:', error);
+          }
         }
-      }
-
-      // Get recent bookings for the current tenant (moved inside the user check)
-      if (user && userTenant?.tenant_id) {
-        const { data, error } = await supabase
-          .from('bookings')
-          .select('*')
-          .eq('tenant_id', userTenant.tenant_id)
-          .order('start_at', { ascending: false })
-          .limit(10);
-
-        console.log('Dashboard: Fetching bookings for tenant:', userTenant.tenant_id);
-        console.log('Dashboard: Found bookings:', data?.length || 0);
-        if (error) console.error('Dashboard: Bookings error:', error);
-        
-        if (data) setBookings(data);
       }
 
       setLoading(false);
