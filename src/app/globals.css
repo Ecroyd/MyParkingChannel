@@ -1,26 +1,122 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
+/* Leaflet CSS */
+@import 'leaflet/dist/leaflet.css';
+
+/* ====== Theme tokens ====== */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+  /* Light */
+  --bg: 210 20% 98%;
+  --fg: 222 22% 15%;
+  --muted: 210 16% 96%;
+  --surface: 0 0% 100%;
+  --border: 215 16% 90%;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Accent = Apple-esque blue */
+  --accent: 213 94% 51%;
+  --accent-foreground: 0 0% 100%;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --bg: 220 18% 9%;
+    --fg: 210 15% 96%;
+    --muted: 220 14% 14%;
+    --surface: 220 16% 12%;
+    --border: 220 12% 20%;
+    --accent: 213 94% 62%;
+    --accent-foreground: 0 0% 100%;
   }
 }
 
+/* ====== Base ====== */
+html, body {
+  height: 100%;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  @apply bg-white text-slate-900 antialiased;
+  /* Subtle Apple-like gradient canvas */
+  background:
+    radial-gradient(1000px 600px at 10% -10%, rgba(0,123,255,0.08), transparent 60%),
+    radial-gradient(800px 500px at 90% -10%, rgba(99,102,241,0.08), transparent 60%),
+    linear-gradient(to bottom, rgba(255,255,255,0.6), rgba(255,255,255,0)) ;
+}
+
+/* Smooth focus ring */
+* { @apply outline-none; }
+:focus-visible { @apply ring-2 ring-blue-500/60 ring-offset-2 ring-offset-white; }
+
+/* ====== Components (glass + UI primitives) ====== */
+@layer components {
+  .glass {
+    @apply bg-white/60 backdrop-blur-xl border border-white/30 shadow-lg;
+  }
+  .glass-dark {
+    @apply bg-white/10 backdrop-blur-xl border border-white/10 shadow-lg;
+  }
+
+  .card {
+    @apply rounded-2xl p-5 shadow-md;
+    @apply glass dark:glass-dark;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all select-none;
+    @apply bg-white text-slate-900 border border-gray-200 hover:shadow-md active:scale-[0.99];
+  }
+  .btn-primary {
+    @apply bg-blue-600 text-white hover:bg-blue-700 border-transparent shadow-md;
+  }
+  .btn-ghost {
+    @apply bg-transparent hover:bg-slate-100 border-transparent;
+  }
+
+  .input, .select {
+    @apply w-full rounded-xl bg-white/90 border border-gray-200 px-3 py-2 text-sm
+           placeholder:text-slate-400 focus:ring-blue-500/60 focus:border-blue-500/60
+           transition-all;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs
+           bg-slate-100 border border-gray-200;
+  }
+
+  .panel-title {
+    @apply text-[15px] font-semibold tracking-tight;
+  }
+}
+
+/* Tables */
+.table {
+  @apply w-full border-collapse;
+}
+.table thead th {
+  @apply sticky top-0 bg-white/95 backdrop-blur border-b border-gray-200 text-left text-xs font-medium uppercase tracking-wide text-slate-600;
+}
+.table tbody td {
+  @apply border-b border-gray-200/70 text-sm;
+}
+
+/* Slim, subtle scrollbar */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: rgba(0,0,0,.15); border-radius: 999px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* Modal styles */
+@layer components {
+  /* Backdrop that disables clicks behind the modal */
+  .modal-overlay {
+    @apply fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm;
+  }
+  /* Opaque panel (not glass) for best readability */
+  .modal-panel {
+    @apply relative mx-auto w-full max-w-3xl rounded-2xl bg-white text-slate-900 shadow-lg border border-gray-200;
+  }
+  .modal-header { @apply px-6 pt-6 pb-3 text-[15px] font-semibold; }
+  .modal-body   { @apply px-6 pb-6; }
+  .modal-footer { @apply px-6 pb-6 pt-3 flex items-center justify-end gap-2; }
 }

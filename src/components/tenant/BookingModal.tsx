@@ -1,0 +1,65 @@
+"use client";
+import { useState, useMemo } from "react";
+
+export default function BookingModal({ slug }: { slug: string }) {
+  const today = useMemo(() => new Date().toISOString().slice(0,10), []);
+  const tomorrow = useMemo(() => {
+    const d = new Date(); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10);
+  }, []);
+
+  const [start, setStart] = useState(today);
+  const [end, setEnd] = useState(tomorrow);
+  const [email, setEmail] = useState("");
+  const [plate, setPlate] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function continueToBackend() {
+    setError(null); setLoading(true);
+    try {
+      const qs = new URLSearchParams({ slug, start, end, email, plate }).toString();
+      const res = await fetch(`/api/booking/start?${qs}`, { redirect: "follow" });
+      // If the API responds with a redirect, the browser will follow automatically (Next route returns 307).
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || "Unable to continue to booking.");
+      }
+    } catch (e: any) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid sm:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium mb-1">Arrival date</label>
+          <input type="date" value={start} onChange={e=>setStart(e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Departure date</label>
+          <input type="date" value={end} onChange={e=>setEnd(e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Email</label>
+          <input type="email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Vehicle plate</label>
+          <input value={plate} onChange={e=>setPlate(e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" />
+        </div>
+      </div>
+
+      {error && <div className="text-red-600 text-sm">{error}</div>}
+
+      <div className="flex gap-3">
+        <button onClick={continueToBackend} disabled={loading}
+          className="inline-flex items-center gap-2 bg-sky-600 hover:bg-sky-700 text-white px-5 py-3 rounded-2xl shadow">
+          {loading ? "Continuing…" : "Continue to booking"}
+        </button>
+      </div>
+    </div>
+  );
+}
