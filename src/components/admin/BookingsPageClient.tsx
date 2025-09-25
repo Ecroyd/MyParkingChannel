@@ -15,6 +15,9 @@ type Booking = {
   customer_name: string
   customer_email: string
   plate: string
+  car_make?: string
+  car_model?: string
+  car_color?: string
   start_at: string
   end_at: string
   status: string

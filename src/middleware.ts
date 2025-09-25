@@ -15,6 +15,7 @@ const STATIC_PATHS = [
   "/assets",
   "/api/site/resolve",
   "/api/_debug", // our host/slug debug endpoint below
+  "/api/manage-booking", // manage booking API routes
 ];
 
 function isStaticPath(pathname: string) {

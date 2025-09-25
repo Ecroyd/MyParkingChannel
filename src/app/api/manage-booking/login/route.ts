@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { SignJWT, jwtVerify } from 'jose';
 import { getServerSupabase } from '@/lib/supabase/server';
+import { createServerClientDirect } from '@/lib/supabase/server-direct';
 
 const COOKIE_NAME = 'booking_session';
 const TTL_MINUTES = 30; // session for editing
@@ -21,7 +22,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ message: 'Missing fields.' }, { status: 400 });
     }
 
-    const supabase = await getServerSupabase();
+    // Use admin client to bypass RLS
+    const supabase = createServerClientDirect({ admin: true });
 
     // resolve tenant by slug
     const { data: tenant, error: terr } = await supabase
@@ -39,7 +41,7 @@ export async function POST(req: Request) {
     // bookings table must include: reference (text), customer_name (text), tenant_id
     const { data: booking, error: berr } = await supabase
       .from('bookings')
-      .select('id, tenant_id, reference, customer_name, email, phone, vehicle_reg, car_make, car_model, car_color, flight_number, dropoff_time, pickup_time')
+      .select('id, tenant_id, reference, customer_name, customer_email, plate, car_make, car_model, car_color, flight_number, start_at, end_at')
       .eq('tenant_id', tenant.id)
       .eq('reference', reference)
       .maybeSingle();

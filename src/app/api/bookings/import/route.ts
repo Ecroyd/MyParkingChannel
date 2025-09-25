@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { withReq } from "@/lib/logger";
-import { getServerSupabase } from '@/lib/supabase/server'; // your existing helper
+import { createServerClient } from '@/lib/supabase/server';
 import { log } from "@/lib/logger";
 
 // Resolve tenant ID from request (header, form, or user's default tenant)
@@ -74,7 +74,7 @@ const parseCSV = async (f: File) => {
 export async function POST(req: Request) {
   const { id, log: slog, error } = withReq(req);
   try {
-    const supabase = await getServerSupabase(); // use user session + RLS
+    const supabase = await createServerClient(); // use user session + RLS
     
     // Resolve tenant ID first
     let tenant_id: string;

@@ -23,7 +23,7 @@ type Site = {
   tenant_id: string;
   slug: string;
   status: 'draft' | 'published';
-  template: string | null;
+  template: string;
   primary_domain: string | null;
 };
 
@@ -59,28 +59,35 @@ export default function TenantSitesPage() {
         setUser(user);
 
         // Get all tenants (for now, we'll get all tenants the user has access to)
-        const { data: userTenants, error: tenantError } = await supabase
+        // First, get user_tenants relationships
+        const { data: userTenants, error: userTenantsError } = await supabase
           .from('user_tenants')
-          .select(`
-            role,
-            tenants!inner(
-              id,
-              slug,
-              name,
-              timezone
-            )
-          `)
+          .select('role, tenant_id')
           .eq('user_id', user.id);
 
-        if (tenantError) {
+        if (userTenantsError) {
+          console.error('Error fetching user tenants:', userTenantsError);
           setError('Failed to load tenant data');
           setLoading(false);
           return;
         }
 
         if (userTenants && userTenants.length > 0) {
+          // Get tenant details for each relationship
+          const tenantIds = userTenants.map(ut => ut.tenant_id);
+          const { data: tenants, error: tenantsError } = await supabase
+            .from('tenants')
+            .select('id, slug, name, timezone, default_capacity')
+            .in('id', tenantIds);
+
+          if (tenantsError) {
+            console.error('Error fetching tenants:', tenantsError);
+            setError('Failed to load tenant data');
+            setLoading(false);
+            return;
+          }
+
           // Get site and branding data for each tenant
-          const tenantIds = userTenants.map(ut => ut.tenants.id);
           
           const [sitesResult, brandingResult] = await Promise.all([
             supabase
@@ -97,7 +104,9 @@ export default function TenantSitesPage() {
           const branding = brandingResult.data || [];
 
           const tenantsWithSites: TenantWithSite[] = userTenants.map(ut => {
-            const tenant = ut.tenants;
+            const tenant = tenants.find(t => t.id === ut.tenant_id);
+            if (!tenant) return null; // Skip if tenant not found
+            
             const site = sites.find(s => s.tenant_id === tenant.id);
             const tenantBranding = branding.find(b => b.tenant_id === tenant.id);
             
@@ -106,7 +115,7 @@ export default function TenantSitesPage() {
               site,
               branding: tenantBranding
             };
-          });
+          }).filter(Boolean) as TenantWithSite[];
 
           setTenants(tenantsWithSites);
         }

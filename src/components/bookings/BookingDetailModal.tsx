@@ -261,18 +261,29 @@ export default function BookingDetailModal({
                 <div>
                   <label className="text-sm font-medium text-slate-600">License Plate</label>
                   <p className="text-sm font-mono bg-slate-100 px-2 py-1 rounded">
-                    {booking.plate}
+                    {booking.plate || 'Not provided'}
                   </p>
                 </div>
-                {booking.flight_number && (
-                  <div>
-                    <label className="text-sm font-medium text-slate-600">Flight Number</label>
-                    <p className="text-sm flex items-center gap-2">
-                      <Plane className="h-3 w-3" />
-                      {booking.flight_number}
-                    </p>
-                  </div>
-                )}
+                <div>
+                  <label className="text-sm font-medium text-slate-600">Flight Number</label>
+                  <p className="text-sm flex items-center gap-2">
+                    <Plane className="h-3 w-3" />
+                    {booking.flight_number || 'Not provided'}
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-600">Make & Model</label>
+                  <p className="text-sm">
+                    {booking.car_make && booking.car_model 
+                      ? `${booking.car_make} ${booking.car_model}`
+                      : 'Not provided'
+                    }
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-600">Color</label>
+                  <p className="text-sm">{booking.car_color || 'Not provided'}</p>
+                </div>
               </div>
             </CardContent>
           </Card>

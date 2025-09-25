@@ -155,15 +155,19 @@ export default function BookingDetailsModal({
             {/* Vehicle Card */}
             <div className="rounded-2xl border border-gray-200/50 bg-white/70 p-6 shadow-sm backdrop-blur-sm">
               <h3 className="text-sm font-medium text-gray-500 mb-3">Vehicle</h3>
-              <p className="font-semibold text-lg text-gray-900">{booking.plate || 'Unknown'}</p>
-              {(booking.car_make || booking.car_model) && (
-                <p className="text-sm text-gray-600 mt-1">
-                  {booking.car_make} {booking.car_model}
-                </p>
-              )}
-              {booking.flight_number && (
-                <p className="text-sm text-gray-600 mt-1">Flight: {booking.flight_number}</p>
-              )}
+              <p className="font-semibold text-lg text-gray-900">{booking.plate || 'Not provided'}</p>
+              <p className="text-sm text-gray-600 mt-1">
+                {booking.car_make && booking.car_model 
+                  ? `${booking.car_make} ${booking.car_model}`
+                  : 'Make & Model: Not provided'
+                }
+              </p>
+              <p className="text-sm text-gray-600 mt-1">
+                Color: {booking.car_color || 'Not provided'}
+              </p>
+              <p className="text-sm text-gray-600 mt-1">
+                Flight: {booking.flight_number || 'Not provided'}
+              </p>
             </div>
           </div>
 

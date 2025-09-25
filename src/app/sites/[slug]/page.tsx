@@ -11,8 +11,8 @@ async function getProfile(slug: string) {
   if (!ctx) return null;
   
   // Get public profile data
-  const { getServerSupabase } = await import("@/lib/supabase/server");
-  const supabase = await getServerSupabase();
+  const { createServerClient } = await import("@/lib/supabase/server");
+  const supabase = await createServerClient();
   
   const { data: profile, error: profileError } = await supabase
     .from("tenant_public_profile")

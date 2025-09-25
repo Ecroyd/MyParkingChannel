@@ -25,30 +25,45 @@ export default function SetupPage() {
   useEffect(() => {
     async function checkUserAndTenant() {
       try {
+        console.log('🔍 Setup: Checking user authentication...')
         const { data: { user }, error: userError } = await supabase.auth.getUser()
         if (userError || !user) {
+          console.log('❌ Setup: User not authenticated, redirecting to login')
           router.push('/login')
           return
         }
 
+        console.log('✅ Setup: User authenticated:', user.id, user.email)
         setUser(user)
 
         // Check if user already has a tenant
+        console.log('🔍 Setup: Checking tenant status via API...')
         const tenantResponse = await fetch('/api/onboarding/check-tenant', {
           credentials: 'include'
         })
         
+        console.log('📊 Setup: Tenant check response status:', tenantResponse.status)
+        
         if (tenantResponse.ok) {
-          const { hasTenant, tenant: existingTenant } = await tenantResponse.json()
+          const tenantData = await tenantResponse.json()
+          console.log('📊 Setup: Tenant check response data:', tenantData)
+          
+          const { hasTenant, tenant: existingTenant } = tenantData
           if (hasTenant && existingTenant) {
+            console.log('✅ Setup: User already has tenant:', existingTenant)
             setTenant(existingTenant)
             setTenantName(existingTenant.name)
             setTenantSlug(existingTenant.slug)
             setTimezone(existingTenant.timezone)
+          } else {
+            console.log('ℹ️ Setup: User has no tenant, showing setup form')
           }
+        } else {
+          const errorText = await tenantResponse.text()
+          console.log('❌ Setup: Tenant check failed:', tenantResponse.status, errorText)
         }
       } catch (err) {
-        console.error('Setup check failed:', err)
+        console.error('❌ Setup: Setup check failed:', err)
         setError('Failed to check setup status')
       }
     }
@@ -62,6 +77,12 @@ export default function SetupPage() {
     setError('')
 
     try {
+      console.log('🚀 Setup: Creating tenant with data:', {
+        name: tenantName,
+        slug: tenantSlug,
+        timezone
+      })
+
       const response = await fetch('/api/onboarding/create-tenant', {
         method: 'POST',
         credentials: 'include',
@@ -73,10 +94,14 @@ export default function SetupPage() {
         })
       })
 
+      console.log('📊 Setup: Create tenant response status:', response.status)
+
       if (!response.ok) {
         const errorData = await response.json()
+        console.log('❌ Setup: Create tenant error response:', errorData)
         
         if (errorData.error && errorData.error.includes('duplicate key value violates unique constraint "tenants_slug_key"')) {
+          console.log('⚠️ Setup: Slug already exists')
           setError('This business name is already taken. Please choose a different name.')
           return
         }
@@ -84,10 +109,13 @@ export default function SetupPage() {
         throw new Error(errorData.error || 'Failed to create tenant')
       }
 
-      const { tenant: newTenant } = await response.json()
+      const responseData = await response.json()
+      console.log('✅ Setup: Tenant created successfully:', responseData)
+      
+      const { tenant: newTenant } = responseData
       setTenant(newTenant)
-      console.log('Tenant created successfully:', newTenant)
     } catch (err: any) {
+      console.error('❌ Setup: Create tenant failed:', err)
       setError(err.message)
     } finally {
       setLoading(false)

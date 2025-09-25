@@ -17,7 +17,7 @@ import { format, eachDayOfInterval } from 'date-fns';
 type Row = { day: string; channel: string; occupancy: number };
 
 type Props = {
-  tenantId: string;
+  tenantId?: string;  // Optional since we use RLS
   start: string;    // 'YYYY-MM-DD'
   end: string;      // 'YYYY-MM-DD' (exclusive)
   tz?: string;
@@ -44,18 +44,25 @@ export default function DailyOccupancyStacked({ tenantId, start, end, tz = 'UTC'
       setLoading(true);
       setError(null);
       try {
-        // Fetch bookings for the specific tenant
-        const { data: bookings, error: bookingsError } = await supabase
+        // Fetch bookings - let RLS handle tenant isolation automatically
+        const { data: allBookings, error: bookingsError } = await supabase
           .from('bookings')
           .select('start_at, end_at, source')
-          .eq('tenant_id', tenantId)
-          .gte('start_at', start)
-          .lte('end_at', end)
           .order('start_at', { ascending: true });
 
         if (bookingsError) {
           throw new Error(`Database error: ${bookingsError.message}`);
         }
+
+        // Filter bookings that overlap with our date range
+        const startDate = new Date(start);
+        const endDate = new Date(end);
+        const bookings = allBookings?.filter(booking => {
+          const bookingStart = new Date(booking.start_at);
+          const bookingEnd = new Date(booking.end_at);
+          // Check if booking overlaps with our date range
+          return bookingStart <= endDate && bookingEnd >= startDate;
+        }) || [];
 
         if (cancelled) return;
 
@@ -63,8 +70,6 @@ export default function DailyOccupancyStacked({ tenantId, start, end, tz = 'UTC'
         const days = eachDayOfInterval({ start: new Date(start), end: new Date(end) });
         const dailyData: Row[] = [];
 
-        console.log(`DailyOccupancyStacked: Processing ${days.length} days from ${start} to ${end} for tenant ${tenantId}`);
-        console.log(`DailyOccupancyStacked: Found ${bookings?.length || 0} bookings`);
 
         for (const day of days) {
           const dayStr = format(day, 'yyyy-MM-dd');

@@ -30,37 +30,68 @@ export function TenantSwitcher({ currentTenant, onTenantChange }: TenantSwitcher
 
   useEffect(() => {
     async function fetchTenants() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          setLoading(false)
+          return
+        }
 
-      const { data: userTenants } = await supabase
-        .from('user_tenants')
-        .select(`
-          role,
-          tenants!inner(
-            id,
-            slug,
-            name
-          )
-        `)
-        .eq('user_id', user.id)
+        // First, get user_tenants relationships
+        const { data: userTenants, error: userTenantsError } = await supabase
+          .from('user_tenants')
+          .select('role, tenant_id')
+          .eq('user_id', user.id)
 
-      if (userTenants) {
-        const formattedTenants = userTenants.map(ut => ({
-          id: ut.tenants.id,
-          slug: ut.tenants.slug,
-          name: ut.tenants.name,
-          role: ut.role
-        }))
-        
-        setTenants(formattedTenants)
-        
-        // Set current tenant
-        const current = formattedTenants.find(t => t.slug === currentTenant) || formattedTenants[0]
-        setSelectedTenant(current)
+        if (userTenantsError) {
+          console.error('Error fetching user tenants:', userTenantsError)
+          console.error('User ID:', user.id)
+          setLoading(false)
+          return
+        }
+
+        console.log('User tenants fetched:', userTenants)
+
+        if (userTenants && userTenants.length > 0) {
+          // Get tenant details for each relationship
+          const tenantIds = userTenants.map(ut => ut.tenant_id)
+          const { data: tenants, error: tenantsError } = await supabase
+            .from('tenants')
+            .select('id, slug, name')
+            .in('id', tenantIds)
+
+          if (tenantsError) {
+            console.error('Error fetching tenants:', tenantsError)
+            console.error('Tenant IDs:', tenantIds)
+            setLoading(false)
+            return
+          }
+
+          console.log('Tenants fetched:', tenants)
+
+          if (tenants) {
+            const formattedTenants = userTenants.map(ut => {
+              const tenant = tenants.find(t => t.id === ut.tenant_id)
+              return {
+                id: tenant?.id || ut.tenant_id,
+                slug: tenant?.slug || '',
+                name: tenant?.name || 'Unknown Tenant',
+                role: ut.role
+              }
+            }).filter(t => t.slug) // Filter out any tenants that couldn't be found
+            
+            setTenants(formattedTenants)
+            
+            // Set current tenant
+            const current = formattedTenants.find(t => t.slug === currentTenant) || formattedTenants[0]
+            setSelectedTenant(current)
+          }
+        }
+      } catch (error) {
+        console.error('Error in fetchTenants:', error)
+      } finally {
+        setLoading(false)
       }
-      
-      setLoading(false)
     }
 
     fetchTenants()

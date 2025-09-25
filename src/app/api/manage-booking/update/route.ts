@@ -2,20 +2,19 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { jwtVerify } from 'jose';
 import { getServerSupabase } from '@/lib/supabase/server';
+import { createServerClientDirect } from '@/lib/supabase/server-direct';
 
 const COOKIE_NAME = 'booking_session';
 const secret = new TextEncoder().encode(process.env.BOOKING_SESSION_SECRET || 'change-me-in-env');
 
 // whitelist keys customers are allowed to change
 const ALLOWED: Record<string, true> = {
-  vehicle_reg: true,
+  plate: true,
   car_make: true,
   car_model: true,
   car_color: true,
-  phone: true,
+  customer_email: true,
   flight_number: true,
-  dropoff_time: true,
-  pickup_time: true,
 };
 
 export async function POST(req: Request) {
@@ -48,7 +47,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ message: 'Nothing to update.' }, { status: 400 });
     }
 
-    const supabase = await getServerSupabase();
+    const supabase = createServerClientDirect({ admin: true });
 
     console.log('Update booking attempt:', { 
       tenant_id, 
@@ -58,40 +57,22 @@ export async function POST(req: Request) {
     });
 
     // Try RPC function first, fallback to direct update if RPC doesn't exist
-    try {
-      const { data: rpcResult, error } = await supabase.rpc('update_customer_booking', {
-        p_tenant_id: tenant_id,
-        p_booking_id: booking_id,
-        p_reference: reference,
-        p_vehicle_reg: allowedChanges.vehicle_reg || null,
-        p_car_make: allowedChanges.car_make || null,
-        p_car_model: allowedChanges.car_model || null,
-        p_car_color: allowedChanges.car_color || null,
-        p_phone: allowedChanges.phone || null,
-        p_flight_number: allowedChanges.flight_number || null,
-        p_dropoff_time: allowedChanges.dropoff_time || null,
-        p_pickup_time: allowedChanges.pickup_time || null,
-      });
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('update_customer_booking', {
+      p_tenant_id: tenant_id,
+      p_reference: reference,
+      p_plate: allowedChanges.plate || null,
+      p_car_make: allowedChanges.car_make || null,
+      p_car_model: allowedChanges.car_model || null,
+      p_car_color: allowedChanges.car_color || null,
+      p_flight_number: allowedChanges.flight_number || null,
+      p_last_name: null, // Not provided in the form
+      p_notes: null, // Not provided in the form
+    });
 
-      console.log('RPC result:', { rpcResult, error });
+    console.log('RPC result:', { rpcResult, error: rpcError });
 
-      if (error) {
-        console.error('Update booking RPC error:', error);
-        return NextResponse.json({ message: error.message }, { status: 400 });
-      }
-
-      // Check the RPC result
-      if (rpcResult && !rpcResult.success) {
-        console.error('RPC function returned error:', rpcResult.error);
-        return NextResponse.json({ message: rpcResult.error }, { status: 400 });
-      }
-
-      return NextResponse.json({ 
-        ok: true, 
-        message: rpcResult?.message || 'Booking updated successfully' 
-      });
-    } catch (rpcError: any) {
-      console.log('RPC function not available, falling back to direct update:', rpcError.message);
+    if (rpcError) {
+      console.log('RPC function failed, falling back to direct update:', rpcError.message);
       
       // Fallback to direct table update
       const { error: updateError } = await supabase
@@ -110,6 +91,17 @@ export async function POST(req: Request) {
         message: 'Booking updated successfully' 
       });
     }
+
+    // Check the RPC result
+    if (rpcResult && !rpcResult.success) {
+      console.error('RPC function returned error:', rpcResult.error);
+      return NextResponse.json({ message: rpcResult.error }, { status: 400 });
+    }
+
+    return NextResponse.json({ 
+      ok: true, 
+      message: rpcResult?.message || 'Booking updated successfully' 
+    });
   } catch (e: any) {
     console.error('Manage booking update error:', e);
     return NextResponse.json({ message: e.message || 'Update failed.' }, { status: 500 });

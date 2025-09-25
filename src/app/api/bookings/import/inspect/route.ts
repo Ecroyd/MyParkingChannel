@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { withReq } from "@/lib/logger";
-import { getServerSupabase } from '@/lib/supabase/server';
-import { createServerClientDirect } from "@/lib/supabase/server-direct";
+import { createServerClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server-admin';
 import { 
   headerSignature, 
   findBestMapping, 
@@ -11,14 +11,14 @@ import {
 } from "../_mapping";
 
 // Resolve tenant ID from request - require explicit tenant selection
-async function resolveTenantId(req: Request, supabase: any) {
+async function resolveTenantId(req: Request, supabase: any, adminClient: any) {
   const fromHeader = req.headers.get('x-tenant-id');
   if (fromHeader) return fromHeader;
 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('NO_USER_SESSION');
 
-  const { data, error } = await supabase
+  const { data, error } = await adminClient
     .from('user_tenants')
     .select('tenant_id')
     .eq('user_id', user.id);
@@ -48,13 +48,15 @@ const parseCSV = async (f: File) => {
 export async function POST(req: Request) {
   const { id, log: slog, error } = withReq(req);
   try {
-    const supabase = await getServerSupabase();
+    console.log('🔍 Import/inspect: Starting file inspection...')
+    const supabase = await createServerClient();
+    const adminClient = createAdminClient();
 
     // 1) trust header, but verify it's a tenant the user belongs to
     const tenantId = req.headers.get("x-tenant-id") ?? "";
     if (!tenantId) return NextResponse.json({ ok:false, reason:"TENANT_REQUIRED" }, { status:400 });
 
-    const { data: links } = await supabase
+    const { data: links } = await adminClient
       .from("user_tenants")
       .select("tenant_id")
       .eq("tenant_id", tenantId)
@@ -82,7 +84,7 @@ export async function POST(req: Request) {
     });
 
     // Find best saved mapping (exact or fuzzy match)
-    const suggested = await findBestMapping(supabase, tenantId, signature);
+    const suggested = await findBestMapping(adminClient, tenantId, signature);
     
     // Fallback to auto-guess if no saved mapping found
     const autoGuess = autoGuessMapping(headers);
@@ -95,7 +97,7 @@ export async function POST(req: Request) {
     // Save file to Supabase Storage
     console.log("Attempting to upload file to storage:", { key, fileSize: file.size, contentType: file.type });
     
-    const { data: uploadData, error: uploadError } = await supabase.storage
+    const { data: uploadData, error: uploadError } = await adminClient.storage
       .from('imports')
       .upload(key, file, {
         contentType: 'text/csv',
@@ -111,7 +113,7 @@ export async function POST(req: Request) {
     console.log("File uploaded successfully:", uploadData);
 
     // Get saved mappings for this tenant
-    const { data: savedMappings } = await supabase
+    const { data: savedMappings } = await adminClient
       .from('booking_import_mappings')
       .select('id, name, mapping, created_at')
       .eq('tenant_id', tenantId)

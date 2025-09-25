@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { withReq } from "@/lib/logger";
-import { getServerSupabase } from '@/lib/supabase/server';
-import { createServerClientDirect } from "@/lib/supabase/server-direct";
+import { createServerClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server-admin';
 import { 
   saveMapping, 
   markMappingUsed,
@@ -134,6 +134,7 @@ export async function POST(req: Request) {
   const { id, log: slog, error } = withReq(req);
   try {
     const supabase = await createServerClient({ admin: false });
+    const adminClient = createAdminClient();
     
     // Resolve tenant ID
     let tenant_id: string;
@@ -164,7 +165,7 @@ export async function POST(req: Request) {
 
     // Download file from storage
     const fileName = `${tenant_id}/${fileId}.csv`;
-    const { data: fileData, error: downloadError } = await supabase.storage
+    const { data: fileData, error: downloadError } = await adminClient.storage
       .from('imports')
       .download(fileName);
 
@@ -262,7 +263,7 @@ export async function POST(req: Request) {
     let skipped = 0;
 
     if (toInsert.length > 0) {
-      const { data, error: insErr } = await supabase
+      const { data, error: insErr } = await adminClient
         .from("bookings")
         .upsert(toInsert, { onConflict: "tenant_id,reference", ignoreDuplicates: false })
         .select("id, reference");
@@ -278,7 +279,7 @@ export async function POST(req: Request) {
 
     // Mark suggested mapping as used (for learning)
     if (suggestedMappingId) {
-      await markMappingUsed(supabase, suggestedMappingId);
+      await markMappingUsed(adminClient, suggestedMappingId);
     }
 
     // Save mapping if requested (with learning)

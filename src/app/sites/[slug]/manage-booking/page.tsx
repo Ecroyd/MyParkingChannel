@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import { Header, Footer } from '../_components/SiteChrome';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,26 +16,26 @@ type Booking = {
   tenant_id: string;
   reference: string;
   customer_name: string;
-  email: string | null;
-  phone: string | null;
-  vehicle_reg: string | null;
+  customer_email: string | null;
+  plate: string | null;
   car_make: string | null;
   car_model: string | null;
   car_color: string | null;
   flight_number: string | null;
-  // times only — not dates
-  dropoff_time: string | null;    // e.g. "10:30"
-  pickup_time: string | null;     // e.g. "18:45"
+  start_at: string;
+  end_at: string;
 };
 
 export default function ManageBookingPage() {
+  const params = useParams();
+  const tenantSlug = params.slug as string;
+  
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
   
   const [step, setStep] = useState<'login' | 'edit'>('login');
-  const [tenantSlug, setTenantSlug] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -46,24 +47,14 @@ export default function ManageBookingPage() {
   // booking model
   const [booking, setBooking] = useState<Booking | null>(null);
   const [form, setForm] = useState({
-    vehicle_reg: '',
+    plate: '',
     car_make: '',
     car_model: '',
     car_color: '',
-    phone: '',
+    customer_email: '',
     flight_number: '',
-    dropoff_time: '',
-    pickup_time: '',
   });
 
-  useEffect(() => {
-    // derive tenant slug from /sites/[slug]/...
-    const parts = window.location.pathname.split('/').filter(Boolean);
-    const slugIdx = parts.indexOf('sites') + 1;
-    const slug = parts[slugIdx] || '';
-    console.log('Extracted tenant slug:', { parts, slugIdx, slug });
-    setTenantSlug(slug);
-  }, []);
 
   function onChange(name: keyof typeof form, value: string) {
     setForm((f) => ({ ...f, [name]: value }));
@@ -94,14 +85,12 @@ export default function ManageBookingPage() {
       const data = (await res.json()) as { booking: Booking };
       setBooking(data.booking);
       setForm({
-        vehicle_reg: data.booking.vehicle_reg ?? '',
-        car_make: data.booking.car_make ?? '',
-        car_model: data.booking.car_model ?? '',
-        car_color: data.booking.car_color ?? '',
-        phone: data.booking.phone ?? '',
-        flight_number: data.booking.flight_number ?? '',
-        dropoff_time: data.booking.dropoff_time ?? '',
-        pickup_time: data.booking.pickup_time ?? '',
+        plate: data.booking.plate || '',
+        car_make: data.booking.car_make || '',
+        car_model: data.booking.car_model || '',
+        car_color: data.booking.car_color || '',
+        customer_email: data.booking.customer_email || '',
+        flight_number: data.booking.flight_number || '',
       });
       setStep('edit');
     } catch (e: any) {
@@ -125,14 +114,12 @@ export default function ManageBookingPage() {
         body: JSON.stringify({
           // booking is inferred from secure cookie set at login
           changes: {
-            vehicle_reg: form.vehicle_reg.trim() || null,
+            plate: form.plate.trim() || null,
             car_make: form.car_make.trim() || null,
             car_model: form.car_model.trim() || null,
             car_color: form.car_color.trim() || null,
-            phone: form.phone.trim() || null,
+            customer_email: form.customer_email.trim() || null,
             flight_number: form.flight_number.trim() || null,
-            dropoff_time: form.dropoff_time.trim() || null,
-            pickup_time: form.pickup_time.trim() || null,
           },
         }),
       });
@@ -240,11 +227,11 @@ export default function ManageBookingPage() {
               <form onSubmit={handleSave} className="space-y-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="vehicle_reg">Vehicle registration</Label>
+                    <Label htmlFor="plate">Vehicle registration</Label>
                     <Input
-                      id="vehicle_reg"
-                      value={form.vehicle_reg}
-                      onChange={(e) => onChange('vehicle_reg', e.target.value.toUpperCase())}
+                      id="plate"
+                      value={form.plate}
+                      onChange={(e) => onChange('plate', e.target.value.toUpperCase())}
                       placeholder="AB12 CDE"
                       disabled={disabled}
                     />
@@ -280,12 +267,13 @@ export default function ManageBookingPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="phone">Contact phone</Label>
+                    <Label htmlFor="customer_email">Contact email</Label>
                     <Input
-                      id="phone"
-                      value={form.phone}
-                      onChange={(e) => onChange('phone', e.target.value)}
-                      placeholder="+44..."
+                      id="customer_email"
+                      type="email"
+                      value={form.customer_email}
+                      onChange={(e) => onChange('customer_email', e.target.value)}
+                      placeholder="your@email.com"
                       disabled={disabled}
                     />
                   </div>
@@ -296,26 +284,6 @@ export default function ManageBookingPage() {
                       value={form.flight_number}
                       onChange={(e) => onChange('flight_number', e.target.value.toUpperCase())}
                       placeholder="BA1432"
-                      disabled={disabled}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="dropoff_time">Drop-off time</Label>
-                    <Input
-                      id="dropoff_time"
-                      type="time"
-                      value={form.dropoff_time || ''}
-                      onChange={(e) => onChange('dropoff_time', e.target.value)}
-                      disabled={disabled}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="pickup_time">Pick-up time</Label>
-                    <Input
-                      id="pickup_time"
-                      type="time"
-                      value={form.pickup_time || ''}
-                      onChange={(e) => onChange('pickup_time', e.target.value)}
                       disabled={disabled}
                     />
                   </div>

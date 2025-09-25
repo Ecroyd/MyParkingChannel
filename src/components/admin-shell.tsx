@@ -20,6 +20,7 @@ export default function AdminShell({ children }: AdminShellProps) {
   const [checking, setChecking] = useState(true);
   const [user, setUser] = useState<any>(null);
   const [tenant, setTenant] = useState<any>(null);
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const router = useRouter();
 
   const loadTenantData = async () => {
@@ -65,6 +66,15 @@ export default function AdminShell({ children }: AdminShellProps) {
           logo_url: profile?.logo_url || tenant.brand_logo_url
         });
       }
+
+      // Check if user is platform admin (jcecroyd@gmail.com)
+      const { data: platformAdmin } = await supabase
+        .from('platform_admins')
+        .select('user_id')
+        .eq('user_id', session.user.id)
+        .maybeSingle();
+      
+      setIsPlatformAdmin(!!platformAdmin);
       
       setChecking(false);
     }
@@ -105,7 +115,7 @@ export default function AdminShell({ children }: AdminShellProps) {
   return (
     <div className="flex h-screen bg-[#f9fafb] text-gray-900">
       {/* Sidebar */}
-      <Sidebar />
+      <Sidebar features={isPlatformAdmin ? ['platform_admin'] : []} />
       
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden bg-glass-gradient">

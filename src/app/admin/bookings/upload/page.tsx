@@ -77,10 +77,28 @@ export default function UploadPage() {
 
   useEffect(() => {
     (async () => {
-      const r = await fetch("/api/tenants/my", { cache: "no-store", credentials: "include" });
-      const j = await r.json();
-      setTenants(j.tenants || []);
-      setTenantId(j.activeTenantId || "");
+      try {
+        console.log('🔍 Upload: Fetching tenants...')
+        const r = await fetch("/api/tenants/my", { cache: "no-store", credentials: "include" });
+        
+        if (!r.ok) {
+          console.log('❌ Upload: API request failed:', r.status, r.statusText)
+          const errorText = await r.text();
+          console.log('❌ Upload: Error response:', errorText)
+          setTenants([]);
+          setTenantId("");
+          return;
+        }
+
+        const j = await r.json();
+        console.log('📊 Upload: API response:', j)
+        setTenants(j.tenants || []);
+        setTenantId(j.activeTenantId || "");
+      } catch (err) {
+        console.error('❌ Upload: Error fetching tenants:', err)
+        setTenants([]);
+        setTenantId("");
+      }
     })();
   }, []);
 
