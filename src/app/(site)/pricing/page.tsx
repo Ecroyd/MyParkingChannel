@@ -1,6 +1,9 @@
 import { resolveTenantByHost } from '@/lib/tenant/resolve-tenant'
 import Link from 'next/link'
 
+// Force dynamic rendering for this page since it requires database access
+export const dynamic = 'force-dynamic'
+
 export default async function Pricing() {
   const t = await resolveTenantByHost()
   return (

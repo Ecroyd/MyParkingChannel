@@ -1,6 +1,9 @@
 import { resolveTenantByHost } from '@/lib/tenant/resolve-tenant'
 import Link from 'next/link'
 
+// Force dynamic rendering for this page since it requires database access
+export const dynamic = 'force-dynamic'
+
 export default async function Home() {
   const t = await resolveTenantByHost()
   const title = t?.site_hero_title ?? 'Airport Parking, made simple.'

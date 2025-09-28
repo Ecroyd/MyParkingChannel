@@ -1,6 +1,9 @@
 import { resolveTenantByHost } from '@/lib/tenant/resolve-tenant'
 import Link from 'next/link'
 
+// Force dynamic rendering for this route group since it requires database access
+export const dynamic = 'force-dynamic'
+
 export default async function SiteLayout({ children }: { children: React.ReactNode }) {
   const tenant = await resolveTenantByHost()
   if (!tenant) {
