@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=18.0.0"
+    "node": "20.x"
   },
   "scripts": {
-    "dev": "kill-port 3002 && next dev -p 3002",
+    "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
@@ -74,5 +74,6 @@
     "globby": "^14.1.0",
     "kill-port": "^2.0.1",
     "webpack": "^5.101.3"
-  }
+  },
+  "packageManager": "npm@10"
 }

@@ -60,8 +60,8 @@ export default function TenantDetailClient({ tenant }: TenantDetailClientProps) 
 
   const getOwnerEmail = () => {
     // First try to get from owner_info
-    if (tenant.owner_info?.email) {
-      return tenant.owner_info.email;
+    if ((tenant as any).owner_info?.email) {
+      return (tenant as any).owner_info.email;
     }
     
     // Fallback to user_tenants if owner_info is not available
@@ -141,10 +141,10 @@ export default function TenantDetailClient({ tenant }: TenantDetailClientProps) 
                 {getOwnerEmail()}
               </p>
             </div>
-            {tenant.owner_info?.phone && (
+            {(tenant as any).owner_info?.phone && (
               <div>
                 <label className="text-sm font-medium text-gray-600">Phone</label>
-                <p className="text-sm text-gray-900 mt-1">{tenant.owner_info.phone}</p>
+                <p className="text-sm text-gray-900 mt-1">{(tenant as any).owner_info.phone}</p>
               </div>
             )}
             <div>

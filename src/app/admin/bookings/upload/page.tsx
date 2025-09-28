@@ -173,7 +173,7 @@ export default function UploadPage() {
                 } else {
         // Use our enhanced auto-mapping
         const autoMapping = autoMapHeaders(data.headers);
-        setMapping(autoMapping);
+        setMapping(autoMapping as BookingMapping);
         setSuggestedMappingId(null);
       }
       

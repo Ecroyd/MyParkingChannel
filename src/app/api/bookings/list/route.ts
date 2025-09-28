@@ -42,7 +42,7 @@ export const POST = withTenant(async (tenant: TenantContext, request: Request) =
   const from = (page - 1) * limit
   const to = from + limit - 1
 
-  const { data, error, count } = await query
+  const { data, error, count } = await (query as any)
     .range(from, to)
     .select('*', { count: 'exact' })
 

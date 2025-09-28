@@ -11,7 +11,7 @@ export function withTenant<T extends any[]>(
       const url = new URL(headersList.get('referer') || '')
       const tenantSlug = url.searchParams.get('tenant')
 
-      const tenant = await resolveTenant(host, tenantSlug)
+      const tenant = await resolveTenant(host, tenantSlug || undefined)
       return await handler(tenant, ...args)
     } catch (error) {
       if (error instanceof TenantNotFoundError) {

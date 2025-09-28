@@ -20,7 +20,8 @@ function stripPort(host: string | null): string {
 }
 
 export async function resolveTenantByHost(): Promise<TenantLite | null> {
-  const host = stripPort(headers().get('host'))
+  const headersList = await headers()
+  const host = stripPort(headersList.get('host'))
   if (!host) return null
 
   const base = process.env.NEXT_PUBLIC_APP_BASE_DOMAIN!

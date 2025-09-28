@@ -162,7 +162,7 @@ export default function BookingsPageClient({
                 >
                   Reset
                 </Button>
-                <Button variant="primary">Apply</Button>
+                <Button variant="default">Apply</Button>
               </div>
             </div>
           </div>
@@ -220,9 +220,9 @@ export default function BookingsPageClient({
 
       <BookingDetailsModal
         open={modalOpen}
-        booking={selectedBooking}
+        booking={selectedBooking as any}
         onClose={() => setModalOpen(false)}
-        onUpdated={handleBookingUpdated}
+        onUpdated={handleBookingUpdated as any}
         tenantId={tenant.id}
       />
     </>

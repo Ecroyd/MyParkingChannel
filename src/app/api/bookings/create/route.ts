@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
+import { getServerSupabase } from '@/lib/supabase/server'
 import crypto from 'crypto'
 import { evaluateBookingRules } from '@/lib/booking-rules/evaluation'
 import { BookingRule } from '@/lib/validation/booking-rules'
@@ -49,18 +49,7 @@ function makeDedupeKey(n: {
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as Body
 
-  const res = new NextResponse()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get: (n) => req.cookies.get(n)?.value,
-        set: (n, v, o) => res.cookies.set({ name: n, value: v, ...o }),
-        remove: (n, o) => res.cookies.set({ name: n, value: '', ...o }),
-      },
-    }
-  )
+  const supabase = getServerSupabase()
 
   // 1) who is the user?
   const { data: { user } } = await supabase.auth.getUser()
@@ -109,12 +98,12 @@ export async function POST(req: NextRequest) {
       if (r.specific_date) {
         return `blocked on ${new Date(r.specific_date).toLocaleDateString()}`
       }
-      if (r.applies_to_days && r.month_range) {
+      if (r.applies_to_days && (r as any).month_range) {
         const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
         const days = r.applies_to_days.map(d => dayNames[d]).join(', ')
         const monthNames = ['', 'January', 'February', 'March', 'April', 'May', 'June',
                            'July', 'August', 'September', 'October', 'November', 'December']
-        const [startMonth, endMonth] = r.month_range
+        const [startMonth, endMonth] = (r as any).month_range
         const monthRange = startMonth === endMonth ? 
           monthNames[startMonth] : 
           `${monthNames[startMonth]} to ${monthNames[endMonth]}`
@@ -151,10 +140,14 @@ export async function POST(req: NextRequest) {
     flight_number: body.flight_number?.toUpperCase() || null,
     is_incomplete: false,
     missing_fields: null,
+    dedupe_key: makeDedupeKey({
+      reference: body.reference?.trim() || `M-${Date.now()}`,
+      plate: body.plate.toUpperCase().replace(/\s+/g, ''),
+      customer_email: body.customer_email,
+      start_at: start_at.toISOString(),
+      end_at: end_at.toISOString()
+    })
   }
-  
-  // Add dedupe key
-  payload.dedupe_key = makeDedupeKey(payload)
 
   const { data, error } = await supabase
     .from('bookings')
@@ -173,5 +166,6 @@ export async function POST(req: NextRequest) {
     totalAmount
   }
   
-  return NextResponse.json(response, { headers: res.headers })
+  return NextResponse.json(response, )
 }
+

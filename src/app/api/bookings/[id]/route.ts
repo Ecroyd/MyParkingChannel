@@ -1,20 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
+import { getServerSupabase } from '@/lib/supabase/server'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const res = new NextResponse()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get: (n: string) => req.cookies.get(n)?.value,
-        set: (n: string, v: string, o: any) => res.cookies.set({ name: n, value: v, ...o }),
-        remove: (n: string, o: any) => res.cookies.set({ name: n, value: '', ...o }),
-      },
-    }
-  )
+  const supabase = getServerSupabase()
 
   const { data, error } = await supabase
     .from('bookings')
@@ -24,23 +13,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  return NextResponse.json(data, { headers: res.headers })
+  return NextResponse.json(data, )
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const res = new NextResponse()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get: (n: string) => req.cookies.get(n)?.value,
-        set: (n: string, v: string, o: any) => res.cookies.set({ name: n, value: v, ...o }),
-        remove: (n: string, o: any) => res.cookies.set({ name: n, value: '', ...o }),
-      },
-    }
-  )
+  const supabase = getServerSupabase()
 
   // Who is calling?
   const { data: auth } = await supabase.auth.getUser()
@@ -83,6 +61,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data, { headers: res.headers })
+  return NextResponse.json(data, )
 }
 

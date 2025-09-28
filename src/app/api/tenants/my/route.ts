@@ -73,3 +73,4 @@ export async function GET() {
     return NextResponse.json({ tenants: [], activeTenantId: null, reason: 'INTERNAL_ERROR' });
   }
 }
+

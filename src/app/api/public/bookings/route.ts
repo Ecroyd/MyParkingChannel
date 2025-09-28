@@ -49,12 +49,12 @@ export async function POST(req: NextRequest) {
       if (r.specific_date) {
         return `blocked on ${new Date(r.specific_date).toLocaleDateString()}`
       }
-      if (r.applies_to_days && r.month_range) {
+      if (r.applies_to_days && (r as any).month_range) {
         const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
         const days = r.applies_to_days.map(d => dayNames[d]).join(', ')
         const monthNames = ['', 'January', 'February', 'March', 'April', 'May', 'June',
                            'July', 'August', 'September', 'October', 'November', 'December']
-        const [startMonth, endMonth] = r.month_range
+        const [startMonth, endMonth] = (r as any).month_range
         const monthRange = startMonth === endMonth ? 
           monthNames[startMonth] : 
           `${monthNames[startMonth]} to ${monthNames[endMonth]}`

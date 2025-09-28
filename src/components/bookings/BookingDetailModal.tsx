@@ -274,15 +274,15 @@ export default function BookingDetailModal({
                 <div>
                   <label className="text-sm font-medium text-slate-600">Make & Model</label>
                   <p className="text-sm">
-                    {booking.car_make && booking.car_model 
-                      ? `${booking.car_make} ${booking.car_model}`
+                    {(booking as any).car_make && (booking as any).car_model
+                      ? `${(booking as any).car_make} ${(booking as any).car_model}`
                       : 'Not provided'
                     }
                   </p>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-slate-600">Color</label>
-                  <p className="text-sm">{booking.car_color || 'Not provided'}</p>
+                  <p className="text-sm">{(booking as any).car_color || 'Not provided'}</p>
                 </div>
               </div>
             </CardContent>

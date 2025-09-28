@@ -40,8 +40,8 @@ export async function resolveTenant(
     if (!domainError && domainData) {
       return {
         tenant_id: domainData.tenant_id,
-        slug: domainData.tenants.slug,
-        timezone: domainData.tenants.timezone || 'Europe/London'
+        slug: Array.isArray(domainData.tenants) ? (domainData.tenants as any)[0]?.slug : (domainData.tenants as any)?.slug,
+        timezone: Array.isArray(domainData.tenants) ? (domainData.tenants as any)[0]?.timezone : (domainData.tenants as any)?.timezone || 'Europe/London'
       }
     }
   }

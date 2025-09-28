@@ -1,11 +1,11 @@
 import { Suspense } from 'react'
-import { createServerClientDirect } from '@/lib/supabase/server-direct'
+import { getServerSupabase } from '@/lib/supabase/server'
 import { requireUser } from '@/lib/auth/requireUser'
 import BookingRulesPageClient from '@/components/admin/BookingRulesPageClient'
 
 export default async function BookingRulesPage() {
   const user = await requireUser()
-  const supabase = createServerClientDirect({ admin: true })
+  const supabase = getServerSupabase({ admin: true })
 
   // Get user's tenant
   const { data: userTenant, error: tenantError } = await supabase
@@ -41,7 +41,7 @@ export default async function BookingRulesPage() {
       </div>
 
       <Suspense fallback={<div>Loading booking rules...</div>}>
-        <BookingRulesPageClient tenant={userTenant.tenants} />
+        <BookingRulesPageClient tenant={userTenant.tenants as any} />
       </Suspense>
     </div>
   )

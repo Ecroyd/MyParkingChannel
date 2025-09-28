@@ -277,7 +277,7 @@ function RulesPane(){
         <div className="grid grid-cols-2 gap-3">
           <Input placeholder="Rate plan id (optional)" value={draft.rate_plan_id||""} onChange={v=>setDraft(d=>({...d,rate_plan_id:v||null}))}/>
           <Select value={draft.tier_id||""} onChange={v=>setDraft(d=>({...d,tier_id:v}))}
-            options={[["","Select Tier"],...tiers.map(t=>[t.id,`${t.label} (${t.code})`])]} />
+            options={[["","Select Tier"],...tiers.map(t=>[t.id,`${t.label} (${t.code})`] as [string, string])]} />
           <Input id="dr-start" type="date" placeholder="Start (optional)"/>
           <Input id="dr-end"   type="date" placeholder="End (optional)"/>
           <Input placeholder="Season id (optional)" value={draft.season_id||""} onChange={v=>setDraft(d=>({...d,season_id:v||null}))}/>

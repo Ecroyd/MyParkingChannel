@@ -3,8 +3,9 @@ import { getTenantContext } from "@/lib/site";
 
 export const dynamic = "force-dynamic";
 
-export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
-  const ctx = await getTenantContext(params.slug);
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params;
+  const ctx = await getTenantContext(slug);
   const title = ctx?.branding?.app_name || ctx?.tenant?.name || "Parking";
   return { title, description: "Secure airport parking. Simple booking." };
 }

@@ -27,7 +27,7 @@ async function getProfile(slug: string) {
     console.log("Logo URL from database:", profile?.logo_url);
   }
     
-  return { tenant: ctx.tenant, profile, branding: ctx.branding, site: ctx.site };
+  return { tenant: ctx.tenant, profile, branding: ctx.branding };
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
@@ -43,7 +43,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   
   const title = data.profile?.meta_title ?? `${data.profile?.business_name ?? data.branding?.app_name ?? "Airport Parking"} | Book Secure Parking`;
   const description = data.profile?.meta_description ?? "Secure airport parking with CCTV, 24/7 access and fast shuttle.";
-  const baseUrl = data.tenant?.domain ? `https://${data.tenant.domain}` : `https://myparkingchannel.app/sites/${resolvedParams.slug}`;
+  const baseUrl = `https://myparkingchannel.app/sites/${resolvedParams.slug}`;
 
   return {
     title,
@@ -86,7 +86,7 @@ export default async function TenantHome({
     );
   }
 
-  const { tenant, profile, branding, site } = data;
+  const { tenant, profile, branding } = data;
   const p = profile;
   const title = p?.business_name ?? branding?.app_name ?? tenant.name ?? "Airport Parking";
 
@@ -95,7 +95,7 @@ export default async function TenantHome({
     "@context": "https://schema.org",
     "@type": "ParkingFacility",
     "name": p?.business_name ?? branding?.app_name,
-    "url": tenant?.domain ? `https://${tenant.domain}` : `https://myparkingchannel.app/sites/${resolvedParams.slug}`,
+    "url": `https://myparkingchannel.app/sites/${resolvedParams.slug}`,
     "priceRange": p?.price_range ?? "££",
     "telephone": p?.phone ?? branding?.contact_phone,
     "email": p?.email ?? branding?.contact_email,

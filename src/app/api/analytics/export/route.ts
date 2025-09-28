@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
+import { getServerSupabase } from '@/lib/supabase/server'
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
@@ -11,18 +11,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid date range' }, { status: 400 })
   }
 
-  const res = new NextResponse()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get: (n) => req.cookies.get(n)?.value,
-        set: (n, v, o) => res.cookies.set({ name: n, value: v, ...o }),
-        remove: (n, o) => res.cookies.set({ name: n, value: '', ...o }),
-      },
-    }
-  )
+  const supabase = getServerSupabase()
 
   const { data, error } = await supabase.rpc('analytics_finance', {
     start_date: start, end_date: end, tz
@@ -48,7 +37,7 @@ export async function GET(req: NextRequest) {
     headers: {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': `attachment; filename="analytics_${start}_to_${end}.csv"`,
-      ...Object.fromEntries(res.headers), // propagate any cookie refresh
+      // Cookie refresh is handled automatically by the server client
     },
   })
 }

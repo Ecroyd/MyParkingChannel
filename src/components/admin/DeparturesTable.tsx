@@ -97,7 +97,7 @@ export function DeparturesTable({ tenantSlug, onBookingUpdate }: DeparturesTable
       case 'reserved':
         return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" />Reserved</Badge>
       case 'checked_in':
-        return <Badge variant="success"><CheckCircle className="h-3 w-3 mr-1" />Checked In</Badge>
+        return <Badge variant="default"><CheckCircle className="h-3 w-3 mr-1" />Checked In</Badge>
       case 'checked_out':
         return <Badge variant="outline">Checked Out</Badge>
       case 'cancelled':

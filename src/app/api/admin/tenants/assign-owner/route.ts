@@ -21,9 +21,9 @@ export async function POST(req: Request) {
 
     // Resolve or create user
     let ownerUserId: string;
-    const { data: lookup } = await sb.auth.admin.getUserByEmail(ownerEmail);
-    if (lookup?.user) {
-      ownerUserId = lookup.user.id;
+    const { data: lookup } = await sb.from('auth.users').select('id').eq('email', ownerEmail).single();
+    if (lookup?.id) {
+      ownerUserId = lookup.id;
     } else if (invite) {
       const { data: invited, error: invErr } = await sb.auth.admin.inviteUserByEmail(ownerEmail, {
         redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? ''}/login`,

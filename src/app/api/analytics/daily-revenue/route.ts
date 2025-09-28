@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const supabase = await getServerSupabase();
+    const supabase = getServerSupabase();
 
     // Verify user has access to this tenant
     const { data: { user } } = await supabase.auth.getUser();

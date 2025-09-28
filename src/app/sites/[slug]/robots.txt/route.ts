@@ -12,7 +12,7 @@ export async function GET(
     return new NextResponse("Site not found", { status: 404 });
   }
 
-  const base = ctx.tenant?.domain ? `https://${ctx.tenant.domain}` : `https://myparkingchannel.app/sites/${resolvedParams.slug}`;
+  const base = `https://myparkingchannel.app/sites/${resolvedParams.slug}`;
   
   const body = `User-agent: *
 Allow: /

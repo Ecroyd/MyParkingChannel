@@ -31,7 +31,7 @@ export default function TenantSiteCard({ tenant }: { tenant: { id: string; slug:
         <Button onClick={ensure} disabled={busy}>
           {busy ? 'Working…' : 'Create / Ensure Site'}
         </Button>
-        <Button variant="primary" asChild>
+        <Button variant="default" asChild>
           <a href={url} target="_blank" rel="noreferrer">View Site</a>
         </Button>
       </div>

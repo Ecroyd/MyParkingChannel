@@ -159,9 +159,8 @@ export default function TenantSitesPage() {
   if (tenants.length === 0) {
     return (
       <EmptyState
-        icon={Building2}
         title="No tenant sites"
-        description="You don't have access to any tenant sites yet."
+        detail="You don't have access to any tenant sites yet."
       />
     );
   }
@@ -274,9 +273,8 @@ export default function TenantSitesPage() {
             </div>
           ) : (
             <EmptyState
-              icon={Settings}
               title="No tenants available"
-              description="You need to have access to at least one tenant to configure settings."
+              detail="You need to have access to at least one tenant to configure settings."
             />
           )}
         </TabsContent>

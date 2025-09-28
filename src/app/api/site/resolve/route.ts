@@ -14,10 +14,10 @@ export async function GET(req: Request) {
     return NextResponse.json({
       ok: true,
       slug,
-      site: ctx?.site ?? null,
+      site: null, // No site property in getSiteContext
       tenant: ctx?.tenant ? { id: ctx.tenant.id, slug: ctx.tenant.slug, name: ctx.tenant.name } : null,
       branding: ctx?.branding ?? null,
-      pagesCount: ctx?.pages?.length ?? 0,
+      pagesCount: 0, // No pages property in getSiteContext
       visible: !!ctx,
     });
   } catch (e: any) {

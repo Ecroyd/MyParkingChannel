@@ -5,7 +5,7 @@ import { createBookingRuleSchema, updateBookingRuleSchema } from '@/lib/validati
 // GET /api/booking-rules - List all booking rules for the tenant
 export async function GET(req: NextRequest) {
   try {
-    const supabase = await getServerSupabase()
+    const supabase = getServerSupabase()
     
     // Get the current user
     const { data: { user }, error: userError } = await supabase.auth.getUser()
@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
     const { data, error } = await supabase
       .from('booking_rules')
       .select('*')
-      .eq('tenant_id', tenant.id)
+      .eq('tenant_id', (tenant as any).id)
       .order('created_at', { ascending: false })
 
     if (error) {
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
   try {
     console.log('POST /api/booking-rules called')
     
-    const supabase = await getServerSupabase()
+    const supabase = getServerSupabase()
     
     // Get the current user
     const { data: { user }, error: userError } = await supabase.auth.getUser()
@@ -94,12 +94,12 @@ export async function POST(req: NextRequest) {
     
     const body = await req.json()
     console.log('Received request body:', body)
-    console.log('Tenant ID:', tenant.id)
+    console.log('Tenant ID:', (tenant as any).id)
     
     // Validate the request body
     const validation = createBookingRuleSchema.safeParse({
       ...body,
-      tenant_id: tenant.id
+      tenant_id: (tenant as any).id
     })
     
     if (!validation.success) {

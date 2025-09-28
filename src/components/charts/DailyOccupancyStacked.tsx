@@ -121,7 +121,7 @@ export default function DailyOccupancyStacked({ tenantId, start, end, tz = 'UTC'
           rec[r.channel] = (rec[r.channel] ?? 0) + r.occupancy;
         });
 
-        const pivot: ChartRow[] = Array.from(byDay.entries())
+        const pivot: any[] = Array.from(byDay.entries())
           .sort(([a],[b]) => a.localeCompare(b))
           .map(([day, rec]) => ({ day, ...rec }));
 

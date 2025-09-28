@@ -5,8 +5,7 @@ import { createAdminClient } from '@/lib/supabase/server-admin';
 import { 
   saveMapping, 
   markMappingUsed,
-  calculateMappingConfidence,
-  type BookingMapping 
+  calculateMappingConfidence
 } from "../_mapping";
 
 // Resolve tenant ID from request - require explicit tenant selection
@@ -353,3 +352,4 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok:false, reason:"FATAL", error: String(e?.message ?? e) }, { status: 500 });
   }
 }
+

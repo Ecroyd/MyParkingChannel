@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 
 export async function GET() {
   try {
-    const supabase = await getServerSupabase()
+    const supabase = getServerSupabase()
     
     const { data: { user }, error: userError } = await supabase.auth.getUser()
     const { data: { session }, error: sessionError } = await supabase.auth.getSession()

@@ -39,7 +39,7 @@ export async function getUserTenants(userId: string): Promise<UserTenant[]> {
     throw error;
   }
 
-  return data || [];
+  return (data as any) || [];
 }
 
 /**

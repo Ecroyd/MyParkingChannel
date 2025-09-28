@@ -19,7 +19,7 @@ export const POST = withTenant(async (tenant: TenantContext, request: Request) =
     
     const results = {
       success: 0,
-      errors: 0,
+      errorCount: 0,
       updated: 0,
       created: 0,
       errors: [] as any[]
@@ -35,9 +35,9 @@ export const POST = withTenant(async (tenant: TenantContext, request: Request) =
           customer_name: row[mapping.customer_name],
           customer_email: row[mapping.customer_email],
           plate: row[mapping.plate],
-          car_make: row[mapping.car_make] || undefined,
-          car_model: row[mapping.car_model] || undefined,
-          car_color: row[mapping.car_color] || undefined,
+          car_make: mapping.car_make ? row[mapping.car_make] : undefined,
+          car_model: mapping.car_model ? row[mapping.car_model] : undefined,
+          car_color: mapping.car_color ? row[mapping.car_color] : undefined,
           start_at: zonedTimeToUtc(
             parseISO(row[mapping.start_at]), 
             tenant.timezone
@@ -48,7 +48,7 @@ export const POST = withTenant(async (tenant: TenantContext, request: Request) =
           ).toISOString(),
           money_charged: mapping.money_charged ? parseFloat(row[mapping.money_charged]) : 0,
           money_received: mapping.money_received ? parseFloat(row[mapping.money_received]) : 0,
-          notes: row[mapping.notes] || undefined,
+          notes: mapping.notes ? row[mapping.notes] : undefined,
           source: 'manual' as const
         }
 
@@ -72,7 +72,7 @@ export const POST = withTenant(async (tenant: TenantContext, request: Request) =
             .eq('tenant_id', tenant.tenant_id)
 
           if (updateError) {
-            results.errors++
+            results.errorCount++
             results.errors.push({
               row: i + 1,
               reference: validatedBooking.reference,
@@ -92,7 +92,7 @@ export const POST = withTenant(async (tenant: TenantContext, request: Request) =
             })
 
           if (insertError) {
-            results.errors++
+            results.errorCount++
             results.errors.push({
               row: i + 1,
               reference: validatedBooking.reference,
@@ -104,7 +104,7 @@ export const POST = withTenant(async (tenant: TenantContext, request: Request) =
           }
         }
       } catch (error: any) {
-        results.errors++
+        results.errorCount++
         results.errors.push({
           row: i + 1,
           reference: row[mapping.reference] || 'Unknown',

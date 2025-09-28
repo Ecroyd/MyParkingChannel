@@ -40,8 +40,8 @@ export default function NewTenantClient() {
         tenant: {
           name: formData.name,
           slug: formData.slug,
-          timezone: formData.timezone || 'Europe/London',
-          capacity: Number(formData.capacity ?? 0),
+          timezone: (formData as any).timezone || 'Europe/London',
+          capacity: Number((formData as any).capacity ?? 0),
         },
         owner: {
           email: formData.ownerEmail.trim(),

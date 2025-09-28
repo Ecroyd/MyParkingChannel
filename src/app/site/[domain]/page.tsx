@@ -33,7 +33,17 @@ export default async function SitePage({ params }: { params: Promise<{ domain: s
       .eq('domain', domain)
       .maybeSingle()
     if (!custom?.sites) return <div className="p-10">Site not found</div>
-    Object.assign(site, custom.sites)
+    // Create a new site object from custom.sites (it's an array, take the first one)
+    const customSite = Array.isArray(custom.sites) ? custom.sites[0] : custom.sites
+    return (
+      <main className="max-w-3xl mx-auto py-10 space-y-6">
+        <section className="card">
+          <h1 className="text-2xl font-semibold mb-2">Welcome to {customSite.slug}</h1>
+          <p className="text-fg/70">Book your parking below.</p>
+        </section>
+        <BookingWidget tenantSlug={customSite.slug} tenantId={customSite.tenant_id} />
+      </main>
+    )
   }
 
   return (

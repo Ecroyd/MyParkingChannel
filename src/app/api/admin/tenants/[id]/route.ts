@@ -56,7 +56,7 @@ export async function PUT(
         console.log('Owner phone:', ownerPhone);
       } catch (ownerError) {
         console.error('Error handling owner assignment:', ownerError);
-        return NextResponse.json({ error: `Owner assignment failed: ${ownerError.message}` }, { status: 500 });
+        return NextResponse.json({ error: `Owner assignment failed: ${(ownerError as any).message || 'Unknown error'}` }, { status: 500 });
       }
     }
 

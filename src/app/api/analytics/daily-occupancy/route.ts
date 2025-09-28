@@ -30,7 +30,7 @@ export async function GET(req: Request) {
 
   console.log("[analytics] Request params:", { tz, vehicle, tenant, start: start.toISOString(), end: end.toISOString() });
 
-  const supabase = await getServerSupabase();
+  const supabase = getServerSupabase();
   const { data: user, error: userErr } = await supabase.auth.getUser();
   if (userErr || !user?.user) {
     console.error("[analytics] no user/session", userErr);

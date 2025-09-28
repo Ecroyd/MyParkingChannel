@@ -100,8 +100,8 @@ function evaluateRuleCondition(
   // Check day of week
   if (rule.applies_to_days && rule.applies_to_days.includes(dayOfWeek)) {
     // If month range is specified, also check month
-    if (rule.month_range) {
-      const [startMonth, endMonth] = rule.month_range
+    if ((rule as any).month_range) {
+      const [startMonth, endMonth] = (rule as any).month_range
       if (month >= startMonth && month <= endMonth) {
         return true
       }
@@ -111,8 +111,8 @@ function evaluateRuleCondition(
   }
 
   // Check month range only (if no specific days)
-  if (rule.month_range && !rule.applies_to_days) {
-    const [startMonth, endMonth] = rule.month_range
+  if ((rule as any).month_range && !rule.applies_to_days) {
+    const [startMonth, endMonth] = (rule as any).month_range
     if (month >= startMonth && month <= endMonth) {
       return true
     }

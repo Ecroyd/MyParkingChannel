@@ -90,7 +90,7 @@ export default function CapacitySettingsPage() {
   }
 
   async function deleteOverride(date: string) {
-    const r = await fetch(`/api/settings/capacity/overrides?${new URLSearchParams({ tenant_id: tenantId, date })}`, { method: 'DELETE' })
+    const r = await fetch(`/api/settings/capacity/overrides?${new URLSearchParams({ tenant_id: tenantId || '', date })}`, { method: 'DELETE' })
     if (r.ok) {
       setOverrides(prev => prev.filter(x => x.date !== date))
       toast.success('Override deleted')

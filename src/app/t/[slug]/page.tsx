@@ -4,8 +4,9 @@ import { Header, Footer } from "./_components/Chrome";
 
 export const dynamic = "force-dynamic";
 
-export default async function TenantHome({ params }: { params: { slug: string } }) {
-  const ctx = await getTenantContext(params.slug);
+export default async function TenantHome({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const ctx = await getTenantContext(slug);
   if (!ctx) return <main className="max-w-xl mx-auto py-24 px-4">Unknown tenant.</main>;
 
   const title = ctx.branding?.app_name || ctx.tenant.name || "Airport Parking";
@@ -14,7 +15,7 @@ export default async function TenantHome({ params }: { params: { slug: string } 
 
   return (
     <>
-      <Header title={title} slug={params.slug} />
+      <Header title={title} slug={slug} />
       <main className="max-w-6xl mx-auto px-4 pt-14 pb-10 grid md:grid-cols-2 gap-10 items-center">
         <div>
           <h1 className="text-3xl md:text-5xl font-semibold tracking-tight leading-tight">
@@ -22,10 +23,10 @@ export default async function TenantHome({ params }: { params: { slug: string } 
           </h1>
           <p className="mt-4 text-slate-600 max-w-prose">{heroSubtitle}</p>
           <div className="mt-6 flex flex-wrap gap-3">
-            <Link href={`/t/${params.slug}/book`} className="inline-flex items-center gap-2 bg-sky-600 hover:bg-sky-700 text-white px-5 py-3 rounded-2xl shadow">
+            <Link href={`/t/${slug}/book`} className="inline-flex items-center gap-2 bg-sky-600 hover:bg-sky-700 text-white px-5 py-3 rounded-2xl shadow">
               Book parking
             </Link>
-            <Link href={`/t/${params.slug}/contact`} className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl border border-slate-300 hover:border-slate-400">
+            <Link href={`/t/${slug}/contact`} className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl border border-slate-300 hover:border-slate-400">
               Contact
             </Link>
           </div>

@@ -6,7 +6,7 @@ export async function GET(req: Request) {
   const tenantId = url.searchParams.get('tenant_id')
   if (!tenantId) return NextResponse.json({ error: 'tenant_id required' }, { status: 400 })
 
-  const supabase = await getServerSupabase()
+  const supabase = getServerSupabase()
   const { data, error } = await supabase
     .from('tenants')
     .select('id, default_capacity')
@@ -22,7 +22,7 @@ export async function PUT(req: Request) {
   if (!body?.tenant_id || body.default_capacity == null)
     return NextResponse.json({ error: 'tenant_id and default_capacity required' }, { status: 400 })
 
-  const supabase = await getServerSupabase()
+  const supabase = getServerSupabase()
   const { error } = await supabase
     .from('tenants')
     .update({ default_capacity: body.default_capacity })

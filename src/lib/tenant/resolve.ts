@@ -32,7 +32,7 @@ function extractTenantSlugFromUrl(u: URL): string | null {
  * - URL based extraction + DB lookup
  */
 export async function resolveTenantIdOrThrow(u?: URL): Promise<string> {
-  const h = headers();
+  const h = await headers();
 
   // Middleware can set these to short-circuit lookups.
   const hdrId = h.get('x-tenant-id');

@@ -145,7 +145,7 @@ function OrphanCard({
       <div className="flex items-center justify-between">
         <div>
           <h3 className="font-medium text-amber-800">{orphan.name}</h3>
-          <p className="text-sm text-amber-600">/{orphan.slug} • {orphan.timezone} • cap {orphan.default_capacity}</p>
+          <p className="text-sm text-amber-600">/{orphan.slug} • {orphan.timezone} • cap {(orphan as any).default_capacity}</p>
           <p className="text-xs text-amber-500">Created: {new Date(orphan.created_at).toLocaleDateString()}</p>
         </div>
         <div className="flex gap-2">

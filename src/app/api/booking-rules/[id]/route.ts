@@ -5,10 +5,11 @@ import { updateBookingRuleSchema } from '@/lib/validation/booking-rules'
 // GET /api/booking-rules/[id] - Get a specific booking rule
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await getServerSupabase()
+    const { id } = await params;
+    const supabase = getServerSupabase()
     
     // Get the current user
     const { data: { user }, error: userError } = await supabase.auth.getUser()
@@ -41,8 +42,8 @@ export async function GET(
     const { data, error } = await supabase
       .from('booking_rules')
       .select('*')
-      .eq('id', params.id)
-      .eq('tenant_id', tenant.id)
+      .eq('id', id)
+      .eq('tenant_id', (tenant as any).id)
       .single()
 
     if (error) {
@@ -59,10 +60,11 @@ export async function GET(
 // PUT /api/booking-rules/[id] - Update a booking rule
 export async function PUT(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await getServerSupabase()
+    const { id } = await params;
+    const supabase = getServerSupabase()
     
     // Get the current user
     const { data: { user }, error: userError } = await supabase.auth.getUser()
@@ -107,8 +109,8 @@ export async function PUT(
     const { data, error } = await supabase
       .from('booking_rules')
       .update(validation.data)
-      .eq('id', params.id)
-      .eq('tenant_id', tenant.id)
+      .eq('id', id)
+      .eq('tenant_id', (tenant as any).id)
       .select()
       .single()
 
@@ -126,10 +128,11 @@ export async function PUT(
 // DELETE /api/booking-rules/[id] - Delete a booking rule
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await getServerSupabase()
+    const { id } = await params;
+    const supabase = getServerSupabase()
     
     // Get the current user
     const { data: { user }, error: userError } = await supabase.auth.getUser()
@@ -162,8 +165,8 @@ export async function DELETE(
     const { error } = await supabase
       .from('booking_rules')
       .delete()
-      .eq('id', params.id)
-      .eq('tenant_id', tenant.id)
+      .eq('id', id)
+      .eq('tenant_id', (tenant as any).id)
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 })

@@ -3,7 +3,7 @@ import { getServerSupabase } from '@/lib/supabase/server';
 
 export async function GET() {
   try {
-    const supabase = await getServerSupabase();
+    const supabase = getServerSupabase();
     
     // Get the current user
     const { data: { user }, error: userError } = await supabase.auth.getUser();
@@ -45,7 +45,7 @@ export async function GET() {
     const { data: profile, error: profileError } = await supabase
       .from('tenant_public_profile')
       .select('id')
-      .eq('tenant_id', tenant.id)
+      .eq('tenant_id', (tenant as any).id)
       .limit(1);
 
     if (profileError && profileError.code === 'PGRST116') {
@@ -54,7 +54,7 @@ export async function GET() {
         status: 'error', 
         message: 'Database setup required',
         setupRequired: true,
-        tenantId: tenant.id 
+        tenantId: (tenant as any).id 
       });
     }
 
@@ -62,12 +62,12 @@ export async function GET() {
       status: 'ok', 
       message: 'Ready',
       setupRequired: false,
-      tenantId: tenant.id,
+      tenantId: (tenant as any).id,
       tenant: {
-        id: tenant.id,
-        name: tenant.name,
-        slug: tenant.slug,
-        timezone: tenant.timezone
+        id: (tenant as any).id,
+        name: (tenant as any).name,
+        slug: (tenant as any).slug,
+        timezone: (tenant as any).timezone
       }
     });
 

@@ -29,7 +29,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'tenant_id, from, to required' }, { status: 400 });
   }
 
-  const supabase = await getServerSupabase();
+  const supabase = getServerSupabase();
 
   // ---- Role gating: owner/finance/admin only
   const { data: auth } = await supabase.auth.getUser();

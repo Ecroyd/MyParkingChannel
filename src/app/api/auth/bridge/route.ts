@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 export async function POST(req: NextRequest) {
   console.log('[Auth Bridge Debug] Starting auth bridge...');
   
-  const supabase = await getServerSupabase();
+  const supabase = getServerSupabase();
   const { access_token, refresh_token } = await req.json();
 
   if (!access_token || !refresh_token) {

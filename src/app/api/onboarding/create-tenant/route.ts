@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
+import { getServerSupabase } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 
 export async function POST(req: NextRequest) {
@@ -12,17 +12,7 @@ export async function POST(req: NextRequest) {
     const res = NextResponse.json({ ok: true })
 
     // 2) SSR client (reads auth cookie)
-    const supaSSR = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get: (n) => req.cookies.get(n)?.value,
-          set: (n, v, o) => res.cookies.set({ name: n, value: v, ...o }),
-          remove: (n, o) => res.cookies.set({ name: n, value: '', ...o }),
-        },
-      }
-    )
+    const supaSSR = getServerSupabase()
 
     console.log('🔍 Create-tenant API: Checking user authentication...')
     const { data: { user }, error } = await supaSSR.auth.getUser()
@@ -82,10 +72,11 @@ export async function POST(req: NextRequest) {
     }
 
     console.log('✅ Create-tenant API: Tenant creation completed successfully')
-    return NextResponse.json({ tenant }, { headers: res.headers })
+    return NextResponse.json({ tenant }, )
 
   } catch (err: any) {
     console.error('❌ Create-tenant API: Unexpected error:', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+

@@ -5,7 +5,7 @@ import { quoteExtensionCents } from "@/lib/pricing/quoteExtension";
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await getServerSupabase();
+    const supabase = getServerSupabase();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ ok: false, error: "UNAUTH" }, { status: 401 });
 

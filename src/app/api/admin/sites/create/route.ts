@@ -1,23 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
+import { getServerSupabase } from '@/lib/supabase/server'
 import { siteDomainForTenantSlug } from '@/lib/sites/domain'
 
 export async function POST(req: NextRequest) {
   const { tenant_id, template = 'default' } = await req.json().catch(() => ({}))
   if (!tenant_id) return NextResponse.json({ error: 'tenant_id required' }, { status: 400 })
 
-  const res = new NextResponse()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get: (n: string) => req.cookies.get(n)?.value,
-        set: (n: string, v: string, o: any) => res.cookies.set({ name: n, value: v, ...o }),
-        remove: (n: string, o: any) => res.cookies.set({ name: n, value: '', ...o }),
-      },
-    }
-  )
+  const supabase = getServerSupabase()
 
   // Ensure caller is a member of this tenant
   const { data: me } = await supabase.auth.getUser()
@@ -67,7 +56,7 @@ export async function POST(req: NextRequest) {
     content_md: `# Welcome\nBook your secure airport parking below.\n\n`,
   }, { onConflict: 'site_id, path' })
 
-  return NextResponse.json({ ok: true, site_id: site.id, url: `https://${primaryDomain}` }, { headers: res.headers })
+  return NextResponse.json({ ok: true, site_id: site.id, url: `https://${primaryDomain}` })
 }
 
 

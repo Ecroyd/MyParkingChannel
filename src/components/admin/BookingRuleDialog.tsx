@@ -71,7 +71,6 @@ export default function BookingRuleDialog({
       type: 'both',
       rule_kind: 'blackout',
       applies_to_days: null,
-      month_range: null,
       specific_date: null,
       surcharge_amount: null,
       notes: ''
@@ -96,15 +95,14 @@ export default function BookingRuleDialog({
           type: rule.type,
           rule_kind: rule.rule_kind,
           applies_to_days: rule.applies_to_days,
-          month_range: rule.month_range,
           specific_date: rule.specific_date,
           surcharge_amount: rule.surcharge_amount,
           notes: rule.notes || ''
         })
         setSelectedDays(rule.applies_to_days || [])
         // Convert month range to date range (approximate)
-        if (rule.month_range) {
-          const [startMonth, endMonth] = rule.month_range
+        if ((rule as any).month_range) {
+          const [startMonth, endMonth] = (rule as any).month_range
           setStartDate(`2024-${startMonth.toString().padStart(2, '0')}-01`)
           setEndDate(`2024-${endMonth.toString().padStart(2, '0')}-28`)
         }
@@ -116,7 +114,6 @@ export default function BookingRuleDialog({
           type: 'both',
           rule_kind: 'blackout',
           applies_to_days: null,
-          month_range: null,
           specific_date: null,
           surcharge_amount: null,
           notes: ''

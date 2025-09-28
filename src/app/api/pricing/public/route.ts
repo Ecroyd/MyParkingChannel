@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Tenant ID is required" }, { status: 400 });
   }
 
-  const supabase = await getServerSupabase();
+  const supabase = getServerSupabase();
 
   // Get pricing for the tenant (public endpoint, no auth required)
   const { data, error } = await supabase

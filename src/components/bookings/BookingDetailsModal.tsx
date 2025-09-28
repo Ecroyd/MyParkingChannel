@@ -157,13 +157,13 @@ export default function BookingDetailsModal({
               <h3 className="text-sm font-medium text-gray-500 mb-3">Vehicle</h3>
               <p className="font-semibold text-lg text-gray-900">{booking.plate || 'Not provided'}</p>
               <p className="text-sm text-gray-600 mt-1">
-                {booking.car_make && booking.car_model 
-                  ? `${booking.car_make} ${booking.car_model}`
+                {(booking as any).car_make && (booking as any).car_model
+                  ? `${(booking as any).car_make} ${(booking as any).car_model}`
                   : 'Make & Model: Not provided'
                 }
               </p>
               <p className="text-sm text-gray-600 mt-1">
-                Color: {booking.car_color || 'Not provided'}
+                Color: {(booking as any).car_color || 'Not provided'}
               </p>
               <p className="text-sm text-gray-600 mt-1">
                 Flight: {booking.flight_number || 'Not provided'}
@@ -239,11 +239,6 @@ export default function BookingDetailsModal({
               onExtended={() => {
                 setShowExtendSheet(false)
                 onUpdated?.(booking)
-              }}
-              getQuote={async (newEndISO: string) => {
-                const res = await fetch(`/api/pricing/quote-extension?tenantId=${tenantId || booking.tenant_id}&bookingEndAtISO=${booking.end_at}&newEndAtISO=${newEndISO}`)
-                const data = await res.json()
-                return data.ok ? data.quoteCents : 0
               }}
             />
           </div>

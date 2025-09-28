@@ -51,7 +51,7 @@ export default function AdminShell({ children }: AdminShellProps) {
         .single();
 
       if (!tenantError && userTenant?.tenants) {
-        const tenant = userTenant.tenants;
+        const tenant = Array.isArray(userTenant.tenants) ? userTenant.tenants[0] : userTenant.tenants;
         
         // Get logo from tenant_public_profile
         const { data: profile } = await supabase

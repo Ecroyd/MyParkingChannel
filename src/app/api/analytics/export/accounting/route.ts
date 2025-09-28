@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Missing required parameters" }, { status: 400 });
   }
 
-  const supabase = await getServerSupabase();
+  const supabase = getServerSupabase();
 
   try {
     // Get all bookings with their extensions for the date range
@@ -88,7 +88,7 @@ export async function GET(req: NextRequest) {
     // Process each booking
     bookings?.forEach(booking => {
       const bookingExtensions = extensionsByBooking.get(booking.id) || [];
-      const totalExtensionAmount = bookingExtensions.reduce((sum, ext) => 
+      const totalExtensionAmount = bookingExtensions.reduce((sum: number, ext: any) =>
         sum + (ext.charged_amount_cents / 100), 0
       );
 

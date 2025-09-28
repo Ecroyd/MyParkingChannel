@@ -290,10 +290,10 @@ export default function TodayServerClient({
       {/* Booking Details Modal */}
       {selectedBooking && (
         <BookingDetailsModal
-          booking={selectedBooking}
-          isOpen={modalOpen}
+          booking={selectedBooking as any}
+          open={modalOpen}
           onClose={() => setModalOpen(false)}
-          onBookingUpdated={handleBookingUpdated}
+          onUpdated={handleBookingUpdated}
         />
       )}
     </>

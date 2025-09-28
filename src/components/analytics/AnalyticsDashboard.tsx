@@ -139,9 +139,9 @@ export default function AnalyticsDashboard({ tenantId }: { tenantId: string }) {
       
       // If summary is empty, calculate from the other data
       if (!summary || Object.keys(summary).length === 0) {
-        const totalBookings = revenueByChannel.reduce((sum, item) => sum + item.bookings_count, 0);
-        const totalRevenue = revenueByChannel.reduce((sum, item) => sum + item.total_revenue, 0);
-        const totalReceived = revenueByChannel.reduce((sum, item) => sum + item.booking_revenue, 0); // Assuming money_received = booking_revenue for now
+        const totalBookings = revenueByChannel.reduce((sum: number, item: any) => sum + item.bookings_count, 0);
+        const totalRevenue = revenueByChannel.reduce((sum: number, item: any) => sum + item.total_revenue, 0);
+        const totalReceived = revenueByChannel.reduce((sum: number, item: any) => sum + item.booking_revenue, 0); // Assuming money_received = booking_revenue for now
         const averageBookingValue = totalBookings > 0 ? totalRevenue / totalBookings : 0;
         
         summary = {
@@ -501,7 +501,7 @@ export default function AnalyticsDashboard({ tenantId }: { tenantId: string }) {
                     cx="50%"
                     cy="50%"
                     labelLine={false}
-                    label={({ channel, total_revenue }) => `${channel}: £${total_revenue.toFixed(2)}`}
+                    label={(entry: any) => `${entry.channel}: £${entry.total_revenue.toFixed(2)}`}
                     outerRadius={80}
                     fill="#8884d8"
                     dataKey="total_revenue"

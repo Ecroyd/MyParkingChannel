@@ -13,7 +13,7 @@ export type TimezoneOption = {
  * Get all available timezone options
  */
 export function getTimezoneOptions(): TimezoneOption[] {
-  return TIMEZONE_OPTIONS;
+  return [...TIMEZONE_OPTIONS];
 }
 
 /**

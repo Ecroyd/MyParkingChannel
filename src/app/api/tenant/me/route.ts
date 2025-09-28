@@ -18,7 +18,7 @@ export async function GET(req: Request) {
   // 3) Domain → tenant_domains
   const host = (h.get('x-forwarded-host') ?? h.get('host') ?? '').toLowerCase()
 
-  const supabase = await getServerSupabase()
+  const supabase = getServerSupabase()
 
   // Helper: find tenant by slug or id
   async function bySlugOrId(key: string) {

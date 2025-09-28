@@ -156,7 +156,7 @@ export default function DashboardClient({
       {modalOpen && selectedBooking && (
         <BookingDetailsModal
           booking={selectedBooking}
-          isOpen={modalOpen}
+          open={modalOpen}
           onClose={() => setModalOpen(false)}
         />
       )}

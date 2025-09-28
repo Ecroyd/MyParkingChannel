@@ -1,7 +1,7 @@
 import { getServerSupabase } from '@/lib/supabase/server';
 
 export async function GET() {
-  const supabase = await getServerSupabase();
+  const supabase = getServerSupabase();
   const {
     data: { user },
   } = await supabase.auth.getUser();
