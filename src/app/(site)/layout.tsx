@@ -3,6 +3,12 @@ import Link from 'next/link'
 
 // Force dynamic rendering for this route group since it requires database access
 export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
+// Prevent static generation of this route group
+export async function generateStaticParams() {
+  return []
+}
 
 export default async function SiteLayout({ children }: { children: React.ReactNode }) {
   const tenant = await resolveTenantByHost()

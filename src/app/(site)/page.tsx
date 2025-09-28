@@ -3,6 +3,12 @@ import Link from 'next/link'
 
 // Force dynamic rendering for this page since it requires database access
 export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
+// Prevent static generation of this page
+export async function generateStaticParams() {
+  return []
+}
 
 export default async function Home() {
   const t = await resolveTenantByHost()
