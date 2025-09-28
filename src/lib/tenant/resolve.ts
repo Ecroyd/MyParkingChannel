@@ -72,7 +72,7 @@ export async function resolveTenantIdOrThrow(u?: URL): Promise<string> {
 }
 
 async function findTenantBySlug(slug: string) {
-  const sb = supabaseAdmin();
+  const sb = await supabaseAdmin();
   const { data, error } = await sb
     .from('tenants')
     .select('id, slug')
@@ -85,7 +85,7 @@ async function findTenantBySlug(slug: string) {
 }
 
 async function findTenantByDomain(domain: string) {
-  const sb = supabaseAdmin();
+  const sb = await supabaseAdmin();
   const { data, error } = await sb
     .from('tenant_domains')
     .select('tenant_id, domain')

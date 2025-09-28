@@ -14,7 +14,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const supabase = getServerSupabase();
+    const supabase = await getServerSupabase();
 
     // Save to applications table
     const { data, error } = await supabase

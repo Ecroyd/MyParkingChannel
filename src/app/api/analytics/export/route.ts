@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid date range' }, { status: 400 })
   }
 
-  const supabase = getServerSupabase()
+  const supabase = await getServerSupabase()
 
   const { data, error } = await supabase.rpc('analytics_finance', {
     start_date: start, end_date: end, tz

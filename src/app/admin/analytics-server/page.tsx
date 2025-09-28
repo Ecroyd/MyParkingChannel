@@ -5,7 +5,7 @@ import AnalyticsServerClient from './AnalyticsServerClient';
 
 export default async function AnalyticsServerPage() {
   const supabase = await createServerClient();
-  const adminClient = createAdminClient();
+  const adminClient = await createAdminClient();
 
   // Get current user
   const { data: { user }, error: userError } = await supabase.auth.getUser();

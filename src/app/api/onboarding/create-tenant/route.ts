@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     const res = NextResponse.json({ ok: true })
 
     // 2) SSR client (reads auth cookie)
-    const supaSSR = getServerSupabase()
+    const supaSSR = await getServerSupabase()
 
     console.log('🔍 Create-tenant API: Checking user authentication...')
     const { data: { user }, error } = await supaSSR.auth.getUser()
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
 
     // 3) Admin client (service role) bypasses RLS for first-tenant bootstrap
     console.log('🔧 Create-tenant API: Creating admin client...')
-    const admin = createAdminClient(
+    const admin = await createAdminClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     )

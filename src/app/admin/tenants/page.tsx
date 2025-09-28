@@ -5,7 +5,7 @@ import OrphansPanel from './OrphansPanel';
 import Link from 'next/link';
 
 export default async function AdminTenantsPage() {
-  const sb = createAdminClient();
+  const sb = await createAdminClient();
 
   const { data: tenants } = await sb
     .from('tenants')

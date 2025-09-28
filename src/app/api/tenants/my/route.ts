@@ -7,7 +7,7 @@ export async function GET() {
   try {
     console.log('🔍 Tenants/my API: Starting tenant fetch...')
     const sb = await createServerClient();
-    const adminClient = createAdminClient();
+    const adminClient = await createAdminClient();
 
     const { data: { user }, error: uErr } = await sb.auth.getUser();
     if (uErr) {

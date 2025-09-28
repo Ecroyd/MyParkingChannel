@@ -30,7 +30,7 @@ export async function requirePlatformAdmin() {
   }
   
   // Return both regular client and admin client
-  const adminClient = createAdminClient();
+  const adminClient = await createAdminClient();
   return { sb, user, adminClient };
 }
 
@@ -41,7 +41,7 @@ export async function requirePlatformAdmin() {
  */
 export async function isPlatformAdmin(userId: string): Promise<boolean> {
   try {
-    const adminClient = createAdminClient();
+    const adminClient = await createAdminClient();
     const { data: platformAdmin, error } = await adminClient
       .from('platform_admins')
       .select('user_id')

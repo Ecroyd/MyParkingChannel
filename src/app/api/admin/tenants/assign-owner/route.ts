@@ -17,7 +17,7 @@ export async function POST(req: Request) {
     }
 
     const { tenantId, ownerEmail, invite } = input;
-    const sb = createAdminClient();
+    const sb = await createAdminClient();
 
     // Resolve or create user
     let ownerUserId: string;

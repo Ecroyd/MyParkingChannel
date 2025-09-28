@@ -9,7 +9,7 @@ export async function GET(req: Request) {
   if (!domain && !slug)
     return NextResponse.json({ error: "missing-domain-or-slug" }, { status: 400 });
 
-  const sb = createAdminClient(); // server-only, OK
+  const sb = await createAdminClient(); // server-only, OK
   let q = sb.from("tenant_domains").select("tenant_id, domain, slug, tenant_id");
   if (domain) q = q.eq("domain", domain);
   if (slug) q = q.eq("slug", slug);

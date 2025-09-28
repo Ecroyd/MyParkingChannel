@@ -3,7 +3,7 @@ import { getServerSupabase } from '@/lib/supabase/server'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = getServerSupabase()
+  const supabase = await getServerSupabase()
 
   const { data, error } = await supabase
     .from('bookings')
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = getServerSupabase()
+  const supabase = await getServerSupabase()
 
   // Who is calling?
   const { data: auth } = await supabase.auth.getUser()

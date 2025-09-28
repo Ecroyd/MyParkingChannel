@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Tenant ID is required" }, { status: 400 });
   }
 
-  const supabase = getServerSupabase();
+  const supabase = await getServerSupabase();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   
   if (authError || !user) {
@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = getServerSupabase();
+  const supabase = await getServerSupabase();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   
   if (authError || !user) {

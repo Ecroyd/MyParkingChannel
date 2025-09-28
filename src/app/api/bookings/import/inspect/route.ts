@@ -50,7 +50,7 @@ export async function POST(req: Request) {
   try {
     console.log('🔍 Import/inspect: Starting file inspection...')
     const supabase = await createServerClient();
-    const adminClient = createAdminClient();
+    const adminClient = await createAdminClient();
 
     // 1) trust header, but verify it's a tenant the user belongs to
     const tenantId = req.headers.get("x-tenant-id") ?? "";

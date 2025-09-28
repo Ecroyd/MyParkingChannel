@@ -3,7 +3,7 @@ import { headers } from 'next/headers'
 import { parseISO } from 'date-fns'
 
 export async function POST(request: Request) {
-  const supabase = createAdminClient()
+  const supabase = await createAdminClient()
   const headersList = await headers()
   const apiKey = headersList.get('x-api-key')
   

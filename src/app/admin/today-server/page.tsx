@@ -4,7 +4,7 @@ import TodayServerClient from './TodayServerClient';
 
 export default async function TodayServerPage() {
   const supabase = await createServerClient();
-  const adminClient = createAdminClient();
+  const adminClient = await createAdminClient();
 
   try {
     // Get current user

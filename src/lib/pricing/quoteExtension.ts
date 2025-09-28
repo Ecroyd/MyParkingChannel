@@ -7,7 +7,7 @@ export async function quoteExtensionCents(opts: {
   newEndAtISO: string;     // proposed end
 }): Promise<number> {
   const { tenantId, bookingEndAtISO, newEndAtISO } = opts;
-  const supabase = getServerSupabase({ admin: true });
+  const supabase = await getServerSupabase({ admin: true });
 
   const start = new Date(bookingEndAtISO);
   const end = new Date(newEndAtISO);

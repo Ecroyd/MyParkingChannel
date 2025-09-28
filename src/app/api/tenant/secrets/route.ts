@@ -5,7 +5,7 @@ import { getServiceSupabase } from '@/lib/supabase/service';
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = getServerSupabase();
+    const supabase = await getServerSupabase();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ ok: false, error: "UNAUTH" }, { status: 401 });
 
@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = getServerSupabase();
+    const supabase = await getServerSupabase();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ ok: false, error: "UNAUTH" }, { status: 401 });
 
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Save tenant secrets (admin client to bypass RLS)
-    const admin = getServerSupabase({ admin: true });
+    const admin = await getServerSupabase({ admin: true });
     const { error } = await admin
       .from("tenant_secrets")
       .upsert({

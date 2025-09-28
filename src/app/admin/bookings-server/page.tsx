@@ -5,7 +5,7 @@ import BookingsServerClient from './BookingsServerClient';
 
 export default async function BookingsServerPage() {
   const supabase = await createServerClient();
-  const adminClient = createAdminClient();
+  const adminClient = await createAdminClient();
 
   // Get current user
   const { data: { user }, error: userError } = await supabase.auth.getUser();

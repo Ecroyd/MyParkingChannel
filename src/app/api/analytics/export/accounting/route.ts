@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Missing required parameters" }, { status: 400 });
   }
 
-  const supabase = getServerSupabase();
+  const supabase = await getServerSupabase();
 
   try {
     // Get all bookings with their extensions for the date range

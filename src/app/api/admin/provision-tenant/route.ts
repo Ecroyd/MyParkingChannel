@@ -31,7 +31,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const sb = createAdminClient();
+    const sb = await createAdminClient();
     console.log('Starting tenant provisioning:', { tenantName: tenant.name, userEmail: user.email });
 
     // Step 1: Create user via Supabase Auth Admin API

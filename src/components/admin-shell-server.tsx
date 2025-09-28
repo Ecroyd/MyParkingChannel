@@ -9,7 +9,7 @@ interface AdminShellServerProps {
 
 export default async function AdminShellServer({ children }: AdminShellServerProps) {
   const supabase = await createServerClient();
-  const adminClient = createAdminClient();
+  const adminClient = await createAdminClient();
 
   // Get current user
   const { data: { user }, error: userError } = await supabase.auth.getUser();

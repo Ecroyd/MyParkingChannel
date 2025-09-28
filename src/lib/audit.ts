@@ -29,7 +29,7 @@ export interface AuditLogEntry {
  */
 export async function logAudit(entry: AuditLogEntry): Promise<void> {
   try {
-    const adminClient = createAdminClient();
+    const adminClient = await createAdminClient();
     
     const { error } = await adminClient
       .from('audit_logs')

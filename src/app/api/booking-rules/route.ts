@@ -5,7 +5,7 @@ import { createBookingRuleSchema, updateBookingRuleSchema } from '@/lib/validati
 // GET /api/booking-rules - List all booking rules for the tenant
 export async function GET(req: NextRequest) {
   try {
-    const supabase = getServerSupabase()
+    const supabase = await getServerSupabase()
     
     // Get the current user
     const { data: { user }, error: userError } = await supabase.auth.getUser()
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
   try {
     console.log('POST /api/booking-rules called')
     
-    const supabase = getServerSupabase()
+    const supabase = await getServerSupabase()
     
     // Get the current user
     const { data: { user }, error: userError } = await supabase.auth.getUser()

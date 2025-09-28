@@ -5,7 +5,7 @@ import BookingRulesPageClient from '@/components/admin/BookingRulesPageClient'
 
 export default async function BookingRulesPage() {
   const user = await requireUser()
-  const supabase = getServerSupabase({ admin: true })
+  const supabase = await getServerSupabase({ admin: true })
 
   // Get user's tenant
   const { data: userTenant, error: tenantError } = await supabase

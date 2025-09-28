@@ -49,7 +49,7 @@ function makeDedupeKey(n: {
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as Body
 
-  const supabase = getServerSupabase()
+  const supabase = await getServerSupabase()
 
   // 1) who is the user?
   const { data: { user } } = await supabase.auth.getUser()

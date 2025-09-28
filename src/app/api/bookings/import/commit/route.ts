@@ -133,7 +133,7 @@ export async function POST(req: Request) {
   const { id, log: slog, error } = withReq(req);
   try {
     const supabase = await createServerClient({ admin: false });
-    const adminClient = createAdminClient();
+    const adminClient = await createAdminClient();
     
     // Resolve tenant ID
     let tenant_id: string;

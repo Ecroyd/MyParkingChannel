@@ -3,7 +3,7 @@ import { headers } from 'next/headers'
 import crypto from 'crypto'
 
 export async function POST(request: Request) {
-  const supabase = createAdminClient()
+  const supabase = await createAdminClient()
   const headersList = await headers()
   
   // Verify webhook signature (implement based on Holiday Extras' documentation)

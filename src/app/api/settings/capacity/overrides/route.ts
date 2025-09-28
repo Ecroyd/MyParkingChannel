@@ -8,7 +8,7 @@ export async function GET(req: Request) {
   const to = url.searchParams.get('to')
   if (!tenantId) return NextResponse.json({ error: 'tenant_id required' }, { status: 400 })
 
-  const supabase = getServerSupabase()
+  const supabase = await getServerSupabase()
   let q = supabase.from('tenant_capacity').select('*').eq('tenant_id', tenantId)
   if (from) q = q.gte('date', from)
   if (to) q = q.lte('date', to)
@@ -23,7 +23,7 @@ export async function PUT(req: Request) {
   if (!body?.tenant_id || !Array.isArray(body.rows))
     return NextResponse.json({ error: 'tenant_id and rows[] required' }, { status: 400 })
 
-  const supabase = getServerSupabase()
+  const supabase = await getServerSupabase()
   const payload = body.rows.map(r => ({ tenant_id: body.tenant_id!, date: r.date, capacity: r.capacity }))
   const { error } = await supabase.from('tenant_capacity').upsert(payload, { onConflict: 'tenant_id,date' })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -36,7 +36,7 @@ export async function DELETE(req: Request) {
   const date = url.searchParams.get('date')
   if (!tenantId || !date) return NextResponse.json({ error: 'tenant_id and date required' }, { status: 400 })
 
-  const supabase = getServerSupabase()
+  const supabase = await getServerSupabase()
   const { error } = await supabase.from('tenant_capacity').delete().eq('tenant_id', tenantId).eq('date', date)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })

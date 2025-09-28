@@ -42,7 +42,7 @@ function processChartData(bookings: any[], startDate: Date, endDate: Date) {
 
 export default async function DashboardServerPage() {
   const supabase = await createServerClient();
-  const adminClient = createAdminClient();
+  const adminClient = await createAdminClient();
 
   // Get current user
   const { data: { user }, error: userError } = await supabase.auth.getUser();

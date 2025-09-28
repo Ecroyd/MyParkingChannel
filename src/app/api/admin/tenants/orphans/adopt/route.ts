@@ -10,7 +10,7 @@ export async function POST(req: Request) {
     if (!tenantId || !ownerEmail) {
       return NextResponse.json({ error: { code:'BAD_REQ', message:'tenantId and ownerEmail required' }}, { status: 400 });
     }
-    const sb = createAdminClient();
+    const sb = await createAdminClient();
 
     // Resolve or create user
     let ownerId: string;

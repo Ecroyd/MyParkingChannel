@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Tenant ID is required" }, { status: 400 });
   }
 
-  const supabase = getServerSupabase();
+  const supabase = await getServerSupabase();
 
   try {
     // Get user authentication
@@ -71,7 +71,7 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Tenant ID is required" }, { status: 400 });
   }
 
-  const supabase = getServerSupabase();
+  const supabase = await getServerSupabase();
 
   try {
     // Get user authentication

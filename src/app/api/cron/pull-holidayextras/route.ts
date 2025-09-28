@@ -2,7 +2,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import crypto from 'crypto'
 
 export async function GET(request: Request) {
-  const supabase = createAdminClient()
+  const supabase = await createAdminClient()
   
   try {
     // Get all enabled Holiday Extras channel accounts

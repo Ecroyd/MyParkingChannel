@@ -10,7 +10,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: { code: 'INVALID_INPUT', message: 'Missing fields' } }, { status: 400 });
     }
 
-    const sb = createAdminClient();
+    const sb = await createAdminClient();
 
     // 1. Create Auth user
     const { data: userRes, error: userErr } = await sb.auth.admin.createUser({

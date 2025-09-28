@@ -6,7 +6,7 @@ export async function POST(req: NextRequest) {
   const { tenant_id, template = 'default' } = await req.json().catch(() => ({}))
   if (!tenant_id) return NextResponse.json({ error: 'tenant_id required' }, { status: 400 })
 
-  const supabase = getServerSupabase()
+  const supabase = await getServerSupabase()
 
   // Ensure caller is a member of this tenant
   const { data: me } = await supabase.auth.getUser()

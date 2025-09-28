@@ -25,7 +25,7 @@ export async function resolveTenantByHost(): Promise<TenantLite | null> {
   if (!host) return null
 
   const base = process.env.NEXT_PUBLIC_APP_BASE_DOMAIN!
-  const admin = createAdminClient()
+  const admin = await createAdminClient()
 
   // 1) Exact custom domain match
   const { data: byDomain, error: dErr } = await admin
