@@ -6,6 +6,9 @@
 import { requirePlatformAdmin } from '@/lib/guards';
 import IntegrationsClient from './IntegrationsClient';
 
+// Force dynamic rendering for this page since it requires authentication
+export const dynamic = 'force-dynamic';
+
 export default async function IntegrationsPage() {
   // Require platform admin access
   await requirePlatformAdmin();

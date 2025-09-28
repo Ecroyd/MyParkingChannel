@@ -1,5 +1,8 @@
-import { requirePlatformAdmin } from "@/lib/guards";
-import TenantDetailClient from "./TenantDetailClient";
+import { requirePlatformAdmin } from '@/lib/guards';
+import TenantDetailClient from './TenantDetailClient';
+
+// Force dynamic rendering for this page since it requires authentication
+export const dynamic = 'force-dynamic';
 
 export default async function TenantDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { adminClient } = await requirePlatformAdmin();

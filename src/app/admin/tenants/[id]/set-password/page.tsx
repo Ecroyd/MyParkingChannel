@@ -2,6 +2,9 @@ import { requirePlatformAdmin } from "@/lib/guards";
 import { createServerClient } from "@/lib/supabase/server";
 import SetPasswordClient from "./SetPasswordClient";
 
+// Force dynamic rendering for this page since it requires authentication
+export const dynamic = 'force-dynamic';
+
 export default async function SetPasswordPage({ params }: { params: Promise<{ id: string }> }) {
   const { sb } = await requirePlatformAdmin();
   const { id } = await params;

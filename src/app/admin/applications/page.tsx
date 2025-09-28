@@ -1,6 +1,9 @@
 import { requirePlatformAdmin } from "@/lib/guards";
 import ApplicationsClient from "./ApplicationsClient";
 
+// Force dynamic rendering for this page since it requires authentication
+export const dynamic = 'force-dynamic';
+
 export default async function ApplicationsPage() {
   const { adminClient } = await requirePlatformAdmin();
   

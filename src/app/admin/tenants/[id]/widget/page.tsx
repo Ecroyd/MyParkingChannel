@@ -6,6 +6,9 @@
 import { requirePlatformAdmin } from '@/lib/guards';
 import WidgetSnippet from '../../WidgetSnippet';
 
+// Force dynamic rendering for this page since it requires authentication
+export const dynamic = 'force-dynamic';
+
 export default async function TenantWidgetPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { sb } = await requirePlatformAdmin();
