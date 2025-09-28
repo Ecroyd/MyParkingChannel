@@ -55,7 +55,7 @@ export function middleware(req: NextRequest) {
 
   const slug = getTenantSlugFromHost(host);
 
-  // Always add a debug header so we can see decisions in the Network tab
+  // Handle subdomain cases (slug.baseDomain)
   if (slug) {
     const rewriteTo = `/sites/${slug}${pathname}`;
     const res = NextResponse.rewrite(new URL(rewriteTo, req.url));
@@ -64,14 +64,32 @@ export function middleware(req: NextRequest) {
     res.headers.set("x-pc-slug", slug);
     res.headers.set("x-pc-path", pathname);
     return res;
-  } else {
-    const res = NextResponse.next();
-    res.headers.set("x-pc-mw", "pass");
+  } 
+  
+  // Handle custom domains - check if this is a custom domain that should show a tenant site
+  // For now, we'll let the /site/[domain] route handle this
+  // This could be enhanced to check a database for custom domain mappings
+  const isCustomDomain = !host.includes('myparkingchannel.app') && 
+                         !host.includes('localhost') && 
+                         !host.includes('127.0.0.1');
+  
+  if (isCustomDomain) {
+    const rewriteTo = `/site/${host}${pathname}`;
+    const res = NextResponse.rewrite(new URL(rewriteTo, req.url));
+    res.headers.set("x-pc-mw", "custom-domain");
     res.headers.set("x-pc-host", host);
-    res.headers.set("x-pc-slug", "");
+    res.headers.set("x-pc-domain", host);
     res.headers.set("x-pc-path", pathname);
     return res;
   }
+
+  // Default case - let it pass through to the main app
+  const res = NextResponse.next();
+  res.headers.set("x-pc-mw", "pass");
+  res.headers.set("x-pc-host", host);
+  res.headers.set("x-pc-slug", "");
+  res.headers.set("x-pc-path", pathname);
+  return res;
 }
 
 export const config = {
