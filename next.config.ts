@@ -11,68 +11,57 @@ const baseConfig = {
   async headers() {
     const headers = [];
 
-    // Derive Supabase origins from env (don't hardcode)
-    const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    // Compute Supabase origins from env (no hardcoding)
+    const SUPA = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
     let supaOrigin = '';
-    let supaWss = '';
+    let supaHost = '';
     try {
-      const u = new URL(SUPA_URL);
-      supaOrigin = `${u.protocol}//${u.host}`;     // e.g. https://abcd.supabase.co
-      supaWss = `wss://${u.host}`;                 // e.g. wss://abcd.supabase.co
-    } catch {}
+      const u = new URL(SUPA);
+      supaOrigin = `${u.protocol}//${u.host}`; // e.g. https://abcd.supabase.co
+      supaHost = u.host;                        // e.g. abcd.supabase.co
+    } catch {
+      // no env or bad URL; we still add wildcard fallbacks below
+    }
 
-    // Stripe origins we need for Stripe.js
     const stripeJs = 'https://js.stripe.com';
     const stripeNet = 'https://m.stripe.network';
     const stripeApi = 'https://api.stripe.com';
-
-    // Optional: Vercel Web Vitals/analytics
     const vercelVitals = 'https://vitals.vercel-insights.com';
 
-    // NOTE: Keep CSP a single string; add only what you actually use.
+    // IMPORTANT: remove 'prefetch-src' (not supported); keep directives valid
     const csp = [
-      // Base
       `default-src 'self'`,
-      // Scripts (Next, your app, Stripe.js; allow 'unsafe-inline' only if you have inline scripts)
+      // allow loading scripts (Stripe)
       `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${stripeJs}`,
-      // Styles (Tailwind needs 'unsafe-inline' for injected styles)
+      // Tailwind/Next need inline styles occasionally
       `style-src 'self' 'unsafe-inline'`,
-      // Images & media
+      // images from anywhere over https (covers Supabase storage image URLs)
       `img-src 'self' data: blob: https:`,
       `media-src 'self' https:`,
-      // Fonts
       `font-src 'self' data: https:`,
-      // XHR/fetch/websocket endpoints (Supabase, Stripe, analytics)
-      `connect-src 'self' ${supaOrigin} ${supaWss} ${stripeJs} ${stripeNet} ${stripeApi} ${vercelVitals}`,
-      // if you use Google Maps or other APIs, add them above ↑
-      // Workers & service worker
+      // XHR/fetch/websocket endpoints (Supabase, Stripe, vitals)
+      `connect-src 'self' ${
+        supaOrigin ? `${supaOrigin} wss://${supaHost}` : ''
+      } https://*.supabase.co wss://*.supabase.co ${stripeJs} ${stripeNet} ${stripeApi} ${vercelVitals}`,
+      // service workers & workers
       `worker-src 'self' blob:`,
-      // Frames/iframes (Stripe uses iframes)
+      // Stripe embeds
       `frame-src 'self' ${stripeJs}`,
-      // Prefetching (PWA/Next)
-      `prefetch-src 'self'`,
-      // Manifest
-      `manifest-src 'self'`,
-      // Base URI
+      // security hardening
       `base-uri 'self'`,
-      // Form actions
       `form-action 'self'`,
-      // Object
       `object-src 'none'`,
-      // Sandbox (optional hardening, loosen if needed)
-      // `sandbox allow-same-origin allow-scripts allow-forms allow-popups`,
+      `frame-ancestors 'self'`,
     ].join('; ');
 
     headers.push({
-      // Apply to everything; you can scope to only tenant/public routes if preferred
       source: '/:path*',
       headers: [
         { key: 'Content-Security-Policy', value: csp },
+        // Debug echo so you can see what's being sent in the Network tab
+        { key: 'X-Debug-CSP', value: csp.slice(0, 900) },
         { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
         { key: 'X-Content-Type-Options', value: 'nosniff' },
-        { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
-        { key: 'X-XSS-Protection', value: '0' }, // modern browsers ignore; kept for legacy
-        { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
       ],
     });
 
