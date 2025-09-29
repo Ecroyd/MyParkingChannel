@@ -6,14 +6,25 @@ export async function getTenantContext(slug: string) {
 
   const { data: tenant, error: tErr } = await sb
     .from("tenants")
-    .select("id, slug, name, site_hero_title, site_hero_subtitle, brand_primary, brand_secondary, brand_logo_url, site_published")
+    .select("id, slug, name, site_hero_title, site_hero_subtitle, brand_primary, brand_secondary, brand_logo_url, status")
     .eq("slug", slug)
     .maybeSingle();
   if (tErr) throw tErr;
   if (!tenant) return null;
   
-  // Check if site is published
-  if (!tenant.site_published) {
+  // Get tenant profile to check publish status
+  const { data: profile } = await sb
+    .from("tenant_public_profile")
+    .select("is_active, status")
+    .eq("tenant_id", tenant.id)
+    .maybeSingle();
+
+  // Check if site is published - both tenant.status and profile.is_active must be true
+  const isPublished = 
+    tenant.status === 'active' && 
+    (profile?.is_active === true || profile?.status === 'active');
+  
+  if (!isPublished) {
     return null;
   }
 

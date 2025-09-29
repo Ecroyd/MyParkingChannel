@@ -21,11 +21,12 @@ export default async function BookPage({ params, searchParams }: { params: Promi
   if (process.env.NEXT_PUBLIC_DEBUG_SITE === '1') {
     console.log('[SITE_GUARD] tenant', {
       slug: resolvedParams.slug,
-      tenantId: (ctx as any)?.tenant?.id,          // keep permissive during debug
+      tenantId: (ctx as any)?.tenant?.id,
       publishFlags: {
-        // add whatever your code actually checks
-        // enabled: (ctx as any)?.tenant?.enabled,
-        // status: (ctx as any)?.site?.status,
+        tenantStatus: (ctx as any)?.tenant?.status,
+        profileIsActive: (ctx as any)?.profile?.is_active,
+        profileStatus: (ctx as any)?.profile?.status,
+        derivedPublished: (ctx as any)?.tenant?.status === 'active' && ((ctx as any)?.profile?.is_active || (ctx as any)?.profile?.status === 'active')
       }
     })
   }

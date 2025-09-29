@@ -41,28 +41,27 @@ export async function GET(req: Request) {
       tenantBySlug = data
     }
 
-    // optional: try tenant_public_profile only if it exists in your schema
+    // Get profile for the resolved tenant
     let profile: any = null
-    try {
-      const tid = tenant?.id ?? tenantBySlug?.id
-      if (tid) {
+    const resolvedTenant = tenant || tenantBySlug
+    if (resolvedTenant?.id) {
+      try {
         const { data } = await sb
           .from('tenant_public_profile')
-          .select('*')
-          .eq('tenant_id', tid)
+          .select('is_active, status, updated_at')
+          .eq('tenant_id', resolvedTenant.id)
           .maybeSingle()
         profile = data
-      }
-    } catch {}
+      } catch {}
+    }
 
     return NextResponse.json({
       host,
       slug,
-      domainRow,
-      tenant,
-      tenantBySlug,
-      profile,
-      hint: 'Find the real publish flag in these rows (e.g. enabled, is_live, status, published_at, etc.)'
+      tenant: resolvedTenant ? { id: resolvedTenant.id, slug: resolvedTenant.slug, status: resolvedTenant.status } : null,
+      profile: profile ? { is_active: profile.is_active, status: profile.status, updated_at: profile.updated_at } : null,
+      derivedPublished: resolvedTenant?.status === 'active' && (profile?.is_active || profile?.status === 'active'),
+      note: 'Tenant needs status=active AND profile.is_active=true (or status=active)'
     })
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? 'unknown' }, { status: 500 })
