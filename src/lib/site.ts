@@ -6,11 +6,16 @@ export async function getTenantContext(slug: string) {
 
   const { data: tenant, error: tErr } = await sb
     .from("tenants")
-    .select("id, slug, name, site_hero_title, site_hero_subtitle, brand_primary, brand_secondary, brand_logo_url")
+    .select("id, slug, name, site_hero_title, site_hero_subtitle, brand_primary, brand_secondary, brand_logo_url, site_published")
     .eq("slug", slug)
     .maybeSingle();
   if (tErr) throw tErr;
   if (!tenant) return null;
+  
+  // Check if site is published
+  if (!tenant.site_published) {
+    return null;
+  }
 
   const { data: branding } = await sb
     .from("tenant_branding")

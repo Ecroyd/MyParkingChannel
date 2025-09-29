@@ -78,6 +78,9 @@ export default async function TenantHome({
   
   if (!data) {
     // Hide draft sites unless ?preview=1
+    if (process.env.NEXT_PUBLIC_DEBUG_SITE === '1') {
+      console.warn('[SITE_GUARD] slug=', resolvedParams.slug, 'tenantId=', data?.tenant?.id, 'site_published=', data?.tenant?.site_published)
+    }
     return (
       <main className="max-w-xl mx-auto py-24 px-4">
         <h1 className="text-2xl font-semibold mb-2">Site unavailable</h1>

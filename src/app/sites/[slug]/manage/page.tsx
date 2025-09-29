@@ -8,7 +8,12 @@ export default async function ManagePage({ params, searchParams }: { params: Pro
   const resolvedSearchParams = await searchParams;
   const preview = resolvedSearchParams?.preview === "1";
   const ctx = await getSiteContext(resolvedParams.slug, { preview });
-  if (!ctx) return <main className="max-w-xl mx-auto py-24 px-4">Site unavailable</main>;
+  if (!ctx) {
+    if (process.env.NEXT_PUBLIC_DEBUG_SITE === '1') {
+      console.warn('[SITE_GUARD] slug=', resolvedParams.slug, 'tenantId=', ctx?.tenant?.id, 'site_published=', ctx?.tenant?.site_published)
+    }
+    return <main className="max-w-xl mx-auto py-24 px-4">Site unavailable</main>;
+  }
   const title = ctx.branding?.app_name || ctx.tenant.name || "Airport Parking";
 
   return (

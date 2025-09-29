@@ -1,6 +1,7 @@
 // src/middleware.ts
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import { createServerClient } from '@/lib/supabase/server';
 
 const ENABLED =
   String(process.env.SITE_ROUTES_ENABLED || "").toLowerCase() === "true";
@@ -43,22 +44,66 @@ function getTenantSlugFromHost(hostname: string): string | null {
   return null;
 }
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const url = new URL(req.url);
   const pathname = url.pathname;
   const host = req.headers.get("host") ?? url.hostname;
 
-  if (isStaticPath(pathname)) return NextResponse.next();
+  // Keep original response by default
+  let res = NextResponse.next();
+
+  // Lightweight diagnostics (enabled only when NEXT_PUBLIC_DEBUG_SITE)
+  const debug = process.env.NEXT_PUBLIC_DEBUG_SITE === '1';
+  if (debug) {
+    console.log('[MW] host=', host, 'pathname=', pathname);
+  }
+
+  if (isStaticPath(pathname)) return res;
 
   // Global kill switch
-  if (!ENABLED) return NextResponse.next();
+  if (!ENABLED) return res;
 
   const slug = getTenantSlugFromHost(host);
+
+  // Add tenant resolution logging for debug mode
+  if (debug) {
+    const isSiteRoute = pathname.startsWith('/sites/') || pathname === '/' || pathname.startsWith('/site/');
+    if (isSiteRoute) {
+      try {
+        const sb = await createServerClient({ admin: true });
+        let resolved: any = null;
+
+        // Try domain-based resolution first
+        if (host && !slug) {
+          const { data } = await sb
+            .from('tenant_domains')
+            .select('tenant_id,domain,enabled,verified_at')
+            .eq('domain', host)
+            .maybeSingle();
+          resolved = { by: 'domain', record: data };
+        }
+
+        // Try slug-based resolution
+        if (!resolved && slug) {
+          const { data } = await sb
+            .from('tenants')
+            .select('id,slug,name,site_published,created_at')
+            .eq('slug', slug)
+            .maybeSingle();
+          resolved = { by: 'slug', record: data };
+        }
+
+        console.log('[MW] resolvedTenant=', resolved);
+      } catch (e) {
+        console.error('[MW] tenant resolve error', e);
+      }
+    }
+  }
 
   // Handle subdomain cases (slug.baseDomain)
   if (slug) {
     const rewriteTo = `/sites/${slug}${pathname}`;
-    const res = NextResponse.rewrite(new URL(rewriteTo, req.url));
+    res = NextResponse.rewrite(new URL(rewriteTo, req.url));
     res.headers.set("x-pc-mw", "rewrite");
     res.headers.set("x-pc-host", host);
     res.headers.set("x-pc-slug", slug);
@@ -75,7 +120,7 @@ export function middleware(req: NextRequest) {
   
   if (isCustomDomain) {
     const rewriteTo = `/site/${host}${pathname}`;
-    const res = NextResponse.rewrite(new URL(rewriteTo, req.url));
+    res = NextResponse.rewrite(new URL(rewriteTo, req.url));
     res.headers.set("x-pc-mw", "custom-domain");
     res.headers.set("x-pc-host", host);
     res.headers.set("x-pc-domain", host);
@@ -84,7 +129,6 @@ export function middleware(req: NextRequest) {
   }
 
   // Default case - let it pass through to the main app
-  const res = NextResponse.next();
   res.headers.set("x-pc-mw", "pass");
   res.headers.set("x-pc-host", host);
   res.headers.set("x-pc-slug", "");
@@ -93,5 +137,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/:path*"],
+  matcher: ['/((?!_next|favicon.ico|api/debug).*)'], // don't log debug API itself
 };
