@@ -17,14 +17,16 @@ export default async function ManagePage({ params, searchParams }: { params: Pro
 
   // From here, ctx is definitely defined
   if (process.env.NEXT_PUBLIC_DEBUG_SITE === '1') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dbg = ctx as any;
     console.log('[SITE_GUARD] tenant', {
       slug: resolvedParams.slug,
-      tenantId: (ctx as any)?.tenant?.id,
+      tenantId: dbg?.tenant?.id,
       publishFlags: {
-        tenantStatus: (ctx as any)?.tenant?.status,
-        profileIsActive: (ctx as any)?.profile?.is_active,
-        profileStatus: (ctx as any)?.profile?.status,
-        derivedPublished: (ctx as any)?.tenant?.status === 'active' && ((ctx as any)?.profile?.is_active || (ctx as any)?.profile?.status === 'active')
+        tenantStatus: dbg?.tenant?.status,
+        profileIsActive: dbg?.profile?.is_active,
+        profileStatus: dbg?.profile?.status,
+        derivedPublished: dbg?.tenant?.status === 'active' && (dbg?.profile?.is_active || dbg?.profile?.status === 'active')
       }
     })
   }
