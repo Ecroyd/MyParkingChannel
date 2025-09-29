@@ -28,30 +28,18 @@ const baseConfig = {
     const stripeApi = 'https://api.stripe.com';
     const vercelVitals = 'https://vitals.vercel-insights.com';
 
-    // IMPORTANT: remove 'prefetch-src' (not supported); keep directives valid
+    // Minimal working CSP to unblock Supabase + Stripe
     const csp = [
       `default-src 'self'`,
-      // allow loading scripts (Stripe)
-      `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${stripeJs}`,
-      // Tailwind/Next need inline styles occasionally
+      `script-src 'self' 'unsafe-inline' ${stripeJs}`,
       `style-src 'self' 'unsafe-inline'`,
-      // images from anywhere over https (covers Supabase storage image URLs)
       `img-src 'self' data: blob: https:`,
       `media-src 'self' https:`,
       `font-src 'self' data: https:`,
-      // XHR/fetch/websocket endpoints (Supabase, Stripe, vitals)
       `connect-src 'self' ${
         supaOrigin ? `${supaOrigin} wss://${supaHost}` : ''
-      } https://*.supabase.co wss://*.supabase.co ${stripeJs} ${stripeNet} ${stripeApi} ${vercelVitals}`,
-      // service workers & workers
-      `worker-src 'self' blob:`,
-      // Stripe embeds
+      } https://*.supabase.co wss://*.supabase.co ${stripeJs} ${stripeApi}`,
       `frame-src 'self' ${stripeJs}`,
-      // security hardening
-      `base-uri 'self'`,
-      `form-action 'self'`,
-      `object-src 'none'`,
-      `frame-ancestors 'self'`,
     ].join('; ');
 
     headers.push({
