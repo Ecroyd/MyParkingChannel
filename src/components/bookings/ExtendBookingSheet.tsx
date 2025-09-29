@@ -260,7 +260,11 @@ function InnerExtendForm({ tenantId, booking, onExtended }: Omit<Props, "publish
 
 export default function ExtendBookingSheet(props: Props) {
   const stripePromise = useMemo(() => {
-    if (!props.publishableKey) return null;
+    if (!props.publishableKey) {
+      console.log("🔴 Stripe publishable key not provided");
+      return null;
+    }
+    console.log("✅ Loading Stripe with publishable key:", props.publishableKey.substring(0, 20) + "...");
     return loadStripe(props.publishableKey);
   }, [props.publishableKey]);
 

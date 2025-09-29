@@ -51,7 +51,10 @@ export default function DailyOccupancyStacked({ tenantId, start, end, tz = 'UTC'
           .order('start_at', { ascending: true });
 
         if (bookingsError) {
+          console.error("🔴 Supabase bookings fetch error:", bookingsError);
           throw new Error(`Database error: ${bookingsError.message}`);
+        } else {
+          console.log("✅ Supabase bookings fetch result:", allBookings?.length || 0, "bookings");
         }
 
         // Filter bookings that overlap with our date range

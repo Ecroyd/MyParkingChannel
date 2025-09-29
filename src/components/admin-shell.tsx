@@ -50,15 +50,27 @@ export default function AdminShell({ children }: AdminShellProps) {
         .eq('user_id', session.user.id)
         .single();
 
+      if (tenantError) {
+        console.error("🔴 Supabase user_tenants fetch error:", tenantError);
+      } else {
+        console.log("✅ Supabase user_tenants fetch result:", userTenant);
+      }
+
       if (!tenantError && userTenant?.tenants) {
         const tenant = Array.isArray(userTenant.tenants) ? userTenant.tenants[0] : userTenant.tenants;
         
         // Get logo from tenant_public_profile
-        const { data: profile } = await supabase
+        const { data: profile, error: profileError } = await supabase
           .from('tenant_public_profile')
           .select('logo_url')
           .eq('tenant_id', tenant.id)
           .maybeSingle();
+
+        if (profileError) {
+          console.error("🔴 Supabase tenant_public_profile fetch error:", profileError);
+        } else {
+          console.log("✅ Supabase tenant_public_profile fetch result:", profile);
+        }
         
         // Add logo_url to tenant object
         setTenant({
@@ -68,11 +80,17 @@ export default function AdminShell({ children }: AdminShellProps) {
       }
 
       // Check if user is platform admin (jcecroyd@gmail.com)
-      const { data: platformAdmin } = await supabase
+      const { data: platformAdmin, error: platformAdminError } = await supabase
         .from('platform_admins')
         .select('user_id')
         .eq('user_id', session.user.id)
         .maybeSingle();
+
+      if (platformAdminError) {
+        console.error("🔴 Supabase platform_admins fetch error:", platformAdminError);
+      } else {
+        console.log("✅ Supabase platform_admins fetch result:", platformAdmin);
+      }
       
       setIsPlatformAdmin(!!platformAdmin);
       

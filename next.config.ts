@@ -9,61 +9,28 @@ const baseConfig = {
     domains: ["*.supabase.co", "localhost"] 
   },
   async headers() {
-    const headers = [];
+    const securityHeaders = [
+      {
+        key: "Content-Security-Policy",
+        value: `
+          default-src 'self';
+          script-src 'self' 'unsafe-inline' https://js.stripe.com;
+          style-src 'self' 'unsafe-inline';
+          img-src 'self' data: blob: https:;
+          media-src 'self' https:;
+          font-src 'self' data: https:;
+          connect-src 'self' https://*.supabase.co wss://*.supabase.co https://js.stripe.com https://api.stripe.com;
+          frame-src 'self' https://js.stripe.com;
+        `.replace(/\n/g, " "), // remove line breaks for HTTP header
+      }
+    ];
 
-    // Compute Supabase origins from env (no hardcoding)
-    const SUPA = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    let supaOrigin = '';
-    let supaHost = '';
-    try {
-      const u = new URL(SUPA);
-      supaOrigin = `${u.protocol}//${u.host}`; // e.g. https://abcd.supabase.co
-      supaHost = u.host;                        // e.g. abcd.supabase.co
-    } catch {
-      // no env or bad URL; we still add wildcard fallbacks below
-    }
-
-    const stripeJs = 'https://js.stripe.com';
-    const stripeNet = 'https://m.stripe.network';
-    const stripeApi = 'https://api.stripe.com';
-    const vercelVitals = 'https://vitals.vercel-insights.com';
-
-    // Minimal working CSP to unblock Supabase + Stripe
-    const csp = [
-      `default-src 'self'`,
-      `script-src 'self' 'unsafe-inline' ${stripeJs}`,
-      `style-src 'self' 'unsafe-inline'`,
-      `img-src 'self' data: blob: https:`,
-      `media-src 'self' https:`,
-      `font-src 'self' data: https:`,
-      `connect-src 'self' ${
-        supaOrigin ? `${supaOrigin} wss://${supaHost}` : ''
-      } https://*.supabase.co wss://*.supabase.co ${stripeJs} ${stripeApi}`,
-      `frame-src 'self' ${stripeJs}`,
-    ].join('; ');
-
-    headers.push({
-      source: '/:path*',
-      headers: [
-        { key: 'Content-Security-Policy', value: csp },
-        // Debug echo so you can see what's being sent in the Network tab
-        { key: 'X-Debug-CSP', value: csp.slice(0, 900) },
-        { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-        { key: 'X-Content-Type-Options', value: 'nosniff' },
-      ],
-    });
-
-    // SW should never be cached; also add a few safe security headers
-    headers.push({
-      source: "/sw.js",
-      headers: [
-        { key: "Content-Type", value: "application/javascript; charset=utf-8" },
-        { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
-        { key: "Content-Security-Policy", value: "default-src 'self'; script-src 'self'" }
-      ]
-    });
-
-    return headers;
+    return [
+      {
+        source: "/(.*)",
+        headers: securityHeaders,
+      },
+    ];
   }
 };
 
