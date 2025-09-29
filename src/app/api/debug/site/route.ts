@@ -1,3 +1,5 @@
+export const runtime = 'nodejs'; // <— forces Node, so supabase-js is allowed
+
 import { NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase/server'
 
@@ -12,34 +14,46 @@ export async function GET(req: Request) {
     const slug = url.searchParams.get('slug') || undefined
     const sb = await createServerClient({ admin: true })
 
-    // 1) domain → tenant
+    // Keep selects broad so we can *see* what exists, but ONLY for known tables
     const { data: domainRow } = await sb
       .from('tenant_domains')
-      .select('tenant_id, domain, enabled, verified_at')
+      .select('*')
       .eq('domain', host)
       .maybeSingle()
 
-    // 2) tenant core row
     let tenant: any = null
     if (domainRow?.tenant_id) {
       const { data } = await sb
         .from('tenants')
-        .select('id, slug, name, site_published, created_at')
+        .select('*')
         .eq('id', domainRow.tenant_id)
         .maybeSingle()
       tenant = data
     }
 
-    // 3) if slug provided, fetch by slug too (path-based sites)
     let tenantBySlug: any = null
     if (slug) {
       const { data } = await sb
         .from('tenants')
-        .select('id, slug, name, site_published, created_at')
+        .select('*')
         .eq('slug', slug)
         .maybeSingle()
       tenantBySlug = data
     }
+
+    // optional: try tenant_public_profile only if it exists in your schema
+    let profile: any = null
+    try {
+      const tid = tenant?.id ?? tenantBySlug?.id
+      if (tid) {
+        const { data } = await sb
+          .from('tenant_public_profile')
+          .select('*')
+          .eq('tenant_id', tid)
+          .maybeSingle()
+        profile = data
+      }
+    } catch {}
 
     return NextResponse.json({
       host,
@@ -47,12 +61,10 @@ export async function GET(req: Request) {
       domainRow,
       tenant,
       tenantBySlug,
-      note: 'site_published is the flag that gates rendering. Ensure this is true for the resolved tenant.',
+      profile,
+      hint: 'Find the real publish flag in these rows (e.g. enabled, is_live, status, published_at, etc.)'
     })
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message ?? 'unknown' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: e?.message ?? 'unknown' }, { status: 500 })
   }
 }
