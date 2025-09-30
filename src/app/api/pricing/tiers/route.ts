@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSupabase } from "@/lib/supabase/server";
 
 export async function GET(req: NextRequest) {
+  console.log('GET /api/pricing/tiers called');
   const supabase = await getServerSupabase();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   
   if (authError || !user) {
+    console.log('Auth error:', authError);
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  console.log('User authenticated:', user.id);
 
   // Get user's tenants (following the same pattern as other admin pages)
   const { data: userTenants, error: tenantError } = await supabase
@@ -26,10 +30,14 @@ export async function GET(req: NextRequest) {
     .eq('user_id', user.id);
 
   if (tenantError) {
+    console.log('Tenant error:', tenantError);
     return NextResponse.json({ error: "Error loading tenant data" }, { status: 400 });
   }
 
+  console.log('User tenants found:', userTenants?.length || 0);
+
   if (!userTenants || userTenants.length === 0) {
+    console.log('No tenant access found');
     return NextResponse.json({ error: "No tenant access found" }, { status: 404 });
   }
 
@@ -37,16 +45,18 @@ export async function GET(req: NextRequest) {
   const userTenant = userTenants.find(ut => ut.is_default) || userTenants[0];
   const tenant = userTenant?.tenants;
 
+  console.log('Selected tenant:', tenant);
+
   if (!tenant) {
+    console.log('No tenant found in userTenant');
     return NextResponse.json({ error: "No tenant found" }, { status: 404 });
   }
 
   // Get pricing data from tenant_pricing table
-  const { data: pricing, error: pricingError } = await supabase
+  const { data: pricingData, error: pricingError } = await supabase
     .from("tenant_pricing")
     .select("*")
-    .eq("tenant_id", (tenant as any).id)
-    .single();
+    .eq("tenant_id", (tenant as any).id);
 
   if (pricingError) {
     console.log('Pricing data not found or error:', pricingError);
@@ -58,6 +68,24 @@ export async function GET(req: NextRequest) {
       ] 
     });
   }
+
+  console.log('Pricing data found:', pricingData?.length || 0, 'records');
+
+  // Use the first pricing record or create default
+  const pricing = pricingData && pricingData.length > 0 ? pricingData[0] : null;
+
+  if (!pricing) {
+    console.log('No pricing data found, returning default');
+    // Return default pricing structure
+    return NextResponse.json({ 
+      success: true, 
+      data: [
+        { id: "default", code: "standard", label: "Standard Rate", type: "flat", value: 7.0, color: "#3b82f6", sort_order: 10, is_active: true }
+      ] 
+    });
+  }
+
+  console.log('Using pricing data:', pricing);
 
   // Transform tenant_pricing data to match expected format
   const tiers = [
