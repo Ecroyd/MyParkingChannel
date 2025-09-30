@@ -25,7 +25,7 @@ export const ADMIN_NAV: NavNode[] = [
   },
   { key: "booking-rules", label: "Booking Rules", href: "/admin/booking-rules", section: "Core" },
   { key: "pricing", label: "Pricing", href: "/admin/pricing", section: "Core" },
-  { key: "analytics", label: "Analytics", href: "/admin/analytics-server", section: "Core" },
+  { key: "analytics", label: "Analytics", href: "/admin/analytics", section: "Core" },
 
   // ——— Sites & Integrations ———
   { key: "tenant-sites", label: "Tenant Sites", href: "/admin/tenant-sites-server", section: "Sites & Integrations" },
