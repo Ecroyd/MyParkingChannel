@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createBrowserClient } from '@supabase/ssr'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -31,65 +30,31 @@ export default function SettingsPage() {
   const [passwordLoading, setPasswordLoading] = useState(false)
   const [passwordMessage, setPasswordMessage] = useState<{type: 'success' | 'error', text: string} | null>(null)
 
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
   const router = useRouter()
 
   useEffect(() => {
     async function loadData() {
       try {
-        const { data: { user }, error: userError } = await supabase.auth.getUser()
-        if (userError || !user) {
-          setError('Not authenticated')
-          setLoading(false)
-          return
+        const response = await fetch('/api/admin/settings/data');
+        const result = await response.json();
+
+        if (!result.success) {
+          setError(result.error || 'Failed to load settings data');
+          setLoading(false);
+          return;
         }
 
-        setUser(user)
-
-        // Get user's tenants (following the same pattern as other admin pages)
-        const { data: userTenants, error: tenantError } = await supabase
-          .from('user_tenants')
-          .select(`
-            tenant_id,
-            role,
-            is_default,
-            tenants (
-              id,
-              name,
-              slug,
-              timezone,
-              brand_logo_url
-            )
-          `)
-          .eq('user_id', user.id)
-
-        if (tenantError) {
-          setError('Failed to load tenant data')
-          setLoading(false)
-          return
-        }
-
-        if (!userTenants || userTenants.length === 0) {
-          setError('No tenant access found')
-          setLoading(false)
-          return
-        }
-
-        // Find the default tenant or use the first one
-        const userTenant = userTenants.find(ut => ut.is_default) || userTenants[0]
-        setTenant(userTenant?.tenants)
-        setLoading(false)
+        setUser(result.user);
+        setTenant(result.tenant);
+        setLoading(false);
       } catch (err) {
-        console.error('Load data error:', err)
-        setError('Failed to load data')
-        setLoading(false)
+        console.error('Load data error:', err);
+        setError('Failed to load data');
+        setLoading(false);
       }
     }
 
-    loadData()
+    loadData();
   }, [])
 
   const handlePasswordChange = async (e: React.FormEvent) => {
