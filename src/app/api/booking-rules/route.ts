@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSupabase } from '@/lib/supabase/server'
+import { getServerSupabase, getServerSupabaseAdmin } from '@/lib/supabase/server'
 import { createBookingRuleSchema, updateBookingRuleSchema } from '@/lib/validation/booking-rules'
 
 // GET /api/booking-rules - List all booking rules for the tenant
@@ -13,8 +13,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
     }
 
-    // Get user's tenants (following the same pattern as other admin pages)
-    const { data: userTenants, error: tenantError } = await supabase
+    // Get user's tenants using admin client to bypass RLS
+    const adminSupabase = await getServerSupabaseAdmin();
+    const { data: userTenants, error: tenantError } = await adminSupabase
       .from('user_tenants')
       .select(`
         tenant_id,
@@ -74,8 +75,9 @@ export async function POST(req: NextRequest) {
 
     console.log('User:', user.id)
 
-    // Get user's tenants (following the same pattern as other admin pages)
-    const { data: userTenants, error: tenantError } = await supabase
+    // Get user's tenants using admin client to bypass RLS
+    const adminSupabase = await getServerSupabaseAdmin();
+    const { data: userTenants, error: tenantError } = await adminSupabase
       .from('user_tenants')
       .select(`
         tenant_id,
