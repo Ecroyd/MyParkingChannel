@@ -48,9 +48,12 @@ async function getTenantByDomain(domain: string) {
     .eq('domain', domain)
     .maybeSingle()
 
-  if (custom?.sites?.tenants) {
-    const tenant = Array.isArray(custom.sites.tenants) ? custom.sites.tenants[0] : custom.sites.tenants
-    return { id: tenant.id, slug: tenant.slug, name: tenant.name }
+  if (custom?.sites && Array.isArray(custom.sites) && custom.sites.length > 0) {
+    const site = custom.sites[0]
+    if (site.tenants) {
+      const tenant = Array.isArray(site.tenants) ? site.tenants[0] : site.tenants
+      return { id: tenant.id, slug: tenant.slug, name: tenant.name }
+    }
   }
 
   return null
