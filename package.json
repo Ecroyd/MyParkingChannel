@@ -64,10 +64,10 @@
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5",
     "xlsx": "^0.18.5",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "@ducanh2912/next-pwa": "^10.2.9"
   },
   "devDependencies": {
-    "@ducanh2912/next-pwa": "^10.2.9",
     "@types/csv-stringify": "^1.4.3",
     "eslint": "^8",
     "eslint-config-next": "15.5.2",
