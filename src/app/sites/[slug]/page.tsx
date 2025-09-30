@@ -147,7 +147,7 @@ export default async function TenantHome({
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(ld) }} />
       {faqLd && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqLd) }} />}
       
-      <Header title={title} logoUrl={p?.logo_url} />
+      <Header title={title} logoUrl={p?.logo_url} tenantSlug={resolvedParams.slug} />
       <main className="max-w-6xl mx-auto px-4 pt-14 pb-10">
         {/* HERO */}
         <section className="grid lg:grid-cols-2 gap-8 items-center mb-16">

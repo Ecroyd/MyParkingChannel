@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getServerSupabase } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server-admin'
 
 export async function GET(req: Request) {
   const url = new URL(req.url)
@@ -9,12 +10,47 @@ export async function GET(req: Request) {
   if (!tenantId) return NextResponse.json({ error: 'tenant_id required' }, { status: 400 })
 
   const supabase = await getServerSupabase()
-  let q = supabase.from('tenant_capacity').select('*').eq('tenant_id', tenantId)
-  if (from) q = q.gte('date', from)
-  if (to) q = q.lte('date', to)
-  const { data, error } = await q.order('date', { ascending: true })
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ rows: data ?? [] })
+  
+  try {
+    // Get user authentication
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Verify user has access to this tenant
+    const { data: userTenant, error: accessError } = await supabase
+      .from("user_tenants")
+      .select("tenant_id, role")
+      .eq("user_id", user.id)
+      .eq("tenant_id", tenantId)
+      .single();
+
+    if (accessError || !userTenant) {
+      // Fallback: Use admin client to check if user_tenants record exists
+      const adminClient = await createAdminClient();
+      const { data: adminUserTenant, error: adminAccessError } = await adminClient
+        .from("user_tenants")
+        .select("tenant_id, role")
+        .eq("user_id", user.id)
+        .eq("tenant_id", tenantId)
+        .single();
+      
+      if (adminAccessError || !adminUserTenant) {
+        return NextResponse.json({ error: "Access denied" }, { status: 403 });
+      }
+    }
+
+    let q = supabase.from('tenant_capacity').select('*').eq('tenant_id', tenantId)
+    if (from) q = q.gte('date', from)
+    if (to) q = q.lte('date', to)
+    const { data, error } = await q.order('date', { ascending: true })
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ rows: data ?? [] })
+  } catch (error) {
+    console.error("Capacity overrides GET error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
 }
 
 export async function PUT(req: Request) {
@@ -24,10 +60,45 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: 'tenant_id and rows[] required' }, { status: 400 })
 
   const supabase = await getServerSupabase()
-  const payload = body.rows.map(r => ({ tenant_id: body.tenant_id!, date: r.date, capacity: r.capacity }))
-  const { error } = await supabase.from('tenant_capacity').upsert(payload, { onConflict: 'tenant_id,date' })
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ ok: true, upserted: payload.length })
+  
+  try {
+    // Get user authentication
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Verify user has access to this tenant
+    const { data: userTenant, error: accessError } = await supabase
+      .from("user_tenants")
+      .select("tenant_id, role")
+      .eq("user_id", user.id)
+      .eq("tenant_id", body.tenant_id)
+      .single();
+
+    if (accessError || !userTenant) {
+      // Fallback: Use admin client to check if user_tenants record exists
+      const adminClient = await createAdminClient();
+      const { data: adminUserTenant, error: adminAccessError } = await adminClient
+        .from("user_tenants")
+        .select("tenant_id, role")
+        .eq("user_id", user.id)
+        .eq("tenant_id", body.tenant_id)
+        .single();
+      
+      if (adminAccessError || !adminUserTenant) {
+        return NextResponse.json({ error: "Access denied" }, { status: 403 });
+      }
+    }
+
+    const payload = body.rows.map(r => ({ tenant_id: body.tenant_id!, date: r.date, capacity: r.capacity }))
+    const { error } = await supabase.from('tenant_capacity').upsert(payload, { onConflict: 'tenant_id,date' })
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ ok: true, upserted: payload.length })
+  } catch (error) {
+    console.error("Capacity overrides PUT error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
 }
 
 export async function DELETE(req: Request) {
@@ -37,8 +108,43 @@ export async function DELETE(req: Request) {
   if (!tenantId || !date) return NextResponse.json({ error: 'tenant_id and date required' }, { status: 400 })
 
   const supabase = await getServerSupabase()
-  const { error } = await supabase.from('tenant_capacity').delete().eq('tenant_id', tenantId).eq('date', date)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ ok: true })
+  
+  try {
+    // Get user authentication
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Verify user has access to this tenant
+    const { data: userTenant, error: accessError } = await supabase
+      .from("user_tenants")
+      .select("tenant_id, role")
+      .eq("user_id", user.id)
+      .eq("tenant_id", tenantId)
+      .single();
+
+    if (accessError || !userTenant) {
+      // Fallback: Use admin client to check if user_tenants record exists
+      const adminClient = await createAdminClient();
+      const { data: adminUserTenant, error: adminAccessError } = await adminClient
+        .from("user_tenants")
+        .select("tenant_id, role")
+        .eq("user_id", user.id)
+        .eq("tenant_id", tenantId)
+        .single();
+      
+      if (adminAccessError || !adminUserTenant) {
+        return NextResponse.json({ error: "Access denied" }, { status: 403 });
+      }
+    }
+
+    const { error } = await supabase.from('tenant_capacity').delete().eq('tenant_id', tenantId).eq('date', date)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ ok: true })
+  } catch (error) {
+    console.error("Capacity overrides DELETE error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
 }
 

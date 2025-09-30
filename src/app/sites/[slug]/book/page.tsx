@@ -37,7 +37,7 @@ export default async function BookPage({ params, searchParams }: { params: Promi
 
   return (
     <>
-      <Header title={title} />
+      <Header title={title} tenantSlug={resolvedParams.slug} />
       <main className="max-w-6xl mx-auto px-4 py-10">
         <div className="grid lg:grid-cols-2 gap-10 items-start">
           <div>

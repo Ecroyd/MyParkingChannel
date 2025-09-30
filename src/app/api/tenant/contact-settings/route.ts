@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSupabase } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server-admin';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -14,24 +15,51 @@ export async function GET(req: NextRequest) {
   try {
     // Get user authentication
     const { data: { user }, error: authError } = await supabase.auth.getUser();
+    console.log('🔍 Contact Settings GET: Auth check:', { user: user?.id, authError });
     if (authError || !user) {
+      console.log('❌ Contact Settings GET: Auth failed:', authError);
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     // Verify user has access to this tenant
+    console.log('🔍 Contact Settings GET: Checking access for user:', user.id, 'tenant:', tenantId);
+    
     const { data: userTenant, error: accessError } = await supabase
       .from("user_tenants")
-      .select("tenant_id")
+      .select("tenant_id, role")
       .eq("user_id", user.id)
       .eq("tenant_id", tenantId)
       .single();
 
+    console.log('🔍 Contact Settings GET: Access check result:', { userTenant, accessError });
+
     if (accessError || !userTenant) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+      console.log('❌ Contact Settings GET: Access denied - userTenant:', userTenant, 'error:', accessError);
+      
+      // Fallback: Use admin client to check if user_tenants record exists
+      console.log('🔍 Contact Settings GET: Trying admin client fallback...');
+      const adminClient = await createAdminClient();
+      const { data: adminUserTenant, error: adminAccessError } = await adminClient
+        .from("user_tenants")
+        .select("tenant_id, role")
+        .eq("user_id", user.id)
+        .eq("tenant_id", tenantId)
+        .single();
+      
+      console.log('🔍 Contact Settings GET: Admin client check result:', { adminUserTenant, adminAccessError });
+      
+      if (adminAccessError || !adminUserTenant) {
+        console.log('❌ Contact Settings GET: Admin client also failed - userTenant:', adminUserTenant, 'error:', adminAccessError);
+        return NextResponse.json({ error: "Access denied" }, { status: 403 });
+      }
+      
+      console.log('✅ Contact Settings GET: Admin client found user_tenants record, proceeding...');
     }
 
     // Get contact settings from tenant_branding
-    const { data: branding, error: brandingError } = await supabase
+    let branding, brandingError;
+    
+    const { data: brandingData, error: brandingErr } = await supabase
       .from("tenant_branding")
       .select(`
         contact_email,
@@ -46,6 +74,33 @@ export async function GET(req: NextRequest) {
       `)
       .eq("tenant_id", tenantId)
       .single();
+    
+    branding = brandingData;
+    brandingError = brandingErr;
+    
+    // If regular client fails, try admin client
+    if (brandingError) {
+      console.log('🔍 Contact Settings GET: Regular client failed, trying admin client for branding...');
+      const adminClient = await createAdminClient();
+      const { data: adminBranding, error: adminBrandingError } = await adminClient
+        .from("tenant_branding")
+        .select(`
+          contact_email,
+          contact_phone,
+          contact_address,
+          contact_city,
+          contact_postcode,
+          contact_country,
+          business_hours,
+          website_url,
+          social_media
+        `)
+        .eq("tenant_id", tenantId)
+        .single();
+      
+      branding = adminBranding;
+      brandingError = adminBrandingError;
+    }
 
     if (brandingError) {
       console.error("Error fetching contact settings:", brandingError);

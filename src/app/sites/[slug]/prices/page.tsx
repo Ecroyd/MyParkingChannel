@@ -88,7 +88,7 @@ export default async function PricesPage({ params }: PageProps) {
 
   return (
     <>
-      <Header title={title} logoUrl={p?.logo_url} />
+      <Header title={title} logoUrl={p?.logo_url} tenantSlug={resolvedParams.slug} />
       <main className="max-w-4xl mx-auto px-4 pt-14 pb-10">
         <div className="mb-8">
           <h1 className="text-3xl font-semibold text-slate-900 mb-4 flex items-center gap-3">

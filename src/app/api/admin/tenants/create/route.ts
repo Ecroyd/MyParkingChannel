@@ -70,6 +70,7 @@ export async function POST(req: Request) {
     const tenantId = tenantRes.id;
 
     // 3. Link user to tenant
+    console.log('🔍 Tenant Creation: Linking user to tenant:', { tenantId, ownerUserId });
     const { error: linkErr } = await sb
       .from('user_tenants')
       .insert({
@@ -78,7 +79,11 @@ export async function POST(req: Request) {
         role: 'owner',
         is_default: true,
       });
-    if (linkErr) throw linkErr;
+    if (linkErr) {
+      console.error('❌ Tenant Creation: Failed to link user to tenant:', linkErr);
+      throw linkErr;
+    }
+    console.log('✅ Tenant Creation: Successfully linked user to tenant');
 
     // 4. Create site
     await sb.from('sites').insert({

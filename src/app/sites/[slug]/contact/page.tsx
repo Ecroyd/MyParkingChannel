@@ -34,7 +34,7 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
 
   return (
     <>
-      <Header title={title} />
+      <Header title={title} tenantSlug={resolvedParams.slug} />
       <main className="max-w-3xl mx-auto px-4 py-10">
         <h1 className="text-2xl md:text-3xl font-semibold">Contact us</h1>
         <p className="text-slate-600 mt-2">Questions about arrival or your booking? We're here to help.</p>

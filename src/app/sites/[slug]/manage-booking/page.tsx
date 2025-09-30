@@ -141,7 +141,7 @@ export default function ManageBookingPage() {
 
   return (
     <>
-      <Header title="Manage Booking" />
+      <Header title="Manage Booking" tenantSlug={tenantSlug} />
       <main className="max-w-2xl mx-auto px-4 pt-14 pb-10">
         <div className="mb-8">
           <h1 className="text-3xl font-semibold text-slate-900 mb-4">Manage your booking</h1>

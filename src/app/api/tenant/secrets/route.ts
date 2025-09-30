@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSupabase } from '@/lib/supabase/server';
 import { getServiceSupabase } from '@/lib/supabase/service';
+import { createAdminClient } from '@/lib/supabase/server-admin';
 
 export async function GET(req: NextRequest) {
   try {
@@ -17,15 +18,26 @@ export async function GET(req: NextRequest) {
     }
 
     // Verify user has access to this tenant
-    const { data: userTenant } = await supabase
+    const { data: userTenant, error: accessError } = await supabase
       .from("user_tenants")
       .select("tenant_id")
       .eq("tenant_id", tenantId)
       .eq("user_id", user.id)
       .maybeSingle();
 
-    if (!userTenant) {
-      return NextResponse.json({ ok: false, error: "TENANT_ACCESS_DENIED" }, { status: 403 });
+    if (!userTenant || accessError) {
+      // Fallback: Use admin client to check if user_tenants record exists
+      const adminClient = await createAdminClient();
+      const { data: adminUserTenant, error: adminAccessError } = await adminClient
+        .from("user_tenants")
+        .select("tenant_id")
+        .eq("tenant_id", tenantId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      
+      if (!adminUserTenant || adminAccessError) {
+        return NextResponse.json({ ok: false, error: "TENANT_ACCESS_DENIED" }, { status: 403 });
+      }
     }
 
     // Get tenant secrets (only publishable key for client)
@@ -60,15 +72,26 @@ export async function POST(req: NextRequest) {
     }
 
     // Verify user has access to this tenant
-    const { data: userTenant } = await supabase
+    const { data: userTenant, error: accessError } = await supabase
       .from("user_tenants")
       .select("tenant_id")
       .eq("tenant_id", tenantId)
       .eq("user_id", user.id)
       .maybeSingle();
 
-    if (!userTenant) {
-      return NextResponse.json({ ok: false, error: "TENANT_ACCESS_DENIED" }, { status: 403 });
+    if (!userTenant || accessError) {
+      // Fallback: Use admin client to check if user_tenants record exists
+      const adminClient = await createAdminClient();
+      const { data: adminUserTenant, error: adminAccessError } = await adminClient
+        .from("user_tenants")
+        .select("tenant_id")
+        .eq("tenant_id", tenantId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      
+      if (!adminUserTenant || adminAccessError) {
+        return NextResponse.json({ ok: false, error: "TENANT_ACCESS_DENIED" }, { status: 403 });
+      }
     }
 
     // Save tenant secrets (admin client to bypass RLS)

@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 
-export function Header({ title, logoUrl }: { title: string; logoUrl?: string }) {
+export function Header({ title, logoUrl, tenantSlug }: { title: string; logoUrl?: string; tenantSlug?: string }) {
   return (
     <header className="sticky top-0 z-40 bg-white/80 backdrop-blur border-b border-slate-200">
       <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-3">
+        <Link href={tenantSlug ? `/sites/${tenantSlug}` : "/"} className="flex items-center gap-3">
           {logoUrl ? (
             <img 
               src={logoUrl} 
@@ -18,10 +18,10 @@ export function Header({ title, logoUrl }: { title: string; logoUrl?: string }) 
           <span className="font-semibold text-lg tracking-tight">{title}</span>
         </Link>
         <nav className="flex items-center gap-6 text-sm">
-          <Link href="/book" className="hover:text-sky-600">Book</Link>
-          <Link href="/directions" className="hover:text-sky-600">Directions</Link>
-          <Link href="/manage-booking" className="hover:text-sky-600">Manage Booking</Link>
-          <Link href="/contact" className="hover:text-sky-600">Contact</Link>
+          <Link href={tenantSlug ? `/sites/${tenantSlug}/book` : "/book"} className="hover:text-sky-600">Book</Link>
+          <Link href={tenantSlug ? `/sites/${tenantSlug}/directions` : "/directions"} className="hover:text-sky-600">Directions</Link>
+          <Link href={tenantSlug ? `/sites/${tenantSlug}/manage-booking` : "/manage-booking"} className="hover:text-sky-600">Manage Booking</Link>
+          <Link href={tenantSlug ? `/sites/${tenantSlug}/contact` : "/contact"} className="hover:text-sky-600">Contact</Link>
         </nav>
       </div>
     </header>
