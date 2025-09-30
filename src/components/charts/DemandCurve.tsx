@@ -86,7 +86,18 @@ export default function DemandCurve({
         result = { from: todayStr, to: nextQuarter.toISOString().split('T')[0] };
         break;
       case 'custom':
-        result = { from: customStartDate, to: customEndDate };
+        // Validate custom dates
+        if (!customStartDate || !customEndDate) {
+          // Fallback to default if custom dates not set
+          const defaultTwoWeeks = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
+          result = { from: todayStr, to: defaultTwoWeeks.toISOString().split('T')[0] };
+        } else if (new Date(customStartDate) > new Date(customEndDate)) {
+          // Fallback to default if invalid range
+          const defaultTwoWeeks = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
+          result = { from: todayStr, to: defaultTwoWeeks.toISOString().split('T')[0] };
+        } else {
+          result = { from: customStartDate, to: customEndDate };
+        }
         break;
       default:
         const defaultTwoWeeks = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
@@ -121,7 +132,24 @@ export default function DemandCurve({
   const days = useMemo(() => {
     const start = new Date(from);
     const end = new Date(to);
-    return eachDayOfInterval({ start, end });
+    
+    // Validate date range
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      console.error('Invalid date range:', { from, to });
+      return [];
+    }
+    
+    if (start > end) {
+      console.error('Start date is after end date:', { from, to });
+      return [];
+    }
+    
+    try {
+      return eachDayOfInterval({ start, end });
+    } catch (error) {
+      console.error('Error creating day interval:', error, { from, to });
+      return [];
+    }
   }, [from, to]);
 
   // 3) Aggregate per day per channel
@@ -200,6 +228,7 @@ export default function DemandCurve({
               onChange={(e) => setCustomStartDate(e.target.value)}
               className="rounded-md border border-gray-300 px-3 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               placeholder="Start date"
+              min={new Date().toISOString().split('T')[0]} // Prevent past dates
             />
             <span className="text-gray-500">to</span>
             <input
@@ -208,7 +237,11 @@ export default function DemandCurve({
               onChange={(e) => setCustomEndDate(e.target.value)}
               className="rounded-md border border-gray-300 px-3 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               placeholder="End date"
+              min={customStartDate || new Date().toISOString().split('T')[0]} // End date must be after start date
             />
+            {(customStartDate && customEndDate && new Date(customStartDate) > new Date(customEndDate)) && (
+              <span className="text-red-500 text-xs">End date must be after start date</span>
+            )}
           </div>
         )}
         
