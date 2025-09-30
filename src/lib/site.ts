@@ -4,20 +4,13 @@ export async function getTenantContext(slug: string) {
   if (!slug) return null;
   const sb = createServerClientDirect({ admin: true });
 
-  console.log('🔍 getTenantContext: Looking up slug:', slug);
-
   const { data: tenant, error: tErr } = await sb
     .from("tenants")
     .select("id, slug, name, site_hero_title, site_hero_subtitle, brand_primary, brand_secondary, brand_logo_url, status")
     .eq("slug", slug)
     .maybeSingle();
   if (tErr) throw tErr;
-  if (!tenant) {
-    console.log('❌ getTenantContext: No tenant found for slug:', slug);
-    return null;
-  }
-  
-  console.log('✅ getTenantContext: Found tenant:', { id: tenant.id, slug: tenant.slug, status: tenant.status });
+  if (!tenant) return null;
   
   // Get tenant profile to check publish status
   const { data: profile } = await sb
@@ -26,21 +19,12 @@ export async function getTenantContext(slug: string) {
     .eq("tenant_id", tenant.id)
     .maybeSingle();
 
-  console.log('📋 getTenantContext: Profile data:', profile);
-
   // Check if site is published - both tenant.status and profile.is_active must be true
   const isPublished = 
     tenant.status === 'active' && 
     (profile?.is_active === true || profile?.status === 'active');
   
-  console.log('🚀 getTenantContext: Is published?', isPublished, {
-    tenantStatus: tenant.status,
-    profileIsActive: profile?.is_active,
-    profileStatus: profile?.status
-  });
-  
   if (!isPublished) {
-    console.log('❌ getTenantContext: Site not published, returning null');
     return null;
   }
 
@@ -67,7 +51,6 @@ export async function getTenantContext(slug: string) {
     .eq("tenant_id", tenant.id)
     .maybeSingle();
 
-  console.log('✅ getTenantContext: Returning tenant data with branding:', !!branding);
   return { tenant, branding: branding || null };
 }
 

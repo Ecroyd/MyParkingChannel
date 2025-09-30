@@ -12,7 +12,6 @@ export default async function HomePage() {
   
   if (tenant) {
     // If there's a tenant for this domain, redirect to their site
-    console.log('🏠 HomePage: Found tenant, redirecting to:', `/sites/${tenant.slug}`);
     redirect(`/sites/${tenant.slug}`);
   }
 
