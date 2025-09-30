@@ -263,6 +263,9 @@ function RulesPane(){
     if(draft.date_range_start && draft.date_range_end) {
       payload.date_range = `[${draft.date_range_start},${draft.date_range_end})`;
     }
+    // Remove the individual date fields that don't exist in the database
+    delete payload.date_range_start;
+    delete payload.date_range_end;
     
     console.log('Sending pricing rule:', payload);
     const r=await api.post("/api/pricing/rules",payload); 

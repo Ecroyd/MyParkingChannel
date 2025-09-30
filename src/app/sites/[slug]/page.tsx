@@ -7,13 +7,25 @@ import type { Metadata } from "next";
 export const dynamic = "force-dynamic";
 
 async function getProfile(slug: string) {
+  console.log('📋 getProfile: Starting for slug:', slug);
+  
+  console.log('📋 getProfile: Calling getSiteContext...');
   const ctx = await getSiteContext(slug);
-  if (!ctx) return null;
+  
+  console.log('📋 getProfile: getSiteContext returned:', !!ctx);
+  if (!ctx) {
+    console.log('❌ getProfile: getSiteContext returned null, returning null');
+    return null;
+  }
+  
+  console.log('📋 getProfile: getSiteContext success, tenant ID:', ctx.tenant.id);
   
   // Get public profile data
+  console.log('📋 getProfile: Creating Supabase client...');
   const { createServerClient } = await import("@/lib/supabase/server");
   const supabase = await createServerClient();
   
+  console.log('📋 getProfile: Querying tenant_public_profile for tenant_id:', ctx.tenant.id);
   const { data: profile, error: profileError } = await supabase
     .from("tenant_public_profile")
     .select("*")
@@ -21,13 +33,20 @@ async function getProfile(slug: string) {
     .maybeSingle();
     
   if (profileError) {
-    console.error("Error loading tenant profile:", profileError);
+    console.error("❌ getProfile: Error loading tenant profile:", profileError);
   } else {
-    console.log("Loaded tenant profile:", profile);
-    console.log("Logo URL from database:", profile?.logo_url);
+    console.log("✅ getProfile: Loaded tenant profile:", profile);
+    console.log("📋 getProfile: Logo URL from database:", profile?.logo_url);
   }
-    
-  return { tenant: ctx.tenant, profile, branding: ctx.branding };
+  
+  const result = { tenant: ctx.tenant, profile, branding: ctx.branding };
+  console.log('📋 getProfile: Returning result:', { 
+    hasTenant: !!result.tenant, 
+    hasProfile: !!result.profile, 
+    hasBranding: !!result.branding 
+  });
+  
+  return result;
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
@@ -71,12 +90,21 @@ export default async function TenantHome({
   params: Promise<{ slug: string }>;
   searchParams: Promise<{ preview?: string }>;
 }) {
+  console.log('🏠 TenantHome: Starting to load site');
+  
   const resolvedParams = await params;
   const resolvedSearchParams = await searchParams;
   const preview = resolvedSearchParams?.preview === "1";
+  
+  console.log('🏠 TenantHome: Resolved params:', { slug: resolvedParams.slug, preview });
+  
+  console.log('🏠 TenantHome: Calling getProfile for slug:', resolvedParams.slug);
   const data = await getProfile(resolvedParams.slug);
   
+  console.log('🏠 TenantHome: getProfile returned:', !!data);
+  
   if (!data) {
+    console.log('❌ TenantHome: No data returned from getProfile');
     // Hide draft sites unless ?preview=1
     if (process.env.NEXT_PUBLIC_DEBUG_SITE === '1') {
       console.warn('[SITE_GUARD] slug=', resolvedParams.slug, 'no data found')
@@ -88,6 +116,8 @@ export default async function TenantHome({
       </main>
     );
   }
+  
+  console.log('✅ TenantHome: Data found, proceeding to render site');
 
   const { tenant, profile, branding } = data;
   const p = profile;
