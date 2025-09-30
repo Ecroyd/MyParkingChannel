@@ -28,7 +28,7 @@ export const ADMIN_NAV: NavNode[] = [
   { key: "analytics", label: "Analytics", href: "/admin/analytics-server", section: "Core" },
 
   // ——— Sites & Integrations ———
-  { key: "tenant-sites", label: "Tenant Sites", href: "/admin/tenant-sites", section: "Sites & Integrations" },
+  { key: "tenant-sites", label: "Tenant Sites", href: "/admin/tenant-sites-server", section: "Sites & Integrations" },
   { key: "site-seo", label: "Site & SEO", href: "/admin/site-seo", section: "Sites & Integrations" },
   { key: "integrations", label: "Integrations", href: "/admin/integrations", section: "Sites & Integrations", feature: "integrations" },
   { key: "devices", label: "Gate Devices", href: "/admin/devices", section: "Sites & Integrations", feature: "devices" },

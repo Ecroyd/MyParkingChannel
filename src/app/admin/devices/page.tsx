@@ -33,12 +33,13 @@ export default function DevicesPage() {
 
         setUser(user)
 
-        // Get user's tenant
-        const { data: userTenant, error: tenantError } = await supabase
+        // Get user's tenants (following the same pattern as other admin pages)
+        const { data: userTenants, error: tenantError } = await supabase
           .from('user_tenants')
           .select(`
             tenant_id,
             role,
+            is_default,
             tenants (
               id,
               name,
@@ -47,7 +48,6 @@ export default function DevicesPage() {
             )
           `)
           .eq('user_id', user.id)
-          .single()
 
         if (tenantError) {
           setError('Failed to load tenant data')
@@ -55,6 +55,14 @@ export default function DevicesPage() {
           return
         }
 
+        if (!userTenants || userTenants.length === 0) {
+          setError('No tenant access found')
+          setLoading(false)
+          return
+        }
+
+        // Find the default tenant or use the first one
+        const userTenant = userTenants.find(ut => ut.is_default) || userTenants[0]
         setTenant(userTenant?.tenants)
         setLoading(false)
       } catch (err) {

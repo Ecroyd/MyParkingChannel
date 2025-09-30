@@ -7,12 +7,13 @@ export default async function BookingRulesPage() {
   const user = await requireUser()
   const supabase = await getServerSupabase({ admin: true })
 
-  // Get user's tenant
-  const { data: userTenant, error: tenantError } = await supabase
+  // Get user's tenants (following the same pattern as other admin pages)
+  const { data: userTenants, error: tenantError } = await supabase
     .from('user_tenants')
     .select(`
       tenant_id,
       role,
+      is_default,
       tenants (
         id,
         name,
@@ -21,15 +22,25 @@ export default async function BookingRulesPage() {
       )
     `)
     .eq('user_id', user.id)
-    .single()
 
-  if (tenantError || !userTenant?.tenants) {
+  if (tenantError) {
     return (
       <div className="p-6">
         <div className="text-red-600">Error loading tenant information</div>
       </div>
     )
   }
+
+  if (!userTenants || userTenants.length === 0) {
+    return (
+      <div className="p-6">
+        <div className="text-red-600">No tenant access found</div>
+      </div>
+    )
+  }
+
+  // Find the default tenant or use the first one
+  const userTenant = userTenants.find(ut => ut.is_default) || userTenants[0]
 
   return (
     <div className="p-6">
