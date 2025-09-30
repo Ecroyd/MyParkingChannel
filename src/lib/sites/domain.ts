@@ -1,5 +1,10 @@
 export function baseSitesURL() {
-  const raw = process.env.NEXT_PUBLIC_SITES_BASE_DOMAIN!;
+  // Use production domain when NODE_ENV is production, otherwise use the configured domain
+  const isProduction = process.env.NODE_ENV === 'production';
+  const raw = isProduction 
+    ? 'https://myparkingchannel.app'
+    : process.env.NEXT_PUBLIC_SITES_BASE_DOMAIN!;
+  
   try { return new URL(raw); } catch { throw new Error(`Bad NEXT_PUBLIC_SITES_BASE_DOMAIN: ${raw}`); }
 }
 
