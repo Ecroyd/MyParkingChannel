@@ -59,9 +59,9 @@ async function getTenantByDomain(domain: string) {
   return null
 }
 
-export default async function SiteEntry({ params }: { params: { domain: string } }) {
+export default async function SiteEntry({ params }: { params: Promise<{ domain: string }> }) {
   // Get domain from the URL
-  const domain = params.domain
+  const { domain } = await params
 
   // Look up tenant by domain
   const tenant = await getTenantByDomain(domain)
