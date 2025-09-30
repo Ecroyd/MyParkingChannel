@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Save, ArrowLeft, Key } from 'lucide-react';
 import Link from 'next/link';
+import { siteUrlForTenantSlug } from '@/lib/sites/domain';
 
 type Tenant = {
   id: string;
@@ -167,12 +168,12 @@ export default function TenantDetailClient({ tenant }: TenantDetailClientProps) 
               <label className="text-sm font-medium text-gray-600">Site URL</label>
               <p className="text-sm text-gray-900">
                 <a 
-                  href={`${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3002'}/sites/${tenant.slug}`}
+                  href={siteUrlForTenantSlug(tenant.slug)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-blue-600 hover:underline"
                 >
-                  {process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3002'}/sites/{tenant.slug}
+                  {siteUrlForTenantSlug(tenant.slug)}
                 </a>
               </p>
             </div>

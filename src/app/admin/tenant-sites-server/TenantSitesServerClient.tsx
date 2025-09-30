@@ -8,6 +8,7 @@ import EmptyState from '@/components/admin/EmptyState';
 import WidgetEmbedCard from '@/components/admin/WidgetEmbedCard';
 import ContactSettingsForm from '@/components/admin/ContactSettingsForm';
 import { ExternalLink, Eye, Globe, Building2, Settings } from 'lucide-react';
+import { siteUrlForTenantSlug } from '@/lib/sites/domain';
 
 type Tenant = {
   id: string;
@@ -105,7 +106,7 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => window.open(`http://${tenant.slug}.localhost:3002/`, '_blank')}
+                          onClick={() => window.open(siteUrlForTenantSlug(tenant.slug), '_blank')}
                           className="flex items-center gap-2 flex-1 sm:flex-none"
                         >
                           <Globe className="h-4 w-4" />
@@ -114,7 +115,7 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => window.open(`http://${tenant.slug}.localhost:3002/?preview=1`, '_blank')}
+                          onClick={() => window.open(siteUrlForTenantSlug(tenant.slug, '/?preview=1'), '_blank')}
                           className="flex items-center gap-2 flex-1 sm:flex-none"
                         >
                           <Eye className="h-4 w-4" />
