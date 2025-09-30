@@ -181,6 +181,11 @@ export default async function TenantHome({
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(ld) }} />
       {faqLd && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqLd) }} />}
       
+      {/* 🔥 DEBUGGING: This should be visible if the page is loading 🔥 */}
+      <div style={{background: 'red', color: 'white', padding: '20px', textAlign: 'center', fontSize: '24px'}}>
+        🔥 PAGE IS LOADING - DEBUGGING ACTIVE 🔥
+      </div>
+      
       <Header title={title} logoUrl={p?.logo_url} />
       <main className="max-w-6xl mx-auto px-4 pt-14 pb-10">
         {/* HERO */}
