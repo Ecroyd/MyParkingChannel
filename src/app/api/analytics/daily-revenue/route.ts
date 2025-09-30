@@ -38,30 +38,45 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 
-    // Use admin client to bypass RLS and tenant access checks in functions
-    console.log('🔍 Analytics Daily Revenue: Calling analytics_daily_revenue with:', {
-      tenantId,
-      start,
-      end
-    });
+    // Query data directly instead of using functions with tenant access control
+    console.log('🔍 Analytics Daily Revenue: Querying bookings directly for tenant:', tenantId);
     
-    const { data, error } = await adminSupabase.rpc("analytics_daily_revenue", {
-      p_tenant_id: tenantId,
-      p_start: start,
-      p_end: end,
-    });
+    const { data: bookings, error } = await adminSupabase
+      .from('bookings')
+      .select('money_received, extension_revenue, start_at')
+      .eq('tenant_id', tenantId)
+      .gte('start_at', `${start}T00:00:00.000Z`)
+      .lt('start_at', `${end}T23:59:59.999Z`);
 
     if (error) {
       console.error("❌ Analytics Daily Revenue Error:", error);
-      console.error("❌ Error details:", {
-        code: error.code,
-        message: error.message,
-        details: error.details,
-        hint: error.hint
-      });
-      return NextResponse.json({ error: error.message, details: error }, { status: 500 });
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    // Process the data to match the expected format
+    const dailyData = new Map();
+    
+    bookings?.forEach(booking => {
+      const date = booking.start_at.split('T')[0]; // Extract date part
+      if (!dailyData.has(date)) {
+        dailyData.set(date, {
+          date,
+          bookings_count: 0,
+          booking_revenue: 0,
+          extension_revenue: 0,
+          total_revenue: 0,
+          occupancy_rate: 0
+        });
+      }
+      
+      const data = dailyData.get(date);
+      data.bookings_count++;
+      data.booking_revenue += booking.money_received || 0;
+      data.extension_revenue += booking.extension_revenue || 0;
+      data.total_revenue = data.booking_revenue + data.extension_revenue;
+    });
+
+    const data = Array.from(dailyData.values()).sort((a, b) => a.date.localeCompare(b.date));
     console.log('✅ Analytics Daily Revenue Success:', data);
 
     if (format === "csv") {
