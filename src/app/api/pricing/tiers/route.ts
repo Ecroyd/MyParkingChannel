@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
   // Transform tenant_pricing data to match expected format
   const tiers = [
     {
-      id: pricing.id || "default",
+      id: pricing.tenant_id || "default",
       code: "standard",
       label: "Standard Rate",
       type: "flat",
