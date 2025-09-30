@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSupabase } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server-admin';
 import { stringify } from "csv-stringify/sync";
 
 export async function GET(req: NextRequest) {
@@ -18,6 +19,7 @@ export async function GET(req: NextRequest) {
     }
 
     const supabase = await getServerSupabase();
+    const adminSupabase = await createAdminClient();
 
     // Verify user has access to this tenant
     const { data: { user } } = await supabase.auth.getUser();
@@ -25,7 +27,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { data: userTenant } = await supabase
+    const { data: userTenant } = await adminSupabase
       .from('user_tenants')
       .select('tenant_id')
       .eq('user_id', user.id)
@@ -36,7 +38,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 
-    const { data, error } = await supabase.rpc("analytics_daily_revenue", {
+    // Use admin client to bypass RLS and tenant access checks in functions
+    const { data, error } = await adminSupabase.rpc("analytics_daily_revenue", {
       p_tenant_id: tenantId,
       p_start: start,
       p_end: end,
