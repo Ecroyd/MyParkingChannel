@@ -60,8 +60,8 @@ async function getTenantByDomain(domain: string) {
   return null
 }
 
-export default async function Page({ params }: { params: { domain: string } }) {
-  const domain = params.domain
+export default async function Page({ params }: { params: Promise<{ domain: string }> }) {
+  const { domain } = await params
 
   // Look up the tenant from domain
   const tenant = await getTenantByDomain(domain)
