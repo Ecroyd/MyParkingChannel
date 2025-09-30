@@ -269,6 +269,8 @@ function RulesPane(){
     const j=await r.json();
     if(j.error) {
       console.error('Pricing rule error:', j);
+      console.error('Error details:', j.details);
+      console.error('Rule data sent:', j.ruleData);
       toast.error(j.error);
     } else { 
       toast.success("Rule added"); 
