@@ -106,11 +106,11 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => window.open('/sites/testbusiness', '_blank')}
+                          onClick={() => window.open('/test-subdomain', '_blank')}
                           className="flex items-center gap-2 flex-1 sm:flex-none"
                         >
                           <Globe className="h-4 w-4" />
-                          Direct Site Test
+                          Subdomain Test
                         </Button>
                         <Button
                           size="sm"

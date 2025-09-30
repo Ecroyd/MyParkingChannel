@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
     
     const { data: bookings, error } = await adminSupabase
       .from('bookings')
-      .select('money_received, extension_revenue, start_at')
+      .select('money_received, start_at')
       .eq('tenant_id', tenantId)
       .gte('start_at', `${start}T00:00:00.000Z`)
       .lt('start_at', `${end}T23:59:59.999Z`);
@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
     // Process the data to match the expected format
     const totalBookings = bookings?.length || 0;
     const totalRevenue = bookings?.reduce((sum, booking) => sum + (booking.money_received || 0), 0) || 0;
-    const extensionRevenue = bookings?.reduce((sum, booking) => sum + (booking.extension_revenue || 0), 0) || 0;
+    const extensionRevenue = 0; // No extension_revenue column exists
     const avgDailyRevenue = totalBookings > 0 ? totalRevenue / Math.ceil((new Date(end).getTime() - new Date(start).getTime()) / (1000 * 60 * 60 * 24)) : 0;
     
     const data = [{
@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
       total_revenue: totalRevenue + extensionRevenue,
       avg_daily_revenue: avgDailyRevenue,
       peak_occupancy_rate: 0, // Would need capacity data to calculate
-      total_extensions: bookings?.filter(b => b.extension_revenue > 0).length || 0,
+      total_extensions: 0, // No extension data available
       extension_revenue: extensionRevenue
     }];
 

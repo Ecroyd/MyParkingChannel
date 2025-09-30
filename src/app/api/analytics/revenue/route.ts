@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
     
     const { data: bookings, error } = await adminSupabase
       .from('bookings')
-      .select('source, money_received, extension_revenue')
+      .select('source, money_received')
       .eq('tenant_id', tenantId)
       .gte('start_at', `${start}T00:00:00.000Z`)
       .lt('start_at', `${end}T23:59:59.999Z`);
@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
       const data = channelData.get(channel);
       data.bookings_count++;
       data.booking_revenue += booking.money_received || 0;
-      data.extension_revenue += booking.extension_revenue || 0;
+      data.extension_revenue += 0; // No extension_revenue column exists
       data.total_revenue = data.booking_revenue + data.extension_revenue;
     });
 
