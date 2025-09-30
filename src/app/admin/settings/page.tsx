@@ -75,13 +75,22 @@ export default function SettingsPage() {
         return
       }
 
-      // Update password using Supabase auth
-      const { error } = await supabase.auth.updateUser({
-        password: passwordData.newPassword
+      // Update password using API endpoint
+      const response = await fetch('/api/admin/settings/password', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          currentPassword: passwordData.currentPassword,
+          newPassword: passwordData.newPassword
+        })
       })
 
-      if (error) {
-        setPasswordMessage({ type: 'error', text: error.message })
+      const result = await response.json()
+
+      if (!result.success) {
+        setPasswordMessage({ type: 'error', text: result.error || 'Failed to update password' })
       } else {
         setPasswordMessage({ type: 'success', text: 'Password updated successfully!' })
         setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' })
