@@ -111,6 +111,11 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json();
   
+  // Validate required fields
+  if (!body.tier_id) {
+    return NextResponse.json({ error: "tier_id is required" }, { status: 400 });
+  }
+  
   // Add tenant_id to the body before inserting
   const ruleData = {
     ...body,
@@ -127,7 +132,10 @@ export async function POST(req: NextRequest) {
     .select("*")
     .single();
     
-  if (error && error.code === 'PGRST116') {
+  if (error) {
+    console.error('Pricing rules insert error:', error);
+    // If it's a table not found error, try booking_rules
+    if (error.code === 'PGRST116') {
     // pricing_rules table doesn't exist, try booking_rules
     console.log('pricing_rules table does not exist, trying booking_rules');
     
@@ -142,16 +150,25 @@ export async function POST(req: NextRequest) {
       notes: body.note || null
     };
     
-    const result = await adminSupabase
-      .from("booking_rules")
-      .insert(bookingRuleData)
-      .select("*")
-      .single();
-    data = result.data;
-    error = result.error;
+      const result = await adminSupabase
+        .from("booking_rules")
+        .insert(bookingRuleData)
+        .select("*")
+        .single();
+      data = result.data;
+      error = result.error;
+    } else {
+      // Other error, return it directly with more details
+      console.error('Pricing rules insert failed:', error);
+      return NextResponse.json({ 
+        error: error.message, 
+        details: error,
+        ruleData: ruleData 
+      }, { status: 400 });
+    }
   }
     
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) return NextResponse.json({ error: error.message, details: error }, { status: 400 });
   return NextResponse.json({ data }, { status: 201 });
 }
 
