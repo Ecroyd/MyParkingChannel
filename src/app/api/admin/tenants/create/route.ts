@@ -4,30 +4,64 @@ import { createAdminClient } from '@/lib/supabase/server-admin';
 
 export async function POST(req: Request) {
   try {
-    const { name, slug, ownerEmail, ownerPassword } = await req.json();
+    const payload = await req.json();
+    
+    // Handle both old and new payload formats
+    let name, slug, ownerEmail, ownerPassword, timezone, capacity;
+    
+    if (payload.tenant && payload.owner) {
+      // New format: { tenant: {...}, owner: {...} }
+      name = payload.tenant.name;
+      slug = payload.tenant.slug;
+      timezone = payload.tenant.timezone || 'Europe/London';
+      capacity = payload.tenant.capacity || 0;
+      ownerEmail = payload.owner.email;
+      ownerPassword = payload.owner.password;
+    } else {
+      // Old format: { name, slug, ownerEmail, ownerPassword }
+      name = payload.name;
+      slug = payload.slug;
+      ownerEmail = payload.ownerEmail;
+      ownerPassword = payload.ownerPassword;
+      timezone = 'Europe/London';
+      capacity = 0;
+    }
 
-    if (!name || !slug || !ownerEmail || !ownerPassword) {
-      return NextResponse.json({ error: { code: 'INVALID_INPUT', message: 'Missing fields' } }, { status: 400 });
+    if (!name || !ownerEmail) {
+      return NextResponse.json({ error: { code: 'INVALID_INPUT', message: 'Missing required fields: name and ownerEmail' } }, { status: 400 });
     }
 
     const sb = await createAdminClient();
 
-    // 1. Create Auth user
-    const { data: userRes, error: userErr } = await sb.auth.admin.createUser({
-      email: ownerEmail,
-      password: ownerPassword,
-      email_confirm: true,
-    });
-    if (userErr || !userRes?.user?.id) throw userErr ?? new Error('User creation failed');
-    const ownerUserId = userRes.user.id;
+    let ownerUserId: string;
+
+    if (ownerPassword) {
+      // 1. Create Auth user with password
+      const { data: userRes, error: userErr } = await sb.auth.admin.createUser({
+        email: ownerEmail,
+        password: ownerPassword,
+        email_confirm: true,
+      });
+      if (userErr || !userRes?.user?.id) throw userErr ?? new Error('User creation failed');
+      ownerUserId = userRes.user.id;
+    } else {
+      // 1. Create Auth user without password (invitation)
+      const { data: userRes, error: userErr } = await sb.auth.admin.createUser({
+        email: ownerEmail,
+        email_confirm: false,
+      });
+      if (userErr || !userRes?.user?.id) throw userErr ?? new Error('User creation failed');
+      ownerUserId = userRes.user.id;
+    }
 
     // 2. Create tenant
     const { data: tenantRes, error: tenantErr } = await sb
       .from('tenants')
       .insert({
         name,
-        slug,
-        timezone: 'Europe/London',
+        slug: slug || null, // Allow null slug for auto-generation
+        timezone,
+        default_capacity: capacity,
         status: 'active',
       })
       .select('id')
@@ -49,7 +83,7 @@ export async function POST(req: Request) {
     // 4. Create site
     await sb.from('sites').insert({
       tenant_id: tenantId,
-      slug,
+      slug: slug || name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
       status: 'draft',
       template: 'default',
     });
