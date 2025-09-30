@@ -44,7 +44,7 @@ async function getTenantByDomain(domain: string) {
   // Try custom domains
   const { data: custom } = await supabase
     .from('site_domains')
-    .select('site_id, sites(id, tenant_id, slug, tenants!inner(id, slug, name))')
+    .select('site_id, sites!inner(id, tenant_id, slug, tenants!inner(id, slug, name))')
     .eq('domain', domain)
     .maybeSingle()
 
