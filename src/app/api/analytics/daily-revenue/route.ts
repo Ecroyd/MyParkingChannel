@@ -39,6 +39,12 @@ export async function GET(req: NextRequest) {
     }
 
     // Use admin client to bypass RLS and tenant access checks in functions
+    console.log('🔍 Analytics Daily Revenue: Calling analytics_daily_revenue with:', {
+      tenantId,
+      start,
+      end
+    });
+    
     const { data, error } = await adminSupabase.rpc("analytics_daily_revenue", {
       p_tenant_id: tenantId,
       p_start: start,
@@ -46,9 +52,17 @@ export async function GET(req: NextRequest) {
     });
 
     if (error) {
-      console.error("Daily analytics error:", error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("❌ Analytics Daily Revenue Error:", error);
+      console.error("❌ Error details:", {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint
+      });
+      return NextResponse.json({ error: error.message, details: error }, { status: 500 });
     }
+
+    console.log('✅ Analytics Daily Revenue Success:', data);
 
     if (format === "csv") {
       const csv = stringify(data, { 

@@ -106,11 +106,11 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => window.open(siteUrlForTenantSlug(tenant.slug), '_blank')}
+                          onClick={() => window.open('/this-should-404', '_blank')}
                           className="flex items-center gap-2 flex-1 sm:flex-none"
                         >
                           <Globe className="h-4 w-4" />
-                          Live Site
+                          Live Site (404 Test)
                         </Button>
                         <Button
                           size="sm"
