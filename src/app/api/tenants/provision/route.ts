@@ -44,6 +44,11 @@ export async function POST(req: Request) {
     if (!(await exists("/book"))) await sb.from("site_pages").insert({ site_id: siteRow.id, path: "/book", title: "Book", content_md: "" });
   }
 
-  const link = `${process.env.NEXT_PUBLIC_SITES_BASE_DOMAIN || "http://localhost:3002"}/t/${slug || ""}`;
+  // Use production domain when NODE_ENV is production, otherwise use the configured domain
+  const isProduction = process.env.NODE_ENV === 'production';
+  const baseDomain = isProduction 
+    ? 'https://myparkingchannel.app'
+    : (process.env.NEXT_PUBLIC_SITES_BASE_DOMAIN || "http://localhost:3002");
+  const link = `${baseDomain}/t/${slug || ""}`;
   return NextResponse.json({ ok: true, tenantId: tId, previewUrl: link });
 }
