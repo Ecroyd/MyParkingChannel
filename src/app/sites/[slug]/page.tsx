@@ -6,6 +6,9 @@ import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";
 
+console.log('🔥🔥🔥 SITES/[SLUG]/PAGE.TSX FILE LOADED 🔥🔥🔥');
+console.log('🔥🔥🔥 TIMESTAMP:', new Date().toISOString(), '🔥🔥🔥');
+
 async function getProfile(slug: string) {
   console.log('📋 getProfile: Starting for slug:', slug);
   
@@ -90,6 +93,7 @@ export default async function TenantHome({
   params: Promise<{ slug: string }>;
   searchParams: Promise<{ preview?: string }>;
 }) {
+  console.log('🚀🚀🚀 TENANT HOME COMPONENT EXECUTING 🚀🚀🚀');
   console.log('🏠 TenantHome: Starting to load site');
   
   const resolvedParams = await params;
