@@ -7,7 +7,10 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { CalendarDays, Search, Plus, Filter } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { CalendarDays, Search, Plus, Filter, Trash2, Eye, Edit } from 'lucide-react';
+import BookingDetailModal from '@/components/bookings/BookingDetailModal';
+import { toast } from 'sonner';
 
 interface BookingsServerClientProps {
   user: any;
@@ -21,6 +24,10 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedBookings, setSelectedBookings] = useState<Set<string>>(new Set());
+  const [selectedBooking, setSelectedBooking] = useState<any>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const getDateRange = () => {
     const today = new Date();
@@ -104,6 +111,61 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  const handleBookingClick = (booking: any) => {
+    setSelectedBooking(booking);
+    setModalOpen(true);
+  };
+
+  const handleSelectBooking = (bookingId: string, checked: boolean) => {
+    const newSelected = new Set(selectedBookings);
+    if (checked) {
+      newSelected.add(bookingId);
+    } else {
+      newSelected.delete(bookingId);
+    }
+    setSelectedBookings(newSelected);
+  };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedBookings(new Set(filteredBookings.map(b => b.id)));
+    } else {
+      setSelectedBookings(new Set());
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedBookings.size === 0) return;
+    
+    setLoading(true);
+    try {
+      const response = await fetch('/api/admin/bookings/bulk-delete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          bookingIds: Array.from(selectedBookings),
+          tenantId: tenant.id
+        }),
+      });
+
+      if (response.ok) {
+        toast.success(`Successfully deleted ${selectedBookings.size} booking(s)`);
+        setSelectedBookings(new Set());
+        // Refresh the page to get updated data
+        window.location.reload();
+      } else {
+        const error = await response.json();
+        toast.error(error.message || 'Failed to delete bookings');
+      }
+    } catch (error) {
+      toast.error('Failed to delete bookings');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -193,10 +255,28 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
       {/* Bookings List */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CalendarDays className="w-5 h-5" />
-            Bookings ({filteredBookings.length})
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <CalendarDays className="w-5 h-5" />
+              Bookings ({filteredBookings.length})
+            </CardTitle>
+            {selectedBookings.size > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600">
+                  {selectedBookings.size} selected
+                </span>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleBulkDelete}
+                  disabled={loading}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete Selected
+                </Button>
+              </div>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {filteredBookings.length === 0 ? (
@@ -209,38 +289,65 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
             </div>
           ) : (
             <div className="space-y-4">
+              {/* Select All Header */}
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                <Checkbox
+                  checked={selectedBookings.size === filteredBookings.length && filteredBookings.length > 0}
+                  onCheckedChange={handleSelectAll}
+                />
+                <span className="text-sm font-medium text-gray-700">
+                  Select All ({filteredBookings.length} bookings)
+                </span>
+              </div>
+
               {filteredBookings.map((booking) => (
                 <div key={booking.id} className="border rounded-lg p-4 hover:bg-gray-50">
                   <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="font-medium text-gray-900">
-                          {booking.customer_name || 'Unknown Customer'}
-                        </h3>
-                        <Badge className={getStatusColor(booking.status)}>
-                          {booking.status.replace('_', ' ').toUpperCase()}
-                        </Badge>
-                        {booking.reference && (
-                          <span className="text-sm text-gray-500">#{booking.reference}</span>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-600">
-                        <div>
-                          <span className="font-medium">Vehicle:</span> {booking.plate} - {booking.car_make} {booking.car_model}
+                    <div className="flex items-center gap-3 flex-1">
+                      <Checkbox
+                        checked={selectedBookings.has(booking.id)}
+                        onCheckedChange={(checked) => handleSelectBooking(booking.id, checked as boolean)}
+                      />
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <h3 className="font-medium text-gray-900">
+                            {booking.customer_name || 'Unknown Customer'}
+                          </h3>
+                          <Badge className={getStatusColor(booking.status)}>
+                            {booking.status.replace('_', ' ').toUpperCase()}
+                          </Badge>
+                          {booking.reference && (
+                            <span className="text-sm text-gray-500">#{booking.reference}</span>
+                          )}
                         </div>
-                        <div>
-                          <span className="font-medium">Period:</span> {formatDate(booking.start_at)} - {formatDate(booking.end_at)}
-                        </div>
-                        <div>
-                          <span className="font-medium">Amount:</span> £{booking.money_received || 0}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-600">
+                          <div>
+                            <span className="font-medium">Vehicle:</span> {booking.plate} - {booking.car_make} {booking.car_model}
+                          </div>
+                          <div>
+                            <span className="font-medium">Period:</span> {formatDate(booking.start_at)} - {formatDate(booking.end_at)}
+                          </div>
+                          <div>
+                            <span className="font-medium">Amount:</span> £{booking.money_received || 0}
+                          </div>
                         </div>
                       </div>
                     </div>
                     <div className="flex gap-2">
-                      <Button variant="outline" size="sm">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleBookingClick(booking)}
+                      >
+                        <Eye className="w-4 h-4 mr-2" />
                         View
                       </Button>
-                      <Button variant="outline" size="sm">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleBookingClick(booking)}
+                      >
+                        <Edit className="w-4 h-4 mr-2" />
                         Edit
                       </Button>
                     </div>
@@ -251,6 +358,20 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
           )}
         </CardContent>
       </Card>
+
+      {/* Booking Details Modal */}
+      {modalOpen && selectedBooking && (
+        <BookingDetailModal
+          booking={selectedBooking}
+          open={modalOpen}
+          onOpenChange={setModalOpen}
+          onBookingUpdated={() => {
+            // Refresh the page to get updated data
+            window.location.reload();
+          }}
+          tenantId={tenant.id}
+        />
+      )}
     </div>
   );
 }

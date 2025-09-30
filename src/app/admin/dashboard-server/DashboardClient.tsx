@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import DemandCurve from '@/components/charts/DemandCurve';
-import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
+import BookingDetailModal from '@/components/bookings/BookingDetailModal';
 
 interface DashboardClientProps {
   user: any;
@@ -154,10 +154,15 @@ export default function DashboardClient({
 
       {/* Booking Details Modal */}
       {modalOpen && selectedBooking && (
-        <BookingDetailsModal
+        <BookingDetailModal
           booking={selectedBooking}
           open={modalOpen}
-          onClose={() => setModalOpen(false)}
+          onOpenChange={setModalOpen}
+          onBookingUpdated={() => {
+            // Refresh the page to get updated data
+            window.location.reload();
+          }}
+          tenantId={tenant.id}
         />
       )}
     </div>
