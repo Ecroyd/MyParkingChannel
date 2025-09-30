@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,28 +48,21 @@ export default function SiteSeoPage() {
         console.log('Site SEO status response:', statusData);
         setTenantId(statusData.tenantId);
 
-        // Load existing profile data
-        const { data: profile, error: profileError } = await supabase
-          .from("tenant_public_profile")
-          .select("*")
-          .eq("tenant_id", statusData.tenantId)
-          .maybeSingle();
+        // Load existing profile data using API endpoint
+        const dataResponse = await fetch('/api/admin/site-seo/data');
+        const dataResult = await dataResponse.json();
 
-        if (profileError) {
-          console.error("Error loading profile:", profileError);
-          if (profileError.code === 'PGRST116') {
-            // Table doesn't exist
-            toast({
-              title: "Setup Required",
-              description: "The tenant_public_profile table needs to be created. Please run the setup script.",
-              variant: "destructive"
-            });
-            return;
-          }
+        if (!dataResult.success) {
+          toast({
+            title: "Error",
+            description: dataResult.error || "Failed to load profile data",
+            variant: "destructive"
+          });
+          return;
         }
 
-        console.log("Loaded profile:", profile);
-        setData(profile || { 
+        console.log("Loaded profile:", dataResult.data);
+        setData(dataResult.data || { 
           tenant_id: statusData.tenantId, 
           features: ["CCTV", "24/7 Access", "Free Shuttle", "ANPR-protected"],
           faq: [],
@@ -89,42 +81,8 @@ export default function SiteSeoPage() {
     };
 
     loadData();
-  }, [supabase, toast]);
+  }, [toast]);
 
-  // Test function to debug Supabase connection
-  const testSupabaseConnection = async () => {
-    try {
-      console.log("Testing Supabase connection...");
-      
-      // First check if user is authenticated
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      console.log("Auth check:", { user: user?.id, authError });
-      
-      if (authError || !user) {
-        return { success: false, error: { message: "User not authenticated", code: "AUTH_ERROR" } };
-      }
-      
-      // Test basic table access
-      const { data, error } = await supabase
-        .from("tenant_public_profile")
-        .select("tenant_id, business_name, latitude, longitude")
-        .limit(1);
-      
-      console.log("Connection test result:", { data, error });
-      console.log("Error details:", {
-        message: error?.message,
-        code: error?.code,
-        details: error?.details,
-        hint: error?.hint,
-        fullError: JSON.stringify(error, null, 2)
-      });
-      
-      return { success: !error, error };
-    } catch (err) {
-      console.error("Connection test failed:", err);
-      return { success: false, error: err };
-    }
-  };
 
   const handleSave = async () => {
     if (!tenantId) {
@@ -139,19 +97,6 @@ export default function SiteSeoPage() {
     
     setSaving(true);
     try {
-      // Test connection first
-      const connectionTest = await testSupabaseConnection();
-      if (!connectionTest.success) {
-        toast({
-          title: "Connection Error",
-          description: "Cannot connect to database. Please check your connection.",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      console.log("Supabase client:", supabase);
-      console.log("Supabase client type:", typeof supabase);
       console.log("Tenant ID:", tenantId);
       console.log("Data object:", data);
       console.log("Logo URL in save data:", data.logo_url);
@@ -161,81 +106,34 @@ export default function SiteSeoPage() {
       const updateData = { ...data, tenant_id: tenantId };
       console.log("Saving data:", updateData);
       
-      // Test if the coordinate columns exist and can be accessed
-      console.log("Testing coordinate columns...");
-      const { data: testData, error: testError } = await supabase
-        .from("tenant_public_profile")
-        .select("tenant_id, latitude, longitude")
-        .eq("tenant_id", tenantId)
-        .limit(1);
-      console.log("Test query result:", { testData, testError });
+      // Use API endpoint instead of direct Supabase calls
+      const response = await fetch('/api/admin/site-seo/data', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updateData),
+      });
 
-      if (testError && testError.message?.includes('column') && testError.message?.includes('does not exist')) {
-        throw new Error("The latitude/longitude columns don't exist. Please run the migration script: supabase-migrations/add-coordinates-to-tenant-public-profile.sql");
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to save data');
       }
 
-      console.log("About to call Supabase upsert with data:", JSON.stringify(updateData, null, 2));
-      
-      const { data: result, error } = await supabase
-        .from("tenant_public_profile")
-        .upsert(updateData)
-        .eq("tenant_id", tenantId)
-        .select();
-
-      console.log("Supabase upsert result:", { result, error });
-      console.log("Result type:", typeof result);
-      console.log("Error type:", typeof error);
-      console.log("Error is null?", error === null);
-      console.log("Error is undefined?", error === undefined);
-
-      if (error) {
-        console.error("Supabase error details:", {
-          message: error.message,
-          code: error.code,
-          details: error.details,
-          hint: error.hint,
-          fullError: JSON.stringify(error, null, 2)
-        });
-        if (error.code === 'PGRST116') {
-          throw new Error("The tenant_public_profile table doesn't exist. Please run the setup script first.");
-        }
-        throw new Error(`Database error: ${error.message || 'Unknown error'}`);
-      }
-
+      console.log("Save result:", result);
       toast({
         title: "Success",
         description: "Site & SEO settings saved successfully"
       });
     } catch (error: any) {
       console.error("Error saving details:", error);
-      console.error("Error type:", typeof error);
-      console.error("Error constructor:", error?.constructor?.name);
-      console.error("Error message:", error?.message);
-      console.error("Error code:", error?.code);
-      console.error("Error details:", error?.details);
-      console.error("Error hint:", error?.hint);
-      console.error("Error stack:", error?.stack);
-      console.error("Full error object:", JSON.stringify(error, null, 2));
-      
-      // Try to parse the error if it's a string
-      if (typeof error === 'string') {
-        try {
-          const parsedError = JSON.parse(error);
-          console.error("Parsed error:", parsedError);
-        } catch (parseError) {
-          console.error("Could not parse error as JSON:", parseError);
-        }
-      }
       
       let errorMessage = "Failed to save settings";
       if (error?.message) {
         errorMessage = error.message;
-      } else if (error?.code) {
-        errorMessage = `Database error: ${error.code}`;
       } else if (typeof error === 'string') {
         errorMessage = error;
-      } else if (error?.details) {
-        errorMessage = `Database error: ${error.details}`;
       } else {
         errorMessage = `Unknown error: ${JSON.stringify(error)}`;
       }
@@ -348,7 +246,7 @@ export default function SiteSeoPage() {
         onLogoUpdated={async (logoUrl) => {
           setData((prev: any) => ({ ...prev, logo_url: logoUrl }))
           
-          // Immediately save the logo URL to the database
+          // Immediately save the logo URL to the database using API endpoint
           try {
             const updateData = { 
               ...data, 
@@ -359,13 +257,18 @@ export default function SiteSeoPage() {
             console.log("Saving logo URL:", logoUrl);
             console.log("Update data for logo save:", updateData);
             
-            const { error } = await supabase
-              .from("tenant_public_profile")
-              .upsert(updateData)
-              .eq("tenant_id", tenantId);
+            const response = await fetch('/api/admin/site-seo/data', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(updateData),
+            });
+
+            const result = await response.json();
               
-            if (error) {
-              console.error("Error saving logo:", error);
+            if (!result.success) {
+              console.error("Error saving logo:", result.error);
               toast({
                 title: "Error",
                 description: "Failed to save logo to database",
