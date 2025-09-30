@@ -57,10 +57,6 @@ export default function TenantsClient({ initialTenants }: TenantsClientProps) {
   };
 
   const handleDelete = async (tenantId: string) => {
-    if (!confirm('Are you sure you want to delete this tenant? This action cannot be undone.')) {
-      return;
-    }
-
     setActionLoading(tenantId);
     try {
       const response = await fetch(`/api/admin/tenants/${tenantId}`, {

@@ -13,7 +13,9 @@ import {
   Calendar,
   Globe,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Edit,
+  Trash2
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import Link from 'next/link';
@@ -35,6 +37,7 @@ interface TenantCardProps {
 
 export default function TenantCard({ tenant, onDelete, onCopyWidget }: TenantCardProps) {
   const [loading, setLoading] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   
   const hasOwner = tenant.user_tenants.some(ut => ut.role === 'owner');
   const ownerCount = tenant.user_tenants.filter(ut => ut.role === 'owner').length;
@@ -129,9 +132,9 @@ export default function TenantCard({ tenant, onDelete, onCopyWidget }: TenantCar
         {/* Action Buttons */}
         <div className="flex gap-2">
           <Button asChild variant="outline" size="sm" className="flex-1">
-            <Link href={`/admin/tenants/${tenant.id}`}>
-              <Settings className="h-4 w-4 mr-1" />
-              Manage
+            <Link href={`/admin/tenants/${tenant.id}/edit`}>
+              <Edit className="h-4 w-4 mr-1" />
+              Edit
             </Link>
           </Button>
           
@@ -143,6 +146,20 @@ export default function TenantCard({ tenant, onDelete, onCopyWidget }: TenantCar
           </Button>
         </div>
         
+        {/* Delete Button */}
+        {onDelete && (
+          <Button 
+            variant="destructive" 
+            size="sm" 
+            className="w-full"
+            onClick={() => setShowDeleteConfirm(true)}
+            disabled={loading}
+          >
+            <Trash2 className="h-4 w-4 mr-1" />
+            Delete Tenant
+          </Button>
+        )}
+        
         <Button asChild variant="outline" size="sm" className="w-full">
           <Link href={`/sites/${tenant.slug}`} target="_blank">
             <ExternalLink className="h-4 w-4 mr-1" />
@@ -150,6 +167,44 @@ export default function TenantCard({ tenant, onDelete, onCopyWidget }: TenantCar
           </Link>
         </Button>
       </CardContent>
+      
+      {/* Delete Confirmation Dialog */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Tenant</h3>
+            <p className="text-gray-600 mb-4">
+              Are you sure you want to delete <strong>{tenant.name}</strong>? This action cannot be undone and will permanently remove all associated data.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <Button 
+                variant="outline" 
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={loading}
+              >
+                Cancel
+              </Button>
+              <Button 
+                variant="destructive" 
+                onClick={async () => {
+                  setLoading(true);
+                  try {
+                    await onDelete?.(tenant.id);
+                    setShowDeleteConfirm(false);
+                  } catch (error) {
+                    console.error('Error deleting tenant:', error);
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                disabled={loading}
+              >
+                {loading ? 'Deleting...' : 'Delete Tenant'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }

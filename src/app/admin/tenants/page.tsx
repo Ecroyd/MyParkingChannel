@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/server-admin';
 import CreateTenantModal from './CreateTenantModal';
 import AssignOwnerModal from './AssignOwnerModal';
 import OrphansPanel from './OrphansPanel';
+import TenantsClient from './TenantsClient';
 import Link from 'next/link';
 
 export default async function AdminTenantsPage() {
@@ -22,6 +23,12 @@ export default async function AdminTenantsPage() {
     owners?.forEach((o: any) => ownersByTenantId.set(o.tenant_id, o.owner_email));
   }
 
+  // Transform tenants data to include user_tenants for the client component
+  const tenantsWithUsers = (tenants ?? []).map(tenant => ({
+    ...tenant,
+    user_tenants: [] // We'll populate this in the client component if needed
+  }));
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -39,27 +46,7 @@ export default async function AdminTenantsPage() {
 
       <OrphansPanel />
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {(tenants ?? []).map((t) => {
-          const ownerEmail = ownersByTenantId.get(t.id) ?? null;
-          return (
-            <div key={t.id} className="rounded-2xl border p-4 bg-white">
-              <div className="flex items-center justify-between">
-                <div className="font-medium">{t.name}</div>
-                <span className="text-xs rounded-full px-2 py-0.5 border">{t.status}</span>
-              </div>
-              <div className="mt-2 text-sm text-gray-600">/{t.slug} • {t.timezone} • cap {t.default_capacity}</div>
-              <div className="mt-3 text-sm">
-                <span className="text-gray-500">Owner:</span>{' '}
-                {ownerEmail ? ownerEmail : <span className="text-amber-600">No Owner</span>}
-              </div>
-              <div className="mt-4 flex gap-2">
-                <AssignOwnerModal tenantId={t.id} currentOwnerEmail={ownerEmail} />
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <TenantsClient initialTenants={tenantsWithUsers} />
     </div>
   );
 }
