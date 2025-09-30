@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSupabase, getServerSupabaseAdmin } from "@/lib/supabase/server";
+import { getServerSupabase, createAdminClient } from "@/lib/supabase/server";
 
 export async function GET(req: NextRequest) {
   console.log('GET /api/pricing/tiers called');
@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   console.log('User authenticated:', user.id);
 
   // Get user's tenants using admin client to bypass RLS
-  const adminSupabase = await getServerSupabaseAdmin();
+  const adminSupabase = await createAdminClient();
   const { data: userTenants, error: tenantError } = await adminSupabase
     .from('user_tenants')
     .select(`
