@@ -53,8 +53,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "No tenant found" }, { status: 404 });
   }
 
-  // Get pricing data from tenant_pricing table
-  const { data: pricingData, error: pricingError } = await supabase
+  // Get pricing data from tenant_pricing table using admin client
+  const { data: pricingData, error: pricingError } = await adminSupabase
     .from("tenant_pricing")
     .select("*")
     .eq("tenant_id", (tenant as any).id);

@@ -1,9 +1,8 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import BookingWidget from '@/components/booking/BookingWidget'
+import { redirect, notFound } from 'next/navigation'
 
-export default async function SitePage({ params }: { params: Promise<{ domain: string }>}) {
-  const { domain } = await params
+async function getTenantByDomain(domain: string) {
   const cookieStore = await cookies()
   
   const supabase = createServerClient(
@@ -18,44 +17,56 @@ export default async function SitePage({ params }: { params: Promise<{ domain: s
     }
   )
 
-  // Resolve site by domain (primary or custom)
+  // First try to find tenant by domain in tenant_domains table
+  const { data: tenantDomain, error: tenantError } = await supabase
+    .from('tenant_domains')
+    .select('tenant_id, tenants!inner(id, slug, name)')
+    .eq('domain', domain)
+    .maybeSingle()
+
+  if (tenantDomain && tenantDomain.tenants) {
+    const tenant = Array.isArray(tenantDomain.tenants) ? tenantDomain.tenants[0] : tenantDomain.tenants
+    return { id: tenant.id, slug: tenant.slug, name: tenant.name }
+  }
+
+  // Fallback: try to find site by domain and get tenant from there
   const { data: site } = await supabase
     .from('sites')
-    .select('id, tenant_id, slug, primary_domain')
+    .select('id, tenant_id, slug, primary_domain, tenants!inner(id, slug, name)')
     .eq('primary_domain', domain)
     .maybeSingle()
 
-  if (!site) {
-    // try custom domains
-    const { data: custom } = await supabase
-      .from('site_domains')
-      .select('site_id, sites( id, tenant_id, slug, primary_domain )')
-      .eq('domain', domain)
-      .maybeSingle()
-    if (!custom?.sites) return <div className="p-10">Site not found</div>
-    // Create a new site object from custom.sites (it's an array, take the first one)
-    const customSite = Array.isArray(custom.sites) ? custom.sites[0] : custom.sites
-    return (
-      <main className="max-w-3xl mx-auto py-10 space-y-6">
-        <section className="card">
-          <h1 className="text-2xl font-semibold mb-2">Welcome to {customSite.slug}</h1>
-          <p className="text-fg/70">Book your parking below.</p>
-        </section>
-        <BookingWidget tenantSlug={customSite.slug} tenantId={customSite.tenant_id} />
-      </main>
-    )
+  if (site && site.tenants) {
+    const tenant = Array.isArray(site.tenants) ? site.tenants[0] : site.tenants
+    return { id: tenant.id, slug: tenant.slug, name: tenant.name }
   }
 
-  return (
-    <main className="max-w-3xl mx-auto py-10 space-y-6">
-      <section className="card">
-        <h1 className="text-2xl font-semibold mb-2">Welcome to {site.slug}</h1>
-        <p className="text-fg/70">Book your parking below.</p>
-      </section>
+  // Try custom domains
+  const { data: custom } = await supabase
+    .from('site_domains')
+    .select('site_id, sites(id, tenant_id, slug, tenants!inner(id, slug, name))')
+    .eq('domain', domain)
+    .maybeSingle()
 
-      {/* Inline widget version */}
-      <BookingWidget tenantSlug={site.slug} tenantId={site.tenant_id} />
-    </main>
-  )
+  if (custom?.sites?.tenants) {
+    const tenant = Array.isArray(custom.sites.tenants) ? custom.sites.tenants[0] : custom.sites.tenants
+    return { id: tenant.id, slug: tenant.slug, name: tenant.name }
+  }
+
+  return null
+}
+
+export default async function RedirectToTenant({ params }: { params: Promise<{ domain: string }> }) {
+  const { domain } = await params
+  
+  console.log("🌐 Incoming custom domain:", domain)
+
+  const tenant = await getTenantByDomain(domain)
+
+  console.log("🏢 Matched tenant:", tenant)
+
+  if (!tenant) return notFound()
+
+  redirect(`/sites/${tenant.slug}`)
 }
 
