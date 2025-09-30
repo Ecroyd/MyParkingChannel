@@ -1,3 +1,4 @@
+// src/app/site/[domain]/page.tsx
 import { redirect } from 'next/navigation'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
@@ -18,13 +19,13 @@ async function getTenantByDomain(domain: string) {
   )
 
   // First try to find tenant by domain in tenant_domains table
-  const { data: tenantDomain, error: tenantError } = await supabase
+  const { data: tenantDomain } = await supabase
     .from('tenant_domains')
     .select('tenant_id, tenants!inner(id, slug, name)')
     .eq('domain', domain)
     .maybeSingle()
 
-  if (tenantDomain && tenantDomain.tenants) {
+  if (tenantDomain?.tenants) {
     const tenant = Array.isArray(tenantDomain.tenants) ? tenantDomain.tenants[0] : tenantDomain.tenants
     return { id: tenant.id, slug: tenant.slug, name: tenant.name }
   }
@@ -36,7 +37,7 @@ async function getTenantByDomain(domain: string) {
     .eq('primary_domain', domain)
     .maybeSingle()
 
-  if (site && site.tenants) {
+  if (site?.tenants) {
     const tenant = Array.isArray(site.tenants) ? site.tenants[0] : site.tenants
     return { id: tenant.id, slug: tenant.slug, name: tenant.name }
   }
@@ -59,20 +60,18 @@ async function getTenantByDomain(domain: string) {
   return null
 }
 
-export default async function SiteEntry({ params }: { params: Promise<{ domain: string }> }) {
-  // Get domain from the URL
-  const { domain } = await params
+export default async function Page({ params }: { params: { domain: string } }) {
+  const domain = params.domain
 
-  // Look up tenant by domain
+  // Look up the tenant from domain
   const tenant = await getTenantByDomain(domain)
 
   if (!tenant) {
     console.error('❌ No tenant found for domain:', domain)
-    redirect('/')
+    redirect('/') // fallback to home
   }
 
-  // ✅ Found tenant → redirect to correct site
-  const slug = tenant.slug
-  redirect(`/sites/${slug}`)
+  // Redirect to the correct site slug
+  redirect(`/sites/${tenant.slug}`)
 }
 

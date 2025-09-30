@@ -84,7 +84,7 @@ function TiersPane(){
           <Input placeholder="Code" value={draft.code||""} onChange={v=>setDraft(d=>({...d,code:v}))}/>
           <Input placeholder="Label" value={draft.label||""} onChange={v=>setDraft(d=>({...d,label:v}))}/>
           <Select value={draft.type||"multiplier"} onChange={v=>setDraft(d=>({...d,type:v as any}))} options={[
-            ["flat","Flat (cents/day)"],["multiplier","Multiplier (e.g. 1.25)"],["delta","Delta (cents)"]
+            ["flat","Flat (pence/day)"],["multiplier","Multiplier (e.g. 1.25)"],["delta","Delta (pence)"]
           ]}/>
           <Input placeholder="Value" value={(draft.value??"").toString()} onChange={v=>setDraft(d=>({...d,value:Number(v)}))}/>
           <Input placeholder="Color #RRGGBB" value={draft.color||""} onChange={v=>setDraft(d=>({...d,color:v}))}/>
