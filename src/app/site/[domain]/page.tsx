@@ -63,6 +63,8 @@ async function getTenantByDomain(domain: string) {
 export default async function Page({ params }: { params: Promise<{ domain: string }> }) {
   const { domain } = await params
 
+  console.log('🌐 Resolving domain:', domain)
+
   // Look up the tenant from domain
   const tenant = await getTenantByDomain(domain)
 
@@ -70,6 +72,9 @@ export default async function Page({ params }: { params: Promise<{ domain: strin
     console.error('❌ No tenant found for domain:', domain)
     redirect('/') // fallback to home
   }
+
+  console.log('✅ Found tenant:', tenant)
+  console.log('✅ Redirecting to:', `/sites/${tenant.slug}`)
 
   // Redirect to the correct site slug
   redirect(`/sites/${tenant.slug}`)
