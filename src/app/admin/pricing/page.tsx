@@ -10,6 +10,8 @@ type Rule = {
   id:string;
   rate_plan_id?:string|null;
   date_range?:string|null;
+  date_range_start?:string|null;
+  date_range_end?:string|null;
   season_id?:string|null;
   tier_id:string;
   weekdays?:number[]|null;
@@ -204,11 +206,11 @@ function RulesPane(){
   useEffect(()=>{ load(); },[]);
 
   async function getCandidateRanges(): Promise<[string,string][]> {
-    const start=(document.getElementById("dr-start") as HTMLInputElement)?.value;
-    const end=(document.getElementById("dr-end") as HTMLInputElement)?.value;
     const out: [string,string][] = [];
-    if (start && end) out.push([start,end]);
-    if (!start && !end && draft.season_id) {
+    if (draft.date_range_start && draft.date_range_end) {
+      out.push([draft.date_range_start, draft.date_range_end]);
+    }
+    if (!draft.date_range_start && !draft.date_range_end && draft.season_id) {
       const res = await api.get(`/api/pricing/seasons/${draft.season_id}/ranges`);
       const j = await res.json();
       if (j?.data) {
@@ -257,12 +259,22 @@ function RulesPane(){
       if (!proceed) return;
     }
 
-    const drStart=(document.getElementById("dr-start") as HTMLInputElement)?.value;
-    const drEnd=(document.getElementById("dr-end") as HTMLInputElement)?.value;
     const payload:any = {...draft};
-    if(drStart && drEnd) payload.date_range = `[${drStart},${drEnd})`;
-    const r=await api.post("/api/pricing/rules",payload); const j=await r.json();
-    if(j.error) toast.error(j.error); else { toast.success("Rule added"); setDraft({priority:100,is_active:true}); load(); }
+    if(draft.date_range_start && draft.date_range_end) {
+      payload.date_range = `[${draft.date_range_start},${draft.date_range_end})`;
+    }
+    
+    console.log('Sending pricing rule:', payload);
+    const r=await api.post("/api/pricing/rules",payload); 
+    const j=await r.json();
+    if(j.error) {
+      console.error('Pricing rule error:', j);
+      toast.error(j.error);
+    } else { 
+      toast.success("Rule added"); 
+      setDraft({priority:100,is_active:true}); 
+      load(); 
+    }
   };
 
   const toggleActive = async (rule: Rule) => {
@@ -278,8 +290,8 @@ function RulesPane(){
           <Input placeholder="Rate plan id (optional)" value={draft.rate_plan_id||""} onChange={v=>setDraft(d=>({...d,rate_plan_id:v||null}))}/>
           <Select value={draft.tier_id||""} onChange={v=>setDraft(d=>({...d,tier_id:v}))}
             options={[["","Select Tier"],...tiers.map(t=>[t.id,`${t.label} (${t.code})`] as [string, string])]} />
-          <Input id="dr-start" type="date" placeholder="Start (optional)"/>
-          <Input id="dr-end"   type="date" placeholder="End (optional)"/>
+          <Input id="dr-start" type="date" placeholder="Start (optional)" value={draft.date_range_start||""} onChange={v=>setDraft(d=>({...d,date_range_start:v||null}))}/>
+          <Input id="dr-end"   type="date" placeholder="End (optional)" value={draft.date_range_end||""} onChange={v=>setDraft(d=>({...d,date_range_end:v||null}))}/>
           <Input placeholder="Season id (optional)" value={draft.season_id||""} onChange={v=>setDraft(d=>({...d,season_id:v||null}))}/>
           <Input placeholder="Channel (optional)" value={draft.channel||""} onChange={v=>setDraft(d=>({...d,channel:v||null}))}/>
           <Input placeholder="Min stay (optional)" value={(draft.min_stay??"").toString()} onChange={v=>setDraft(d=>({...d,min_stay:v?Number(v):null}))}/>
