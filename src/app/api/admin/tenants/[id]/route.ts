@@ -72,19 +72,37 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { sb } = await requirePlatformAdmin();
+    const { adminClient } = await requirePlatformAdmin();
     const { id } = await params;
 
-    // Delete tenant (this will cascade to user_tenants due to foreign key)
-    const { error } = await sb
+    console.log('Deleting tenant:', id);
+
+    // First, delete all user_tenants relationships for this tenant
+    // This prevents RLS recursion issues
+    const { error: userTenantsError } = await adminClient
+      .from('user_tenants')
+      .delete()
+      .eq('tenant_id', id);
+
+    if (userTenantsError) {
+      console.error('Error deleting user_tenants:', userTenantsError);
+      return NextResponse.json({ error: `Failed to delete user relationships: ${userTenantsError.message}` }, { status: 400 });
+    }
+
+    console.log('Deleted user_tenants relationships');
+
+    // Then delete the tenant itself
+    const { error: tenantError } = await adminClient
       .from('tenants')
       .delete()
       .eq('id', id);
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (tenantError) {
+      console.error('Error deleting tenant:', tenantError);
+      return NextResponse.json({ error: `Failed to delete tenant: ${tenantError.message}` }, { status: 400 });
     }
 
+    console.log('Successfully deleted tenant:', id);
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error('Error deleting tenant:', error);

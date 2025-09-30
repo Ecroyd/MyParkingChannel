@@ -13,12 +13,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
     }
 
-    // Get user's tenant
-    const { data: userTenant, error: tenantError } = await supabase
+    // Get user's tenants (following the same pattern as other admin pages)
+    const { data: userTenants, error: tenantError } = await supabase
       .from('user_tenants')
       .select(`
         tenant_id,
         role,
+        is_default,
         tenants (
           id,
           name,
@@ -27,13 +28,18 @@ export async function GET(req: NextRequest) {
         )
       `)
       .eq('user_id', user.id)
-      .single()
 
-    if (tenantError || !userTenant?.tenants) {
-      return NextResponse.json({ error: 'No tenant found for user' }, { status: 404 })
+    if (tenantError) {
+      return NextResponse.json({ error: 'Error loading tenant data' }, { status: 400 })
     }
 
-    const tenant = userTenant.tenants
+    if (!userTenants || userTenants.length === 0) {
+      return NextResponse.json({ error: 'No tenant access found' }, { status: 404 })
+    }
+
+    // Find the default tenant or use the first one
+    const userTenant = userTenants.find(ut => ut.is_default) || userTenants[0]
+    const tenant = userTenant?.tenants
 
     // Get booking rules for the tenant
     const { data, error } = await supabase
@@ -68,12 +74,13 @@ export async function POST(req: NextRequest) {
 
     console.log('User:', user.id)
 
-    // Get user's tenant
-    const { data: userTenant, error: tenantError } = await supabase
+    // Get user's tenants (following the same pattern as other admin pages)
+    const { data: userTenants, error: tenantError } = await supabase
       .from('user_tenants')
       .select(`
         tenant_id,
         role,
+        is_default,
         tenants (
           id,
           name,
@@ -82,14 +89,20 @@ export async function POST(req: NextRequest) {
         )
       `)
       .eq('user_id', user.id)
-      .single()
 
-    if (tenantError || !userTenant?.tenants) {
-      console.log('No tenant found for user:', tenantError)
-      return NextResponse.json({ error: 'No tenant found for user' }, { status: 404 })
+    if (tenantError) {
+      console.log('Error loading tenant data:', tenantError)
+      return NextResponse.json({ error: 'Error loading tenant data' }, { status: 400 })
     }
 
-    const tenant = userTenant.tenants
+    if (!userTenants || userTenants.length === 0) {
+      console.log('No tenant access found for user')
+      return NextResponse.json({ error: 'No tenant access found' }, { status: 404 })
+    }
+
+    // Find the default tenant or use the first one
+    const userTenant = userTenants.find(ut => ut.is_default) || userTenants[0]
+    const tenant = userTenant?.tenants
     console.log('Tenant:', tenant)
     
     const body = await req.json()

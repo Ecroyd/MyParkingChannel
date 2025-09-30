@@ -20,15 +20,30 @@ export default async function AnalyticsServerPage() {
     );
   }
 
-  // Get user's default tenant
-  const { data: userTenant } = await adminClient
+  // Get user's tenants (following the same pattern as other admin pages)
+  const { data: userTenants, error: userTenantsError } = await adminClient
     .from('user_tenants')
     .select('tenant_id, role, is_default')
-    .eq('user_id', user.id)
-    .eq('is_default', true)
-    .single();
+    .eq('user_id', user.id);
+
+  if (userTenantsError) {
+    console.log('❌ Analytics: Error fetching user tenants:', userTenantsError)
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-gray-600">Error loading tenant data</p>
+        </div>
+      </div>
+    );
+  }
+
+  console.log('📊 Analytics: User tenants found:', userTenants?.length || 0, userTenants)
+
+  // Find the default tenant or use the first one
+  const userTenant = userTenants?.find(ut => ut.is_default) || userTenants?.[0];
 
   if (!userTenant?.tenant_id) {
+    console.log('ℹ️ Analytics: No tenant found for user')
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
