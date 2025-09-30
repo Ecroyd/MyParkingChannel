@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
-import 'leaflet/dist/leaflet.css'; // ensure Leaflet CSS is loaded
 import markerPin from '/public/marker-pin.png'; // <-- robust import (works in dev/prod)
 
 // Dynamic imports to avoid SSR issues
