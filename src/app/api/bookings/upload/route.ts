@@ -34,7 +34,7 @@ export const POST = withTenant(async (tenant: TenantContext, request: Request) =
           reference: row[mapping.reference],
           customer_name: row[mapping.customer_name],
           customer_email: row[mapping.customer_email],
-          plate: row[mapping.plate],
+          plate: mapping.plate ? row[mapping.plate] : undefined,
           car_make: mapping.car_make ? row[mapping.car_make] : undefined,
           car_model: mapping.car_model ? row[mapping.car_model] : undefined,
           car_color: mapping.car_color ? row[mapping.car_color] : undefined,

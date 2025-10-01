@@ -179,7 +179,7 @@ export async function POST(req: Request) {
     slog("commit_start", { tenant_id, fileId, totalRows: rows.length });
 
     // Validate required mappings (reference is optional - will auto-generate if empty)
-    const requiredFields = ['plate', 'start_at', 'end_at'];
+    const requiredFields = ['start_at', 'end_at'];
     const missingRequired = requiredFields.filter(field => !mapping[field as keyof BookingMapping]);
     if (missingRequired.length > 0) {
       return NextResponse.json({ 
@@ -202,8 +202,8 @@ export async function POST(req: Request) {
         const start_at = mapping.start_at ? row[mapping.start_at] : null;
         const end_at = mapping.end_at ? row[mapping.end_at] : null;
         
-        // Validate required fields (only plate, start_at, end_at are truly required)
-        if (!plate?.trim() || !start_at?.trim() || !end_at?.trim()) {
+        // Validate required fields (only start_at, end_at are truly required)
+        if (!start_at?.trim() || !end_at?.trim()) {
           rejects.push({
             row: index + 1,
             reason: 'Missing required fields',
@@ -229,7 +229,7 @@ export async function POST(req: Request) {
         const dbRow: any = {
           tenant_id,
           reference: reference.trim(),
-          plate: plate.toUpperCase().trim(),
+          plate: plate ? plate.toUpperCase().trim() : null,
           start_at: startDate.toISOString(),
           end_at: endDate.toISOString(),
           customer_name: mapping.customer_name ? (row[mapping.customer_name] || "Unknown") : "Unknown",

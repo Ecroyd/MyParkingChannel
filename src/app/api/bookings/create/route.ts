@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
     reference: body.reference?.trim() || `M-${Date.now()}`,
     customer_name: body.customer_name,
     customer_email: body.customer_email,
-    plate: body.plate.toUpperCase().replace(/\s+/g, ''),
+    plate: body.plate ? body.plate.toUpperCase().replace(/\s+/g, '') : null,
     start_at,
     end_at,
     status: 'reserved',
@@ -142,7 +142,7 @@ export async function POST(req: NextRequest) {
     missing_fields: null,
     dedupe_key: makeDedupeKey({
       reference: body.reference?.trim() || `M-${Date.now()}`,
-      plate: body.plate.toUpperCase().replace(/\s+/g, ''),
+      plate: body.plate ? body.plate.toUpperCase().replace(/\s+/g, '') : '',
       customer_email: body.customer_email,
       start_at: start_at.toISOString(),
       end_at: end_at.toISOString()

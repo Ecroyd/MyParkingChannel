@@ -74,6 +74,7 @@ export default function BookingModal({
   const [showExtendSheet, setShowExtendSheet] = useState(false)
   const [stripePublishableKey, setStripePublishableKey] = useState<string>('')
   const [isEditing, setIsEditing] = useState(false)
+  const [mounted, setMounted] = useState(false)
   const [editForm, setEditForm] = useState({
     plate: '',
     flight_number: '',
@@ -85,7 +86,12 @@ export default function BookingModal({
     notes: ''
   })
 
-  if (!booking) return null
+  // Ensure component is mounted on client side
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  if (!booking || !mounted) return null
 
   // Initialize edit form when booking changes
   useEffect(() => {
@@ -120,18 +126,24 @@ export default function BookingModal({
   }, [open, tenantId])
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-GB', {
+    // Use consistent formatting to avoid hydration mismatches
+    const date = new Date(dateString)
+    return date.toLocaleDateString('en-GB', {
       weekday: 'short',
       year: 'numeric',
       month: 'short',
-      day: 'numeric'
+      day: 'numeric',
+      timeZone: 'UTC'
     })
   }
 
   const formatTime = (dateString: string) => {
-    return new Date(dateString).toLocaleTimeString('en-GB', {
+    // Use consistent formatting to avoid hydration mismatches
+    const date = new Date(dateString)
+    return date.toLocaleTimeString('en-GB', {
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
+      timeZone: 'UTC'
     })
   }
 

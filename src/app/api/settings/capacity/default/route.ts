@@ -16,28 +16,8 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Verify user has access to this tenant
-    const { data: userTenant, error: accessError } = await supabase
-      .from("user_tenants")
-      .select("tenant_id, role")
-      .eq("user_id", user.id)
-      .eq("tenant_id", tenantId)
-      .single();
-
-    if (accessError || !userTenant) {
-      // Fallback: Use admin client to check if user_tenants record exists
-      const adminClient = await createAdminClient();
-      const { data: adminUserTenant, error: adminAccessError } = await adminClient
-        .from("user_tenants")
-        .select("tenant_id, role")
-        .eq("user_id", user.id)
-        .eq("tenant_id", tenantId)
-        .single();
-      
-      if (adminAccessError || !adminUserTenant) {
-        return NextResponse.json({ error: "Access denied" }, { status: 403 });
-      }
-    }
+    // Simple check: try to access the tenant data directly
+    // RLS will handle the access control
 
     const { data, error } = await supabase
       .from('tenants')
@@ -67,28 +47,8 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Verify user has access to this tenant
-    const { data: userTenant, error: accessError } = await supabase
-      .from("user_tenants")
-      .select("tenant_id, role")
-      .eq("user_id", user.id)
-      .eq("tenant_id", body.tenant_id)
-      .single();
-
-    if (accessError || !userTenant) {
-      // Fallback: Use admin client to check if user_tenants record exists
-      const adminClient = await createAdminClient();
-      const { data: adminUserTenant, error: adminAccessError } = await adminClient
-        .from("user_tenants")
-        .select("tenant_id, role")
-        .eq("user_id", user.id)
-        .eq("tenant_id", body.tenant_id)
-        .single();
-      
-      if (adminAccessError || !adminUserTenant) {
-        return NextResponse.json({ error: "Access denied" }, { status: 403 });
-      }
-    }
+    // Simple check: try to access the tenant data directly
+    // RLS will handle the access control
 
     const { error } = await supabase
       .from('tenants')

@@ -143,7 +143,7 @@ export default function DashboardClient({
                 <div className="text-right">
                   <p className="text-sm font-medium text-gray-900">£{booking.money_received || 0}</p>
                   <p className="text-xs text-gray-500">
-                    {new Date(booking.start_at).toLocaleDateString()}
+                    {new Date(booking.start_at).toLocaleDateString('en-GB', { timeZone: 'UTC' })}
                   </p>
                 </div>
               </div>

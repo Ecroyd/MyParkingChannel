@@ -124,7 +124,7 @@ export default function TodayServerClient({
           {booking.plate}
         </td>
         <td className="px-4 py-3 text-sm text-gray-900">
-          {new Date(time).toLocaleTimeString()}
+          {new Date(time).toLocaleTimeString('en-GB', { timeZone: 'UTC' })}
         </td>
         <td className="px-4 py-3 text-sm text-gray-900">
           £{booking.money_received || 0}

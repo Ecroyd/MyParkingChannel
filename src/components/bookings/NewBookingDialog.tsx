@@ -18,7 +18,7 @@ const Schema = z.object({
   reference: z.string().optional(),
   customer_name: z.string().min(2, 'Name required'),
   customer_email: z.string().email('Valid email required'),
-  plate: z.string().min(2, 'Plate required'),
+  plate: z.string().optional(),
   startAt: z.string().min(1, 'Start required'),
   endAt: z.string().min(1, 'End required'),
   money_charged: z.coerce.number().min(0).default(0),

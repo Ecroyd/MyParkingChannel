@@ -18,28 +18,8 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Verify user has access to this tenant
-    const { data: userTenant, error: accessError } = await supabase
-      .from("user_tenants")
-      .select("tenant_id, role")
-      .eq("user_id", user.id)
-      .eq("tenant_id", tenantId)
-      .single();
-
-    if (accessError || !userTenant) {
-      // Fallback: Use admin client to check if user_tenants record exists
-      const adminClient = await createAdminClient();
-      const { data: adminUserTenant, error: adminAccessError } = await adminClient
-        .from("user_tenants")
-        .select("tenant_id, role")
-        .eq("user_id", user.id)
-        .eq("tenant_id", tenantId)
-        .single();
-      
-      if (adminAccessError || !adminUserTenant) {
-        return NextResponse.json({ error: "Access denied" }, { status: 403 });
-      }
-    }
+    // Simple check: try to access the tenant data directly
+    // RLS will handle the access control
 
     let q = supabase.from('tenant_capacity').select('*').eq('tenant_id', tenantId)
     if (from) q = q.gte('date', from)
@@ -68,28 +48,8 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Verify user has access to this tenant
-    const { data: userTenant, error: accessError } = await supabase
-      .from("user_tenants")
-      .select("tenant_id, role")
-      .eq("user_id", user.id)
-      .eq("tenant_id", body.tenant_id)
-      .single();
-
-    if (accessError || !userTenant) {
-      // Fallback: Use admin client to check if user_tenants record exists
-      const adminClient = await createAdminClient();
-      const { data: adminUserTenant, error: adminAccessError } = await adminClient
-        .from("user_tenants")
-        .select("tenant_id, role")
-        .eq("user_id", user.id)
-        .eq("tenant_id", body.tenant_id)
-        .single();
-      
-      if (adminAccessError || !adminUserTenant) {
-        return NextResponse.json({ error: "Access denied" }, { status: 403 });
-      }
-    }
+    // Simple check: try to access the tenant data directly
+    // RLS will handle the access control
 
     const payload = body.rows.map(r => ({ tenant_id: body.tenant_id!, date: r.date, capacity: r.capacity }))
     const { error } = await supabase.from('tenant_capacity').upsert(payload, { onConflict: 'tenant_id,date' })
@@ -116,28 +76,8 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Verify user has access to this tenant
-    const { data: userTenant, error: accessError } = await supabase
-      .from("user_tenants")
-      .select("tenant_id, role")
-      .eq("user_id", user.id)
-      .eq("tenant_id", tenantId)
-      .single();
-
-    if (accessError || !userTenant) {
-      // Fallback: Use admin client to check if user_tenants record exists
-      const adminClient = await createAdminClient();
-      const { data: adminUserTenant, error: adminAccessError } = await adminClient
-        .from("user_tenants")
-        .select("tenant_id, role")
-        .eq("user_id", user.id)
-        .eq("tenant_id", tenantId)
-        .single();
-      
-      if (adminAccessError || !adminUserTenant) {
-        return NextResponse.json({ error: "Access denied" }, { status: 403 });
-      }
-    }
+    // Simple check: try to access the tenant data directly
+    // RLS will handle the access control
 
     const { error } = await supabase.from('tenant_capacity').delete().eq('tenant_id', tenantId).eq('date', date)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })

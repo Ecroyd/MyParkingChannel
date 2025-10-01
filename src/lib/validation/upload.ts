@@ -4,7 +4,7 @@ export const uploadMappingSchema = z.object({
   reference: z.string(),
   customer_name: z.string(),
   customer_email: z.string(),
-  plate: z.string(),
+  plate: z.string().optional(),
   start_at: z.string(),
   end_at: z.string(),
   car_make: z.string().optional(),

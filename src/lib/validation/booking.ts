@@ -5,7 +5,7 @@ export const bookingSchema = z.object({
   customer_id: z.string().uuid().optional(),
   customer_name: z.string().min(1, 'Customer name is required'),
   customer_email: z.string().email('Invalid email address'),
-  plate: z.string().min(1, 'License plate is required'),
+  plate: z.string().optional(),
   car_make: z.string().optional(),
   car_model: z.string().optional(),
   car_color: z.string().optional(),
