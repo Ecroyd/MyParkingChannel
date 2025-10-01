@@ -20,7 +20,6 @@
  */
 
 import { useState, useEffect } from 'react'
-import { createBrowserClient } from '@supabase/ssr'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Upload, Image, X } from 'lucide-react'
@@ -38,10 +37,6 @@ export function UploadTenantLogo({ tenantId, currentLogoUrl, onLogoUpdated }: Up
   const [logoUrl, setLogoUrl] = useState<string | null>(currentLogoUrl || null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
 
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
 
   // Load existing logo on mount
   useEffect(() => {
@@ -80,86 +75,27 @@ export function UploadTenantLogo({ tenantId, currentLogoUrl, onLogoUpdated }: Up
     const preview = URL.createObjectURL(file)
     setPreviewUrl(preview)
 
-    const filePath = `${tenantId}/logo.png`
-
     try {
-      // Debug: Check user authentication and tenant relationship
-      const { data: { user }, error: userError } = await supabase.auth.getUser()
-      if (userError || !user) {
-        setError('User not authenticated')
-        setPreviewUrl(null)
-        toast.error('User not authenticated. Please log in again.')
-        return
-      }
+      // Upload using API endpoint
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('tenantId', tenantId)
 
-      // Debug: Verify user has access to this tenant
-      const { data: userTenant, error: tenantError } = await supabase
-        .from('user_tenants')
-        .select('tenant_id, role')
-        .eq('user_id', user.id)
-        .eq('tenant_id', tenantId)
-        .single()
-
-      if (tenantError || !userTenant) {
-        setError('You do not have access to this tenant')
-        setPreviewUrl(null)
-        toast.error('You do not have access to this tenant. Please contact your administrator.')
-        return
-      }
-
-      console.log('Upload debug:', { 
-        userId: user.id, 
-        tenantId, 
-        filePath, 
-        userTenant,
-        fileName: file.name,
-        fileSize: file.size,
-        fileType: file.type
+      const response = await fetch('/api/admin/logo/upload', {
+        method: 'POST',
+        body: formData,
       })
 
-      // First, try to delete the existing logo if it exists
-      if (logoUrl) {
-        try {
-          const { error: deleteError } = await supabase
-            .storage
-            .from('tenant-assets')
-            .remove([filePath])
-          
-          if (deleteError && deleteError.message !== 'Object not found') {
-            console.warn('Failed to delete existing logo:', deleteError.message)
-            // Continue with upload even if delete fails
-          } else {
-            console.log('Successfully deleted existing logo')
-          }
-        } catch (deleteErr) {
-          console.warn('Error deleting existing logo:', deleteErr)
-          // Continue with upload
-        }
-      }
+      const result = await response.json()
 
-      // Upload the new logo
-      const { error: uploadError } = await supabase
-        .storage
-        .from('tenant-assets')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: true, // allow overwriting the existing logo
-          contentType: file.type,
-        })
-
-      if (uploadError) {
-        console.error('Upload error:', uploadError)
-        setError(uploadError.message)
+      if (!result.success) {
+        setError(result.error || 'Upload failed')
         setPreviewUrl(null)
-        toast.error(`Upload failed: ${uploadError.message}`)
+        toast.error(result.error || 'Upload failed')
       } else {
-        const { data } = supabase.storage
-          .from('tenant-assets')
-          .getPublicUrl(filePath)
-        
-        setLogoUrl(data.publicUrl)
+        setLogoUrl(result.logoUrl)
         setPreviewUrl(null)
-        onLogoUpdated?.(data.publicUrl)
+        onLogoUpdated?.(result.logoUrl)
         toast.success('Logo uploaded successfully!')
       }
     } catch (err) {
@@ -186,22 +122,16 @@ export function UploadTenantLogo({ tenantId, currentLogoUrl, onLogoUpdated }: Up
     setError(null)
 
     try {
-      const filePath = `${tenantId}/logo.png`
-      const { error: deleteError } = await supabase
-        .storage
-        .from('tenant-assets')
-        .remove([filePath])
+      // Delete using API endpoint
+      const response = await fetch(`/api/admin/logo/upload?tenantId=${tenantId}`, {
+        method: 'DELETE',
+      })
 
-      if (deleteError) {
-        // If the error is "Object not found", that's actually success
-        if (deleteError.message === 'Object not found') {
-          setLogoUrl(null)
-          onLogoUpdated?.('')
-          toast.success('Logo removed successfully!')
-        } else {
-          setError(deleteError.message)
-          toast.error(`Failed to remove logo: ${deleteError.message}`)
-        }
+      const result = await response.json()
+
+      if (!result.success) {
+        setError(result.error || 'Failed to remove logo')
+        toast.error(result.error || 'Failed to remove logo')
       } else {
         setLogoUrl(null)
         onLogoUpdated?.('')
