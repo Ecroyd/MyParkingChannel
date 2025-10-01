@@ -11,6 +11,8 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { 
   Calendar, 
   Clock, 
@@ -24,7 +26,8 @@ import {
   Plus,
   X,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Save
 } from 'lucide-react'
 import { toast } from 'sonner'
 import ExtendBookingSheet from './ExtendBookingSheet'
@@ -44,29 +47,61 @@ type Booking = {
   notes?: string
   source: string
   created_at: string
+  tenant_id?: string
+  car_make?: string
+  car_model?: string
+  car_color?: string
+  channel?: string
 }
 
-type BookingDetailModalProps = {
+type BookingModalProps = {
   booking: Booking | null
   open: boolean
   onOpenChange: (open: boolean) => void
-  onBookingUpdated?: () => void
+  onBookingUpdated?: (booking: Booking) => void
   tenantId?: string
 }
 
-export default function BookingDetailModal({ 
+export default function BookingModal({ 
   booking, 
   open, 
   onOpenChange, 
   onBookingUpdated,
   tenantId
-}: BookingDetailModalProps) {
+}: BookingModalProps) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [showExtendSheet, setShowExtendSheet] = useState(false)
   const [stripePublishableKey, setStripePublishableKey] = useState<string>('')
+  const [isEditing, setIsEditing] = useState(false)
+  const [editForm, setEditForm] = useState({
+    plate: '',
+    flight_number: '',
+    start_at: '',
+    end_at: '',
+    status: '',
+    customer_name: '',
+    customer_email: '',
+    notes: ''
+  })
 
   if (!booking) return null
+
+  // Initialize edit form when booking changes
+  useEffect(() => {
+    if (booking) {
+      setEditForm({
+        plate: booking.plate || '',
+        flight_number: booking.flight_number || '',
+        start_at: booking.start_at.slice(0, 16),
+        end_at: booking.end_at.slice(0, 16),
+        status: booking.status || '',
+        customer_name: booking.customer_name || '',
+        customer_email: booking.customer_email || '',
+        notes: booking.notes || ''
+      })
+    }
+  }, [booking])
 
   // Fetch Stripe publishable key when modal opens
   useEffect(() => {
@@ -140,7 +175,7 @@ export default function BookingDetailModal({
       }
 
       toast.success(`Booking ${newStatus.replace('_', ' ')} successfully`)
-      onBookingUpdated?.()
+      onBookingUpdated?.(booking)
       onOpenChange(false)
     } catch (error) {
       toast.error('Failed to update booking status')
@@ -164,8 +199,67 @@ export default function BookingDetailModal({
   }
 
   const handleEdit = () => {
-    // Navigate to edit page or open edit modal
-    toast.info('Edit booking functionality coming soon')
+    setIsEditing(true)
+  }
+
+  const handleSaveEdit = async () => {
+    setLoading(true)
+    try {
+      const response = await fetch(`/api/bookings/${booking.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plate: editForm.plate,
+          flight_number: editForm.flight_number,
+          start_at: editForm.start_at,
+          end_at: editForm.end_at,
+          status: editForm.status,
+          customer_name: editForm.customer_name,
+          customer_email: editForm.customer_email,
+          notes: editForm.notes
+        }),
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to update booking')
+      }
+
+      const updatedBooking = await response.json()
+      toast.success('Booking updated successfully')
+      onBookingUpdated?.(updatedBooking)
+      setIsEditing(false)
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update booking')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (confirm('Are you sure you want to delete this booking? This action cannot be undone.')) {
+      setLoading(true)
+      try {
+        const response = await fetch('/api/bookings/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: booking.id }),
+          credentials: 'include'
+        })
+
+        if (!response.ok) {
+          throw new Error('Failed to delete booking')
+        }
+
+        toast.success('Booking deleted successfully')
+        onBookingUpdated?.(booking)
+        onOpenChange(false)
+      } catch (error) {
+        toast.error('Failed to delete booking')
+      } finally {
+        setLoading(false)
+      }
+    }
   }
 
   return (
@@ -188,35 +282,68 @@ export default function BookingDetailModal({
               </span>
             </div>
             <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleEdit}
-                disabled={loading}
-              >
-                <Edit className="h-4 w-4 mr-2" />
-                Edit
-              </Button>
-              <Button
-                variant="default"
-                size="sm"
-                className="bg-blue-600 hover:bg-blue-700 text-white"
-                onClick={handleExtend}
-                disabled={loading}
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Extend
-              </Button>
-              {booking.status !== 'cancelled' && booking.status !== 'checked_out' && (
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={handleCancel}
-                  disabled={loading}
-                >
-                  <X className="h-4 w-4 mr-2" />
-                  Cancel
-                </Button>
+              {!isEditing ? (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleEdit}
+                    disabled={loading}
+                  >
+                    <Edit className="h-4 w-4 mr-2" />
+                    Edit
+                  </Button>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    onClick={handleExtend}
+                    disabled={loading}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Extend
+                  </Button>
+                  {booking.status !== 'cancelled' && booking.status !== 'checked_out' && (
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={handleCancel}
+                      disabled={loading}
+                    >
+                      <X className="h-4 w-4 mr-2" />
+                      Cancel
+                    </Button>
+                  )}
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={handleDelete}
+                    disabled={loading}
+                  >
+                    <X className="h-4 w-4 mr-2" />
+                    Delete
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={handleSaveEdit}
+                    disabled={loading}
+                  >
+                    <Save className="h-4 w-4 mr-2" />
+                    Save
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsEditing(false)}
+                    disabled={loading}
+                  >
+                    Cancel
+                  </Button>
+                </>
               )}
             </div>
           </div>
@@ -235,14 +362,30 @@ export default function BookingDetailModal({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm font-medium text-slate-600">Name</label>
-                  <p className="text-sm">{booking.customer_name}</p>
+                  {isEditing ? (
+                    <Input
+                      value={editForm.customer_name}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, customer_name: e.target.value }))}
+                      className="mt-1"
+                    />
+                  ) : (
+                    <p className="text-sm">{booking.customer_name}</p>
+                  )}
                 </div>
                 <div>
                   <label className="text-sm font-medium text-slate-600">Email</label>
-                  <p className="text-sm flex items-center gap-2">
-                    <Mail className="h-3 w-3" />
-                    {booking.customer_email}
-                  </p>
+                  {isEditing ? (
+                    <Input
+                      value={editForm.customer_email}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, customer_email: e.target.value }))}
+                      className="mt-1"
+                    />
+                  ) : (
+                    <p className="text-sm flex items-center gap-2">
+                      <Mail className="h-3 w-3" />
+                      {booking.customer_email}
+                    </p>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -260,29 +403,45 @@ export default function BookingDetailModal({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm font-medium text-slate-600">License Plate</label>
-                  <p className="text-sm font-mono bg-slate-100 px-2 py-1 rounded">
-                    {booking.plate || 'Not provided'}
-                  </p>
+                  {isEditing ? (
+                    <Input
+                      value={editForm.plate}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, plate: e.target.value }))}
+                      className="mt-1"
+                    />
+                  ) : (
+                    <p className="text-sm font-mono bg-slate-100 px-2 py-1 rounded">
+                      {booking.plate || 'Not provided'}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="text-sm font-medium text-slate-600">Flight Number</label>
-                  <p className="text-sm flex items-center gap-2">
-                    <Plane className="h-3 w-3" />
-                    {booking.flight_number || 'Not provided'}
-                  </p>
+                  {isEditing ? (
+                    <Input
+                      value={editForm.flight_number}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, flight_number: e.target.value }))}
+                      className="mt-1"
+                    />
+                  ) : (
+                    <p className="text-sm flex items-center gap-2">
+                      <Plane className="h-3 w-3" />
+                      {booking.flight_number || 'Not provided'}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="text-sm font-medium text-slate-600">Make & Model</label>
                   <p className="text-sm">
-                    {(booking as any).car_make && (booking as any).car_model
-                      ? `${(booking as any).car_make} ${(booking as any).car_model}`
+                    {booking.car_make && booking.car_model
+                      ? `${booking.car_make} ${booking.car_model}`
                       : 'Not provided'
                     }
                   </p>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-slate-600">Color</label>
-                  <p className="text-sm">{(booking as any).car_color || 'Not provided'}</p>
+                  <p className="text-sm">{booking.car_color || 'Not provided'}</p>
                 </div>
               </div>
             </CardContent>
@@ -300,18 +459,51 @@ export default function BookingDetailModal({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm font-medium text-slate-600">Start Date</label>
-                  <p className="text-sm flex items-center gap-2">
-                    <Clock className="h-3 w-3" />
-                    {formatDate(booking.start_at)} at {formatTime(booking.start_at)}
-                  </p>
+                  {isEditing ? (
+                    <Input
+                      type="datetime-local"
+                      value={editForm.start_at}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, start_at: e.target.value }))}
+                      className="mt-1"
+                    />
+                  ) : (
+                    <p className="text-sm flex items-center gap-2">
+                      <Clock className="h-3 w-3" />
+                      {formatDate(booking.start_at)} at {formatTime(booking.start_at)}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="text-sm font-medium text-slate-600">End Date</label>
-                  <p className="text-sm flex items-center gap-2">
-                    <Clock className="h-3 w-3" />
-                    {formatDate(booking.end_at)} at {formatTime(booking.end_at)}
-                  </p>
+                  {isEditing ? (
+                    <Input
+                      type="datetime-local"
+                      value={editForm.end_at}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, end_at: e.target.value }))}
+                      className="mt-1"
+                    />
+                  ) : (
+                    <p className="text-sm flex items-center gap-2">
+                      <Clock className="h-3 w-3" />
+                      {formatDate(booking.end_at)} at {formatTime(booking.end_at)}
+                    </p>
+                  )}
                 </div>
+                {isEditing && (
+                  <div>
+                    <label className="text-sm font-medium text-slate-600">Status</label>
+                    <select
+                      value={editForm.status}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, status: e.target.value }))}
+                      className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="reserved">Reserved</option>
+                      <option value="checked_in">Checked In</option>
+                      <option value="checked_out">Checked Out</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -360,17 +552,24 @@ export default function BookingDetailModal({
                   <p className="text-sm font-mono text-slate-500">{booking.id}</p>
                 </div>
               </div>
-              {booking.notes && (
-                <div>
-                  <label className="text-sm font-medium text-slate-600">Notes</label>
-                  <p className="text-sm bg-slate-50 p-3 rounded-md">{booking.notes}</p>
-                </div>
-              )}
+              <div>
+                <label className="text-sm font-medium text-slate-600">Notes</label>
+                {isEditing ? (
+                  <textarea
+                    value={editForm.notes}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, notes: e.target.value }))}
+                    className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    rows={3}
+                  />
+                ) : (
+                  <p className="text-sm bg-slate-50 p-3 rounded-md">{booking.notes || 'No notes'}</p>
+                )}
+              </div>
             </CardContent>
           </Card>
 
           {/* Quick Actions */}
-          {booking.status === 'reserved' && (
+          {booking.status === 'reserved' && !isEditing && (
             <Card className="bg-blue-50 border-blue-200">
               <CardContent className="p-4">
                 <div className="flex items-center gap-2 mb-3">
@@ -389,7 +588,7 @@ export default function BookingDetailModal({
             </Card>
           )}
 
-          {booking.status === 'checked_in' && (
+          {booking.status === 'checked_in' && !isEditing && (
             <Card className="bg-green-50 border-green-200">
               <CardContent className="p-4">
                 <div className="flex items-center gap-2 mb-3">
@@ -429,7 +628,7 @@ export default function BookingDetailModal({
                   publishableKey={stripePublishableKey}
                   onExtended={() => {
                     setShowExtendSheet(false)
-                    onBookingUpdated?.()
+                    onBookingUpdated?.(booking)
                     router.refresh()
                   }}
                 />
@@ -441,4 +640,3 @@ export default function BookingDetailModal({
     </Dialog>
   )
 }
-

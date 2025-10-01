@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { LogIn, LogOut, Car, DollarSign } from 'lucide-react';
-import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
+import BookingModal from '@/components/bookings/BookingModal';
 
 interface Booking {
   id: string;
@@ -289,11 +289,11 @@ export default function TodayServerClient({
 
       {/* Booking Details Modal */}
       {selectedBooking && (
-        <BookingDetailsModal
+        <BookingModal
           booking={selectedBooking as any}
           open={modalOpen}
-          onClose={() => setModalOpen(false)}
-          onUpdated={handleBookingUpdated}
+          onOpenChange={setModalOpen}
+          onBookingUpdated={handleBookingUpdated}
         />
       )}
     </>

@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import StatCard from '@/components/ui/StatCard'
-import BookingDetailModal from '@/components/bookings/BookingDetailModal'
+import BookingModal from '@/components/bookings/BookingModal'
 import { CalendarDays, LogIn, LogOut, Search } from 'lucide-react'
 
 type Booking = {
@@ -100,7 +100,7 @@ export default function TodayPageClient({ tenant, kpis, arrivals, departures }: 
         </section>
       </div>
 
-      <BookingDetailModal
+      <BookingModal
         booking={selectedBooking}
         open={modalOpen}
         onOpenChange={setModalOpen}

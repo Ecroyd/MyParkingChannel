@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import DemandCurve from '@/components/charts/DemandCurve';
-import BookingDetailModal from '@/components/bookings/BookingDetailModal';
+import BookingModal from '@/components/bookings/BookingModal';
 
 interface DashboardClientProps {
   user: any;
@@ -154,7 +154,7 @@ export default function DashboardClient({
 
       {/* Booking Details Modal */}
       {modalOpen && selectedBooking && (
-        <BookingDetailModal
+        <BookingModal
           booking={selectedBooking}
           open={modalOpen}
           onOpenChange={setModalOpen}

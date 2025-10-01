@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { CalendarDays, Search, Plus, Filter, Trash2, Eye, Edit } from 'lucide-react';
-import BookingDetailModal from '@/components/bookings/BookingDetailModal';
+import BookingModal from '@/components/bookings/BookingModal';
 import { toast } from 'sonner';
 
 interface BookingsServerClientProps {
@@ -361,7 +361,7 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
 
       {/* Booking Details Modal */}
       {modalOpen && selectedBooking && (
-        <BookingDetailModal
+        <BookingModal
           booking={selectedBooking}
           open={modalOpen}
           onOpenChange={setModalOpen}
