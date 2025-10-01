@@ -1,5 +1,5 @@
 import { getServerSupabase } from '@/lib/supabase/server'
-import { getCurrentTenant } from '@/lib/tenant'
+import { createAdminClient } from '@/lib/supabase/server-admin'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,11 +9,68 @@ import { Smartphone, Palette, Upload } from 'lucide-react'
 
 export default async function PWASettingsPage() {
   const supabase = await getServerSupabase()
+  const adminClient = await createAdminClient()
 
-  let tenant
-  try {
-    tenant = await getCurrentTenant()
-  } catch (error) {
+  // Get current user
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
+  if (userError || !user) {
+    return (
+      <Card className="shadow-soft">
+        <CardContent className="p-6">
+          <div className="text-center space-y-4">
+            <p className="text-gray-600">Authentication Required</p>
+            <p className="text-sm text-gray-500">Please log in to access PWA settings.</p>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  // Get user's tenant with fallback to admin client
+  let userTenant;
+  let tenantError;
+  
+  const { data: userTenantData, error: userTenantError } = await supabase
+    .from('user_tenants')
+    .select(`
+      tenant_id,
+      role,
+      is_default,
+      tenants (
+        id,
+        name,
+        slug
+      )
+    `)
+    .eq('user_id', user.id)
+    .single();
+
+  userTenant = userTenantData;
+  tenantError = userTenantError;
+
+  // If regular client fails, try admin client
+  if (tenantError || !userTenant?.tenants) {
+    console.log('🔍 PWA Settings: Regular client failed, trying admin client...');
+    const { data: adminUserTenant, error: adminTenantError } = await adminClient
+      .from('user_tenants')
+      .select(`
+        tenant_id,
+        role,
+        is_default,
+        tenants (
+          id,
+          name,
+          slug
+        )
+      `)
+      .eq('user_id', user.id)
+      .single();
+    
+    userTenant = adminUserTenant;
+    tenantError = adminTenantError;
+  }
+
+  if (tenantError || !userTenant?.tenants) {
     return (
       <Card className="shadow-soft">
         <CardContent className="p-6">
@@ -26,8 +83,10 @@ export default async function PWASettingsPage() {
     )
   }
 
+  const tenant = Array.isArray(userTenant.tenants) ? userTenant.tenants[0] : userTenant.tenants;
+
   // Get current branding
-  const { data: branding } = await supabase
+  const { data: branding } = await adminClient
     .from('tenant_branding')
     .select('*')
     .eq('tenant_id', tenant.id)
