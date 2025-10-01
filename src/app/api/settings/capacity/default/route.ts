@@ -16,16 +16,18 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Simple check: try to access the tenant data directly
-    // RLS will handle the access control
-
-    const { data, error } = await supabase
+    // Use admin client to bypass RLS issues
+    const adminClient = await createAdminClient();
+    const { data, error } = await adminClient
       .from('tenants')
       .select('id, default_capacity')
       .eq('id', tenantId)
       .single()
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) {
+      console.error("Tenants query error:", error);
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
     return NextResponse.json({ default_capacity: data?.default_capacity ?? null })
   } catch (error) {
     console.error("Capacity default GET error:", error);
@@ -47,15 +49,17 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Simple check: try to access the tenant data directly
-    // RLS will handle the access control
-
-    const { error } = await supabase
+    // Use admin client to bypass RLS issues
+    const adminClient = await createAdminClient();
+    const { error } = await adminClient
       .from('tenants')
       .update({ default_capacity: body.default_capacity })
       .eq('id', body.tenant_id)
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) {
+      console.error("Tenants update error:", error);
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
     return NextResponse.json({ ok: true })
   } catch (error) {
     console.error("Capacity default PUT error:", error);

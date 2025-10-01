@@ -8,6 +8,10 @@ const baseConfig = {
   images: { 
     domains: ["*.supabase.co", "localhost"] 
   },
+  // Optimize CSS loading to prevent preload warnings
+  experimental: {
+    optimizeCss: true,
+  },
   async headers() {
     const securityHeaders = [
       {
@@ -47,6 +51,11 @@ export default async (phase: any) => {
       // Extend runtime caching to play nice with Supabase
       extendDefaultRuntimeCaching: true,
       workboxOptions: {
+        // Disable automatic preloading of CSS files to prevent warnings
+        preloadStrategy: 'cacheFirst',
+        // Skip preloading CSS files that aren't immediately used
+        skipWaiting: true,
+        clientsClaim: true,
         runtimeCaching: [
           // Cache GET requests for public assets (images, css, js)
           {

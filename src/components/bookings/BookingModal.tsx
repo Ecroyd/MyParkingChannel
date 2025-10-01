@@ -112,16 +112,22 @@ export default function BookingModal({
   // Fetch Stripe publishable key when modal opens
   useEffect(() => {
     if (open && tenantId) {
+      let cancelled = false
+      
       fetch(`/api/tenant/secrets?tenantId=${tenantId}`)
         .then(res => res.json())
         .then(data => {
-          if (data.ok && data.publishableKey) {
+          if (!cancelled && data.ok && data.publishableKey) {
             setStripePublishableKey(data.publishableKey)
           }
         })
         .catch(() => {
           // Stripe not configured
         })
+      
+      return () => {
+        cancelled = true
+      }
     }
   }, [open, tenantId])
 

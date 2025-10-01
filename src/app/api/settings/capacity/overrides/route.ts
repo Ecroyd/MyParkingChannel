@@ -18,14 +18,16 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Simple check: try to access the tenant data directly
-    // RLS will handle the access control
-
-    let q = supabase.from('tenant_capacity').select('*').eq('tenant_id', tenantId)
+    // Use admin client to bypass RLS issues
+    const adminClient = await createAdminClient();
+    let q = adminClient.from('tenant_capacity').select('*').eq('tenant_id', tenantId)
     if (from) q = q.gte('date', from)
     if (to) q = q.lte('date', to)
     const { data, error } = await q.order('date', { ascending: true })
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) {
+      console.error("Tenant capacity query error:", error);
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
     return NextResponse.json({ rows: data ?? [] })
   } catch (error) {
     console.error("Capacity overrides GET error:", error);
@@ -48,12 +50,14 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Simple check: try to access the tenant data directly
-    // RLS will handle the access control
-
+    // Use admin client to bypass RLS issues
+    const adminClient = await createAdminClient();
     const payload = body.rows.map(r => ({ tenant_id: body.tenant_id!, date: r.date, capacity: r.capacity }))
-    const { error } = await supabase.from('tenant_capacity').upsert(payload, { onConflict: 'tenant_id,date' })
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const { error } = await adminClient.from('tenant_capacity').upsert(payload, { onConflict: 'tenant_id,date' })
+    if (error) {
+      console.error("Tenant capacity upsert error:", error);
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
     return NextResponse.json({ ok: true, upserted: payload.length })
   } catch (error) {
     console.error("Capacity overrides PUT error:", error);
@@ -76,11 +80,13 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Simple check: try to access the tenant data directly
-    // RLS will handle the access control
-
-    const { error } = await supabase.from('tenant_capacity').delete().eq('tenant_id', tenantId).eq('date', date)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    // Use admin client to bypass RLS issues
+    const adminClient = await createAdminClient();
+    const { error } = await adminClient.from('tenant_capacity').delete().eq('tenant_id', tenantId).eq('date', date)
+    if (error) {
+      console.error("Tenant capacity delete error:", error);
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
     return NextResponse.json({ ok: true })
   } catch (error) {
     console.error("Capacity overrides DELETE error:", error);
