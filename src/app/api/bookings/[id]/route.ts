@@ -43,14 +43,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await req.json().catch(() => ({} as any))
-  const allowed = ['plate','flight_number','status','start_at','end_at','money_received','money_charged','source'] as const
+  const allowed = ['plate','flight_number','status','start_at','end_at','money_received','money_charged','source','customer_name','customer_email','notes'] as const
   const patch: Record<string, any> = {}
   for (const k of allowed) if (k in body) patch[k] = body[k]
 
   // Simple server-side validation for extend/edit
-  const s = patch.start_at ? new Date(patch.start_at) : new Date(booking.start_at)
-  const e = patch.end_at   ? new Date(patch.end_at)   : new Date(booking.end_at)
-  if (!(e > s)) return NextResponse.json({ error: 'end_at must be after start_at' }, { status: 400 })
+  if (patch.start_at || patch.end_at) {
+    const s = patch.start_at ? new Date(patch.start_at) : new Date(booking.start_at)
+    const e = patch.end_at   ? new Date(patch.end_at)   : new Date(booking.end_at)
+    if (!(e > s)) return NextResponse.json({ error: 'end_at must be after start_at' }, { status: 400 })
+  }
 
   const { data, error } = await supabase
     .from('bookings')
@@ -60,7 +62,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .select('*')
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data, )
+  if (error) {
+    console.error('Booking update error:', error)
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+  return NextResponse.json(data)
 }
 

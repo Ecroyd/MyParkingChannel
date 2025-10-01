@@ -205,19 +205,23 @@ export default function BookingModal({
   const handleSaveEdit = async () => {
     setLoading(true)
     try {
+      const updateData = {
+        plate: editForm.plate,
+        flight_number: editForm.flight_number,
+        start_at: editForm.start_at,
+        end_at: editForm.end_at,
+        status: editForm.status,
+        customer_name: editForm.customer_name,
+        customer_email: editForm.customer_email,
+        notes: editForm.notes
+      }
+      
+      console.log('Updating booking with data:', updateData)
+      
       const response = await fetch(`/api/bookings/${booking.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          plate: editForm.plate,
-          flight_number: editForm.flight_number,
-          start_at: editForm.start_at,
-          end_at: editForm.end_at,
-          status: editForm.status,
-          customer_name: editForm.customer_name,
-          customer_email: editForm.customer_email,
-          notes: editForm.notes
-        }),
+        body: JSON.stringify(updateData),
       })
 
       if (!response.ok) {
@@ -264,12 +268,18 @@ export default function BookingModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl backdrop-blur bg-white/90 shadow-2xl border-0">
+      <DialogContent 
+        className="max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl backdrop-blur bg-white/90 shadow-2xl border-0"
+        aria-describedby="booking-modal-description"
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5" />
             Booking Details - {booking.reference}
           </DialogTitle>
+          <p id="booking-modal-description" className="sr-only">
+            View and edit booking details including customer information, vehicle details, dates, and payment information.
+          </p>
         </DialogHeader>
 
         <div className="space-y-6">
