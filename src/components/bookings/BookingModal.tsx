@@ -217,6 +217,7 @@ export default function BookingModal({
       }
       
       console.log('Updating booking with data:', updateData)
+      console.log('Booking ID:', booking.id)
       
       const response = await fetch(`/api/bookings/${booking.id}`, {
         method: 'PATCH',
@@ -226,7 +227,8 @@ export default function BookingModal({
 
       if (!response.ok) {
         const error = await response.json()
-        throw new Error(error.error || 'Failed to update booking')
+        console.error('Update failed:', error)
+        throw new Error(error.error || `Failed to update booking (${response.status})`)
       }
 
       const updatedBooking = await response.json()

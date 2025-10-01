@@ -43,15 +43,36 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await req.json().catch(() => ({} as any))
-  const allowed = ['plate','flight_number','status','start_at','end_at','money_received','money_charged','source','customer_name','customer_email','notes'] as const
+  console.log('Received update data:', body)
+  
+  const allowed = ['plate','flight_number','status','start_at','end_at','money_received','money_charged','source','customer_name','customer_email','notes','car_make','car_model','car_color'] as const
   const patch: Record<string, any> = {}
-  for (const k of allowed) if (k in body) patch[k] = body[k]
+  for (const k of allowed) {
+    if (k in body && body[k] !== undefined && body[k] !== null && body[k] !== '') {
+      patch[k] = body[k]
+    }
+  }
+  
+  console.log('Filtered patch data:', patch)
+
+  // Check if there's anything to update
+  if (Object.keys(patch).length === 0) {
+    return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
+  }
 
   // Simple server-side validation for extend/edit
   if (patch.start_at || patch.end_at) {
     const s = patch.start_at ? new Date(patch.start_at) : new Date(booking.start_at)
     const e = patch.end_at   ? new Date(patch.end_at)   : new Date(booking.end_at)
     if (!(e > s)) return NextResponse.json({ error: 'end_at must be after start_at' }, { status: 400 })
+  }
+
+  // Convert datetime-local format to ISO string for database
+  if (patch.start_at) {
+    patch.start_at = new Date(patch.start_at).toISOString()
+  }
+  if (patch.end_at) {
+    patch.end_at = new Date(patch.end_at).toISOString()
   }
 
   const { data, error } = await supabase
