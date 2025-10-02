@@ -159,7 +159,7 @@ export default async function TenantHome({
                 <img 
                   src={p.logo_url} 
                   alt={p?.business_name ?? branding?.app_name ?? "Airport Parking"} 
-                  className="h-24 w-auto max-w-64 object-contain shadow-sm"
+                  className="h-72 w-auto max-w-96 object-contain shadow-sm"
                 />
               </div>
             )}
