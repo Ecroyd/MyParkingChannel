@@ -42,7 +42,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .maybeSingle()
   if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const body = await req.json().catch(() => ({} as any))
+  const body = await req.json().catch((err) => {
+    console.error('JSON parse error:', err)
+    return {} as any
+  })
   console.log('Received update data:', body)
   
   const allowed = ['plate','flight_number','status','start_at','end_at','money_received','money_charged','source','customer_name','customer_email','notes','car_make','car_model','car_color'] as const
@@ -63,7 +66,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // Simple server-side validation for extend/edit
   if (patch.start_at || patch.end_at) {
     const s = patch.start_at ? new Date(patch.start_at) : new Date(booking.start_at)
-    const e = patch.end_at   ? new Date(patch.end_at)   : new Date(booking.end_at)
+    const e = patch.end_at ? new Date(patch.end_at) : new Date(booking.end_at)
     if (!(e > s)) return NextResponse.json({ error: 'end_at must be after start_at' }, { status: 400 })
   }
 
@@ -75,6 +78,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     patch.end_at = new Date(patch.end_at).toISOString()
   }
 
+  console.log('Updating booking with patch:', patch)
+  console.log('Booking ID:', id, 'Tenant ID:', booking.tenant_id)
+
   const { data, error } = await supabase
     .from('bookings')
     .update(patch)
@@ -85,8 +91,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   if (error) {
     console.error('Booking update error:', error)
+    console.error('Error details:', JSON.stringify(error, null, 2))
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
+  
+  console.log('Booking updated successfully:', data)
   return NextResponse.json(data)
 }
 
