@@ -39,8 +39,8 @@ export async function GET() {
     // If regular client fails, try admin client
     if (tenantError || !userTenant?.tenants) {
       console.log('🔍 Site SEO Data: Regular client failed, trying admin client...');
-      const adminClient = await createAdminClient();
-      const { data: adminUserTenant, error: adminTenantError } = await adminClient
+        const adminClient8 = await createAdminClient();
+      const { data: adminUserTenant, error: adminTenantError } = await adminClient8
         .from('user_tenants')
         .select(`
           tenant_id,
@@ -69,8 +69,8 @@ export async function GET() {
     const tenantId = (tenant as any).id;
 
     // Get profile data using admin client
-    const adminClient = await createAdminClient();
-    const { data: profile, error: profileError } = await adminClient
+        const adminClient8 = await createAdminClient();
+    const { data: profile, error: profileError } = await adminClient8
       .from('tenant_public_profile')
       .select('*')
       .eq('tenant_id', tenantId)
@@ -114,11 +114,9 @@ export async function POST(req: Request) {
       }, { status: 401 });
     }
 
-    // Get user's tenant with fallback to admin client
-    let userTenant;
-    let tenantError;
-    
-    const { data: userTenantData, error: userTenantError } = await supabase
+    // Get user's tenant using admin client to avoid RLS recursion
+        const adminClient8 = await createAdminClient();
+    const { data: userTenant, error: tenantError } = await adminClient8
       .from('user_tenants')
       .select(`
         tenant_id,
@@ -133,32 +131,6 @@ export async function POST(req: Request) {
       .eq('user_id', user.id)
       .single();
 
-    userTenant = userTenantData;
-    tenantError = userTenantError;
-
-    // If regular client fails, try admin client
-    if (tenantError || !userTenant?.tenants) {
-      console.log('🔍 Site SEO Data POST: Regular client failed, trying admin client...');
-      const adminClient = await createAdminClient();
-      const { data: adminUserTenant, error: adminTenantError } = await adminClient
-        .from('user_tenants')
-        .select(`
-          tenant_id,
-          role,
-          tenants (
-            id,
-            name,
-            slug,
-            timezone
-          )
-        `)
-        .eq('user_id', user.id)
-        .single();
-      
-      userTenant = adminUserTenant;
-      tenantError = adminTenantError;
-    }
-
     if (tenantError || !userTenant?.tenants) {
       return NextResponse.json({ 
         error: 'No tenant found for user' 
@@ -169,8 +141,8 @@ export async function POST(req: Request) {
     const tenantId = (tenant as any).id;
 
     // Update profile data using admin client
-    const adminClient = await createAdminClient();
-    const { data: result, error: updateError } = await adminClient
+        const adminClient8 = await createAdminClient();
+    const { data: result, error: updateError } = await adminClient8
       .from('tenant_public_profile')
       .upsert({ ...data, tenant_id: tenantId })
       .select();

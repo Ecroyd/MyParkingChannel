@@ -307,7 +307,7 @@ export async function POST(req: Request) {
       const rejectsCSV = generateCSV(rejects, ['row', 'reason', 'error', 'data']);
       const rejectsFileName = `imports/${tenant_id}/rejects/${fileId}.csv`;
       
-      const { error: rejectsError } = await supabase.storage
+      const { error: rejectsError } = await adminClient.storage
         .from('imports')
         .upload(rejectsFileName, rejectsCSV, {
           contentType: 'text/csv',
@@ -315,7 +315,7 @@ export async function POST(req: Request) {
         });
 
       if (!rejectsError) {
-        const { data: { publicUrl } } = supabase.storage
+        const { data: { publicUrl } } = adminClient.storage
           .from('imports')
           .getPublicUrl(rejectsFileName);
         rejectsFileUrl = publicUrl;
@@ -323,7 +323,7 @@ export async function POST(req: Request) {
     }
 
     // Clean up original file
-    await supabase.storage.from('imports').remove([fileName]);
+    await adminClient.storage.from('imports').remove([fileName]);
 
     slog("commit_complete", { 
       tenant_id, 

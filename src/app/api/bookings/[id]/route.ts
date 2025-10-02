@@ -33,14 +33,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .single()
   if (bErr) return NextResponse.json({ error: bErr.message }, { status: 500 })
 
-  // Caller must belong to that tenant
+  // Caller must belong to that tenant - use a simpler approach to avoid RLS recursion
   const { data: membership } = await supabase
     .from('user_tenants')
     .select('tenant_id')
     .eq('user_id', userId)
-    .eq('tenant_id', booking.tenant_id)
     .maybeSingle()
-  if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  
+  if (!membership || membership.tenant_id !== booking.tenant_id) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const body = await req.json().catch((err) => {
     console.error('JSON parse error:', err)
@@ -131,14 +133,16 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     .single()
   if (bErr) return NextResponse.json({ error: bErr.message }, { status: 500 })
 
-  // Caller must belong to that tenant
+  // Caller must belong to that tenant - use a simpler approach to avoid RLS recursion
   const { data: membership } = await supabase
     .from('user_tenants')
     .select('tenant_id')
     .eq('user_id', userId)
-    .eq('tenant_id', booking.tenant_id)
     .maybeSingle()
-  if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  
+  if (!membership || membership.tenant_id !== booking.tenant_id) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const { error } = await supabase
     .from('bookings')

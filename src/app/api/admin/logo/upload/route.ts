@@ -39,8 +39,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Verify user has access to this tenant using admin client to avoid RLS recursion
-    const adminClient = await createAdminClient();
-    const { data: userTenant, error: accessError } = await adminClient
+    const adminClient10 = await createAdminClient();
+    const { data: userTenant, error: accessError } = await adminClient9
       .from('user_tenants')
       .select('tenant_id, role')
       .eq('user_id', user.id)
@@ -55,9 +55,12 @@ export async function POST(req: NextRequest) {
 
     const filePath = `${tenantId}/logo.png`;
 
+    // Use admin client for storage operations to avoid RLS recursion
+    const adminClient3 = await createAdminClient();
+
     // First, try to delete the existing logo if it exists
     try {
-      await supabase.storage
+      await adminClient3.storage
         .from('tenant-assets')
         .remove([filePath]);
     } catch (deleteErr) {
@@ -65,8 +68,8 @@ export async function POST(req: NextRequest) {
       console.warn('Error deleting existing logo:', deleteErr);
     }
 
-    // Upload the new logo
-    const { error: uploadError } = await supabase.storage
+    // Upload the new logo using admin client
+    const { error: uploadError } = await adminClient3.storage
       .from('tenant-assets')
       .upload(filePath, file, {
         cacheControl: '3600',
@@ -81,8 +84,8 @@ export async function POST(req: NextRequest) {
       }, { status: 500 });
     }
 
-    // Get the public URL
-    const { data } = supabase.storage
+    // Get the public URL using admin client
+    const { data } = adminClient3.storage
       .from('tenant-assets')
       .getPublicUrl(filePath);
 
@@ -121,8 +124,8 @@ export async function DELETE(req: NextRequest) {
     }
 
     // Verify user has access to this tenant using admin client to avoid RLS recursion
-    const adminClient = await createAdminClient();
-    const { data: userTenant, error: accessError } = await adminClient
+    const adminClient10 = await createAdminClient();
+    const { data: userTenant, error: accessError } = await adminClient9
       .from('user_tenants')
       .select('tenant_id, role')
       .eq('user_id', user.id)
@@ -137,8 +140,11 @@ export async function DELETE(req: NextRequest) {
 
     const filePath = `${tenantId}/logo.png`;
 
-    // Delete the logo
-    const { error: deleteError } = await supabase.storage
+    // Use admin client for storage operations to avoid RLS recursion
+    const adminClient10 = await createAdminClient();
+
+    // Delete the logo using admin client
+    const { error: deleteError } = await adminClient9.storage
       .from('tenant-assets')
       .remove([filePath]);
 

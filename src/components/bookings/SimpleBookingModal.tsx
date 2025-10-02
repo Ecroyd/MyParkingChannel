@@ -5,6 +5,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -243,12 +244,15 @@ export default function SimpleBookingModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-white">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <FileText className="w-5 h-5" />
-            Booking Details - {booking.reference}
-          </DialogTitle>
-        </DialogHeader>
+               <DialogHeader>
+                 <DialogTitle className="flex items-center gap-2">
+                   <FileText className="w-5 h-5" />
+                   Booking Details - {booking.reference}
+                 </DialogTitle>
+                 <DialogDescription>
+                   View and manage booking details for {booking.customer_name || 'Customer'}
+                 </DialogDescription>
+               </DialogHeader>
 
         <div className="space-y-6">
           {/* Status and Actions */}
