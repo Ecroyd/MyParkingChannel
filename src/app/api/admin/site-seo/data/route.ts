@@ -39,8 +39,8 @@ export async function GET() {
     // If regular client fails, try admin client
     if (tenantError || !userTenant?.tenants) {
       console.log('🔍 Site SEO Data: Regular client failed, trying admin client...');
-        const adminClient8 = await createAdminClient();
-      const { data: adminUserTenant, error: adminTenantError } = await adminClient8
+      const adminClientForTenant = await createAdminClient();
+      const { data: adminUserTenant, error: adminTenantError } = await adminClientForTenant
         .from('user_tenants')
         .select(`
           tenant_id,
@@ -69,8 +69,8 @@ export async function GET() {
     const tenantId = (tenant as any).id;
 
     // Get profile data using admin client
-        const adminClient8 = await createAdminClient();
-    const { data: profile, error: profileError } = await adminClient8
+    const adminClientForProfile = await createAdminClient();
+    const { data: profile, error: profileError } = await adminClientForProfile
       .from('tenant_public_profile')
       .select('*')
       .eq('tenant_id', tenantId)
@@ -115,8 +115,8 @@ export async function POST(req: Request) {
     }
 
     // Get user's tenant using admin client to avoid RLS recursion
-        const adminClient8 = await createAdminClient();
-    const { data: userTenant, error: tenantError } = await adminClient8
+    const adminClientForTenant = await createAdminClient();
+    const { data: userTenant, error: tenantError } = await adminClientForTenant
       .from('user_tenants')
       .select(`
         tenant_id,
@@ -141,8 +141,8 @@ export async function POST(req: Request) {
     const tenantId = (tenant as any).id;
 
     // Update profile data using admin client
-        const adminClient8 = await createAdminClient();
-    const { data: result, error: updateError } = await adminClient8
+    const adminClientForUpdate = await createAdminClient();
+    const { data: result, error: updateError } = await adminClientForUpdate
       .from('tenant_public_profile')
       .upsert({ ...data, tenant_id: tenantId })
       .select();

@@ -39,8 +39,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Verify user has access to this tenant using admin client to avoid RLS recursion
-    const adminClient10 = await createAdminClient();
-    const { data: userTenant, error: accessError } = await adminClient9
+    const adminClientVerify = await createAdminClient();
+    const { data: userTenant, error: accessError } = await adminClientVerify
       .from('user_tenants')
       .select('tenant_id, role')
       .eq('user_id', user.id)
@@ -56,11 +56,11 @@ export async function POST(req: NextRequest) {
     const filePath = `${tenantId}/logo.png`;
 
     // Use admin client for storage operations to avoid RLS recursion
-    const adminClient3 = await createAdminClient();
+    const adminClientStorage = await createAdminClient();
 
     // First, try to delete the existing logo if it exists
     try {
-      await adminClient3.storage
+      await adminClientStorage.storage
         .from('tenant-assets')
         .remove([filePath]);
     } catch (deleteErr) {
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Upload the new logo using admin client
-    const { error: uploadError } = await adminClient3.storage
+    const { error: uploadError } = await adminClientStorage.storage
       .from('tenant-assets')
       .upload(filePath, file, {
         cacheControl: '3600',
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Get the public URL using admin client
-    const { data } = adminClient3.storage
+    const { data } = adminClientStorage.storage
       .from('tenant-assets')
       .getPublicUrl(filePath);
 
@@ -124,8 +124,8 @@ export async function DELETE(req: NextRequest) {
     }
 
     // Verify user has access to this tenant using admin client to avoid RLS recursion
-    const adminClient10 = await createAdminClient();
-    const { data: userTenant, error: accessError } = await adminClient9
+    const adminClientVerify = await createAdminClient();
+    const { data: userTenant, error: accessError } = await adminClientVerify
       .from('user_tenants')
       .select('tenant_id, role')
       .eq('user_id', user.id)
@@ -141,10 +141,10 @@ export async function DELETE(req: NextRequest) {
     const filePath = `${tenantId}/logo.png`;
 
     // Use admin client for storage operations to avoid RLS recursion
-    const adminClient10 = await createAdminClient();
+    const adminClientStorage = await createAdminClient();
 
     // Delete the logo using admin client
-    const { error: deleteError } = await adminClient9.storage
+    const { error: deleteError } = await adminClientStorage.storage
       .from('tenant-assets')
       .remove([filePath]);
 
