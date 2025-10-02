@@ -2,8 +2,9 @@
 import { useState } from 'react'
 
 export default function SwTools() {
-  if (process.env.NEXT_PUBLIC_DEBUG_SITE !== '1') return null;
   const [busy, setBusy] = useState(false);
+  
+  if (process.env.NEXT_PUBLIC_DEBUG_SITE !== '1') return null;
 
   const nuke = async () => {
     setBusy(true);

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import DemandCurve from '@/components/charts/DemandCurve';
-import BookingModal from '@/components/bookings/BookingModal';
+import SimpleBookingModal from '@/components/bookings/SimpleBookingModal';
 
 interface DashboardClientProps {
   user: any;
@@ -67,7 +67,7 @@ export default function DashboardClient({
               </div>
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Today's Bookings</p>
+              <p className="text-sm font-medium text-gray-500">Today&apos;s Bookings</p>
               <p className="text-2xl font-semibold text-gray-900">{revenueData.totalBookings}</p>
             </div>
           </div>
@@ -81,7 +81,7 @@ export default function DashboardClient({
               </div>
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Today's Revenue</p>
+              <p className="text-sm font-medium text-gray-500">Today&apos;s Revenue</p>
               <p className="text-2xl font-semibold text-gray-900">£{revenueData.todayRevenue.toFixed(2)}</p>
             </div>
           </div>
@@ -154,7 +154,7 @@ export default function DashboardClient({
 
       {/* Booking Details Modal */}
       {modalOpen && selectedBooking && (
-        <BookingModal
+        <SimpleBookingModal
           booking={selectedBooking}
           open={modalOpen}
           onOpenChange={setModalOpen}

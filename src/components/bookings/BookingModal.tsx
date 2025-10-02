@@ -91,8 +91,6 @@ export default function BookingModal({
     setMounted(true)
   }, [])
 
-  if (!booking || !mounted) return null
-
   // Initialize edit form when booking changes
   useEffect(() => {
     if (booking) {
@@ -130,6 +128,9 @@ export default function BookingModal({
       }
     }
   }, [open, tenantId])
+
+  // Early return after all hooks
+  if (!booking || !mounted) return null
 
   const formatDate = (dateString: string) => {
     // Use consistent formatting to avoid hydration mismatches

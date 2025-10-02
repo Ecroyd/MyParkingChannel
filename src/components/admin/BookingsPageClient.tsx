@@ -7,7 +7,7 @@ import { TableShell, Th, Td } from '@/components/admin/TableShell'
 import EmptyState from '@/components/admin/EmptyState'
 import { Plus, Search } from 'lucide-react'
 import NewBookingDialog from '@/components/bookings/NewBookingDialog'
-import BookingModal from '@/components/bookings/BookingModal'
+import SimpleBookingModal from '@/components/bookings/SimpleBookingModal'
 
 type Booking = {
   id: string
@@ -218,7 +218,7 @@ export default function BookingsPageClient({
         </GlassCard>
       </div>
 
-      <BookingModal
+      <SimpleBookingModal
         open={modalOpen}
         booking={selectedBooking as any}
         onOpenChange={setModalOpen}
