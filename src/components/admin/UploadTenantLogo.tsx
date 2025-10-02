@@ -88,11 +88,14 @@ export function UploadTenantLogo({ tenantId, currentLogoUrl, onLogoUpdated }: Up
 
       const result = await response.json()
 
+      console.log('Upload result:', result)
+
       if (!result.success) {
         setError(result.error || 'Upload failed')
         setPreviewUrl(null)
         toast.error(result.error || 'Upload failed')
       } else {
+        console.log('Setting new logo URL:', result.logoUrl)
         setLogoUrl(result.logoUrl)
         setPreviewUrl(null)
         onLogoUpdated?.(result.logoUrl)

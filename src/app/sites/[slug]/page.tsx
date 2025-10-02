@@ -152,8 +152,18 @@ export default async function TenantHome({
         {/* HERO */}
         <section className="grid lg:grid-cols-2 gap-8 items-center mb-16">
           <div>
+            {/* Large Logo */}
+            {p?.logo_url && (
+              <div className="mb-8 flex justify-center lg:justify-start">
+                <img 
+                  src={p.logo_url} 
+                  alt={p?.business_name ?? branding?.app_name ?? "Airport Parking"} 
+                  className="h-24 w-auto max-w-64 object-contain shadow-sm"
+                />
+              </div>
+            )}
             <h1 className="text-4xl font-semibold tracking-tight text-slate-900 mb-6">
-              {p?.business_name ?? branding?.app_name ?? "Airport Parking"}, made simple.
+              {p?.business_name ?? branding?.app_name ?? "Airport Parking"}
             </h1>
             <p className="mt-3 text-lg text-gray-600 mb-6">
               {p?.short_tagline ?? "Secure parking, clear pricing, easy check-in. Close to the terminal."}

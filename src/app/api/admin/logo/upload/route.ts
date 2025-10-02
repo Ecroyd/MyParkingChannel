@@ -56,23 +56,28 @@ export async function POST(req: NextRequest) {
     const filePath = `${tenantId}/logo.png`;
 
     // Use admin client for storage operations to avoid RLS recursion
-    const adminClientStorage = await createAdminClient();
+    const adminClient = await createAdminClient();
 
     // First, try to delete the existing logo if it exists
     try {
-      await adminClientStorage.storage
+      const { error: deleteError } = await adminClient.storage
         .from('tenant-assets')
         .remove([filePath]);
+      
+      if (deleteError) {
+        console.warn('Error deleting existing logo:', deleteError);
+      } else {
+        console.log('Successfully deleted existing logo');
+      }
     } catch (deleteErr) {
-      // Continue with upload even if delete fails
-      console.warn('Error deleting existing logo:', deleteErr);
+      console.warn('Exception deleting existing logo:', deleteErr);
     }
 
     // Upload the new logo using admin client
-    const { error: uploadError } = await adminClientStorage.storage
+    const { error: uploadError } = await adminClient.storage
       .from('tenant-assets')
       .upload(filePath, file, {
-        cacheControl: '3600',
+        cacheControl: '0', // No caching to ensure fresh content
         upsert: true,
         contentType: file.type,
       });
@@ -84,14 +89,19 @@ export async function POST(req: NextRequest) {
       }, { status: 500 });
     }
 
+    console.log('Successfully uploaded new logo');
+
     // Get the public URL using admin client
-    const { data } = adminClientStorage.storage
+    const { data } = adminClient.storage
       .from('tenant-assets')
       .getPublicUrl(filePath);
 
+    // Add cache-busting parameter to ensure fresh content
+    const logoUrl = `${data.publicUrl}?t=${Date.now()}`;
+
     return NextResponse.json({ 
       success: true,
-      logoUrl: data.publicUrl 
+      logoUrl: logoUrl
     });
 
   } catch (error: any) {
@@ -141,10 +151,10 @@ export async function DELETE(req: NextRequest) {
     const filePath = `${tenantId}/logo.png`;
 
     // Use admin client for storage operations to avoid RLS recursion
-    const adminClientStorage = await createAdminClient();
+    const adminClient = await createAdminClient();
 
     // Delete the logo using admin client
-    const { error: deleteError } = await adminClientStorage.storage
+    const { error: deleteError } = await adminClient.storage
       .from('tenant-assets')
       .remove([filePath]);
 
