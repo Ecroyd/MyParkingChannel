@@ -90,3 +90,43 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   return NextResponse.json(data)
 }
 
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const supabase = await getServerSupabase()
+
+  // Who is calling?
+  const { data: auth } = await supabase.auth.getUser()
+  const userId = auth?.user?.id
+  if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 })
+
+  // Fetch booking to determine tenant_id
+  const { data: booking, error: bErr } = await supabase
+    .from('bookings')
+    .select('id, tenant_id')
+    .eq('id', id)
+    .single()
+  if (bErr) return NextResponse.json({ error: bErr.message }, { status: 500 })
+
+  // Caller must belong to that tenant
+  const { data: membership } = await supabase
+    .from('user_tenants')
+    .select('tenant_id')
+    .eq('user_id', userId)
+    .eq('tenant_id', booking.tenant_id)
+    .maybeSingle()
+  if (!membership) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const { error } = await supabase
+    .from('bookings')
+    .delete()
+    .eq('id', id)
+    .eq('tenant_id', booking.tenant_id)
+
+  if (error) {
+    console.error('Booking delete error:', error)
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+  
+  return NextResponse.json({ success: true })
+}
+

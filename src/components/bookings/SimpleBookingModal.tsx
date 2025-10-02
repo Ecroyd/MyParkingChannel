@@ -21,7 +21,8 @@ import {
   FileText,
   Edit,
   Save,
-  X
+  X,
+  Trash2
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -175,25 +176,24 @@ export default function SimpleBookingModal({
   const handleSaveEdit = async () => {
     setLoading(true)
     try {
-      const response = await fetch('/api/bookings/update', {
-        method: 'POST',
+      const response = await fetch(`/api/bookings/${booking.id}`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          bookingId: booking.id,
-          ...editForm
-        }),
+        body: JSON.stringify(editForm),
         credentials: 'include'
       })
 
       if (!response.ok) {
-        throw new Error('Failed to update booking')
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to update booking')
       }
 
+      const updatedBooking = await response.json()
       toast.success('Booking updated successfully')
-      onBookingUpdated?.(booking)
+      onBookingUpdated?.(updatedBooking)
       setIsEditing(false)
     } catch (error) {
-      toast.error('Failed to update booking')
+      toast.error(error instanceof Error ? error.message : 'Failed to update booking')
     } finally {
       setLoading(false)
     }
@@ -202,6 +202,33 @@ export default function SimpleBookingModal({
   const handleExtend = () => {
     // For now, just show a message - you can implement extend functionality later
     toast.info('Extend functionality coming soon')
+  }
+
+  const handleDelete = async () => {
+    if (!confirm('Are you sure you want to delete this booking? This action cannot be undone.')) {
+      return
+    }
+
+    setLoading(true)
+    try {
+      const response = await fetch(`/api/bookings/${booking.id}`, {
+        method: 'DELETE',
+        credentials: 'include'
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to delete booking')
+      }
+
+      toast.success('Booking deleted successfully')
+      onBookingUpdated?.(booking)
+      onOpenChange(false)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete booking')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -250,6 +277,15 @@ export default function SimpleBookingModal({
                   Cancel Booking
                 </Button>
               )}
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleDelete}
+                disabled={loading}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete
+              </Button>
             </div>
           </div>
 
