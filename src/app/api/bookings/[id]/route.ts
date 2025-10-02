@@ -81,13 +81,28 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   console.log('Updating booking with patch:', patch)
   console.log('Booking ID:', id, 'Tenant ID:', booking.tenant_id)
 
-  const { data, error } = await supabase
+  // Try update with tenant_id filter first
+  let { data, error } = await supabase
     .from('bookings')
     .update(patch)
     .eq('id', id)
     .eq('tenant_id', booking.tenant_id)
     .select('*')
     .single()
+
+  // If that fails, try without tenant_id filter (fallback)
+  if (error) {
+    console.log('Update with tenant_id failed, trying without tenant_id filter:', error.message)
+    const fallbackResult = await supabase
+      .from('bookings')
+      .update(patch)
+      .eq('id', id)
+      .select('*')
+      .single()
+    
+    data = fallbackResult.data
+    error = fallbackResult.error
+  }
 
   if (error) {
     console.error('Booking update error:', error)

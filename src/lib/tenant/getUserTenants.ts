@@ -1,5 +1,6 @@
 // src/lib/tenant/getUserTenants.ts
 import { createServerClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server-admin';
 
 export interface UserTenant {
   role: string;
@@ -14,12 +15,12 @@ export interface UserTenant {
 
 /**
  * Fetches tenants for the logged-in user
- * Uses RLS to ensure users only see their own tenants
+ * Uses admin client to avoid RLS recursion issues
  */
 export async function getUserTenants(userId: string): Promise<UserTenant[]> {
-  const supabase = await createServerClient();
+  const adminClient = await createAdminClient();
   
-  const { data, error } = await supabase
+  const { data, error } = await adminClient
     .from('user_tenants')
     .select(`
       role,

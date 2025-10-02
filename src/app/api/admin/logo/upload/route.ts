@@ -38,8 +38,9 @@ export async function POST(req: NextRequest) {
       }, { status: 401 });
     }
 
-    // Verify user has access to this tenant
-    const { data: userTenant, error: accessError } = await supabase
+    // Verify user has access to this tenant using admin client to avoid RLS recursion
+    const adminClient = await createAdminClient();
+    const { data: userTenant, error: accessError } = await adminClient
       .from('user_tenants')
       .select('tenant_id, role')
       .eq('user_id', user.id)
@@ -47,20 +48,9 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (accessError || !userTenant) {
-      // Fallback: Use admin client to check if user_tenants record exists
-      const adminClient = await createAdminClient();
-      const { data: adminUserTenant, error: adminAccessError } = await adminClient
-        .from('user_tenants')
-        .select('tenant_id, role')
-        .eq('user_id', user.id)
-        .eq('tenant_id', tenantId)
-        .single();
-      
-      if (adminAccessError || !adminUserTenant) {
-        return NextResponse.json({ 
-          error: 'You do not have access to this tenant' 
-        }, { status: 403 });
-      }
+      return NextResponse.json({ 
+        error: 'You do not have access to this tenant' 
+      }, { status: 403 });
     }
 
     const filePath = `${tenantId}/logo.png`;
@@ -130,8 +120,9 @@ export async function DELETE(req: NextRequest) {
       }, { status: 401 });
     }
 
-    // Verify user has access to this tenant
-    const { data: userTenant, error: accessError } = await supabase
+    // Verify user has access to this tenant using admin client to avoid RLS recursion
+    const adminClient = await createAdminClient();
+    const { data: userTenant, error: accessError } = await adminClient
       .from('user_tenants')
       .select('tenant_id, role')
       .eq('user_id', user.id)
@@ -139,20 +130,9 @@ export async function DELETE(req: NextRequest) {
       .single();
 
     if (accessError || !userTenant) {
-      // Fallback: Use admin client to check if user_tenants record exists
-      const adminClient = await createAdminClient();
-      const { data: adminUserTenant, error: adminAccessError } = await adminClient
-        .from('user_tenants')
-        .select('tenant_id, role')
-        .eq('user_id', user.id)
-        .eq('tenant_id', tenantId)
-        .single();
-      
-      if (adminAccessError || !adminUserTenant) {
-        return NextResponse.json({ 
-          error: 'You do not have access to this tenant' 
-        }, { status: 403 });
-      }
+      return NextResponse.json({ 
+        error: 'You do not have access to this tenant' 
+      }, { status: 403 });
     }
 
     const filePath = `${tenantId}/logo.png`;

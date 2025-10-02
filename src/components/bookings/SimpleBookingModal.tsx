@@ -176,6 +176,9 @@ export default function SimpleBookingModal({
   const handleSaveEdit = async () => {
     setLoading(true)
     try {
+      console.log('Sending edit data:', editForm)
+      console.log('Booking ID:', booking.id)
+      
       const response = await fetch(`/api/bookings/${booking.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -183,16 +186,22 @@ export default function SimpleBookingModal({
         credentials: 'include'
       })
 
+      console.log('Response status:', response.status)
+      console.log('Response headers:', response.headers)
+
       if (!response.ok) {
         const errorData = await response.json()
+        console.error('Error response:', errorData)
         throw new Error(errorData.error || 'Failed to update booking')
       }
 
       const updatedBooking = await response.json()
+      console.log('Updated booking:', updatedBooking)
       toast.success('Booking updated successfully')
       onBookingUpdated?.(updatedBooking)
       setIsEditing(false)
     } catch (error) {
+      console.error('Edit error:', error)
       toast.error(error instanceof Error ? error.message : 'Failed to update booking')
     } finally {
       setLoading(false)

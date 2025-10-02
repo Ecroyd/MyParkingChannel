@@ -16,11 +16,9 @@ export async function GET() {
       });
     }
 
-    // Get user's tenant with fallback to admin client
-    let userTenant;
-    let tenantError;
-    
-    const { data: userTenantData, error: userTenantError } = await supabase
+    // Get user's tenant using admin client to avoid RLS recursion
+    const adminClient = await createAdminClient();
+    const { data: userTenant, error: tenantError } = await adminClient
       .from('user_tenants')
       .select(`
         tenant_id,
@@ -33,31 +31,6 @@ export async function GET() {
       `)
       .eq('user_id', user.id)
       .single();
-
-    userTenant = userTenantData;
-    tenantError = userTenantError;
-
-    // If regular client fails, try admin client
-    if (tenantError || !userTenant?.tenants) {
-      console.log('🔍 Tenant Me: Regular client failed, trying admin client...');
-      const adminClient = await createAdminClient();
-      const { data: adminUserTenant, error: adminTenantError } = await adminClient
-        .from('user_tenants')
-        .select(`
-          tenant_id,
-          role,
-          is_default,
-          tenants (
-            id,
-            slug
-          )
-        `)
-        .eq('user_id', user.id)
-        .single();
-      
-      userTenant = adminUserTenant;
-      tenantError = adminTenantError;
-    }
 
     if (tenantError || !userTenant?.tenants) {
       return NextResponse.json({ 
