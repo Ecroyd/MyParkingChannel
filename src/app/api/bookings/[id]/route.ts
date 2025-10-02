@@ -17,41 +17,63 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  console.log('🔍 PATCH /api/bookings/[id] - Starting request')
   const { id } = await params;
+  console.log('🔍 Booking ID:', id)
+  
   const supabase = await getServerSupabase()
 
   // Who is calling?
   const { data: auth } = await supabase.auth.getUser()
   const userId = auth?.user?.id
+  console.log('🔍 User ID:', userId)
   if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 })
 
   // Fetch booking to determine tenant_id
+  console.log('🔍 Fetching booking details...')
   const { data: booking, error: bErr } = await supabase
     .from('bookings')
     .select('id, tenant_id, start_at, end_at')
     .eq('id', id)
     .single()
-  if (bErr) return NextResponse.json({ error: bErr.message }, { status: 500 })
+  if (bErr) {
+    console.error('🔍 Error fetching booking:', bErr)
+    return NextResponse.json({ error: bErr.message }, { status: 500 })
+  }
+  console.log('🔍 Booking found:', { id: booking.id, tenant_id: booking.tenant_id })
 
   // Caller must belong to that tenant - use admin client to avoid RLS recursion
+  console.log('🔍 Creating admin client...')
   const { createAdminClient } = await import('@/lib/supabase/server-admin')
   const adminClient = await createAdminClient()
+  console.log('🔍 Admin client created successfully')
   
-  const { data: membership } = await adminClient
+  console.log('🔍 Checking user membership with admin client...')
+  const { data: membership, error: membershipError } = await adminClient
     .from('user_tenants')
     .select('tenant_id')
     .eq('user_id', userId)
     .maybeSingle()
   
+  if (membershipError) {
+    console.error('🔍 Error checking membership:', membershipError)
+    return NextResponse.json({ error: membershipError.message }, { status: 500 })
+  }
+  
+  console.log('🔍 Membership result:', membership)
+  
   if (!membership || membership.tenant_id !== booking.tenant_id) {
+    console.log('🔍 Access denied - user not in tenant')
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  
+  console.log('🔍 Access granted - proceeding with update')
 
   const body = await req.json().catch((err) => {
     console.error('JSON parse error:', err)
     return {} as any
   })
-  console.log('Received update data:', body)
+  console.log('🔍 Received update data:', body)
   
   const allowed = ['plate','flight_number','status','start_at','end_at','money_received','money_charged','source','customer_name','customer_email','notes','car_make','car_model','car_color'] as const
   const patch: Record<string, any> = {}
@@ -61,7 +83,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
   
-  console.log('Filtered patch data:', patch)
+  console.log('🔍 Filtered patch data:', patch)
 
   // Check if there's anything to update
   if (Object.keys(patch).length === 0) {
@@ -83,10 +105,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     patch.end_at = new Date(patch.end_at).toISOString()
   }
 
-  console.log('Updating booking with patch:', patch)
-  console.log('Booking ID:', id, 'Tenant ID:', booking.tenant_id)
+  console.log('🔍 Updating booking with patch:', patch)
+  console.log('🔍 Booking ID:', id, 'Tenant ID:', booking.tenant_id)
 
   // Update the booking (RLS will handle tenant access control)
+  console.log('🔍 Executing booking update...')
   const { data, error } = await supabase
     .from('bookings')
     .update(patch)
@@ -95,12 +118,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .single()
 
   if (error) {
-    console.error('Booking update error:', error)
-    console.error('Error details:', JSON.stringify(error, null, 2))
+    console.error('🔍 Booking update error:', error)
+    console.error('🔍 Error details:', JSON.stringify(error, null, 2))
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
   
-  console.log('Booking updated successfully:', data)
+  console.log('🔍 Booking updated successfully:', data)
   return NextResponse.json(data)
 }
 

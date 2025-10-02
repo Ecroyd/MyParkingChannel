@@ -26,7 +26,6 @@ async function getProfile(slug: string) {
     console.log("Loaded tenant profile:", profile);
     console.log("Logo URL from database:", profile?.logo_url);
     console.log("Tenant ID:", ctx.tenant.id);
-    console.log("Profile data keys:", profile ? Object.keys(profile) : "No profile data");
   }
     
   return { tenant: ctx.tenant, profile, branding: ctx.branding };
@@ -161,14 +160,12 @@ export default async function TenantHome({
                   src={p.logo_url} 
                   alt={p?.business_name ?? branding?.app_name ?? "Airport Parking"} 
                   className="h-24 w-auto max-w-64 object-contain shadow-sm"
-                  onLoad={() => console.log("Logo loaded successfully:", p.logo_url)}
-                  onError={(e) => console.error("Logo failed to load:", p.logo_url, e)}
                 />
               </div>
             )}
             {!p?.logo_url && (
               <div className="mb-8 text-center text-gray-500 text-sm">
-                No logo URL found. Profile data: {JSON.stringify(p)}
+                No logo URL found. Logo URL field: {p?.logo_url || 'undefined'}
               </div>
             )}
             <h1 className="text-4xl font-semibold tracking-tight text-slate-900 mb-6">
