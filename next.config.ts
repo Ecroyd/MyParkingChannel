@@ -51,8 +51,6 @@ export default async (phase: any) => {
       // Extend runtime caching to play nice with Supabase
       extendDefaultRuntimeCaching: true,
       workboxOptions: {
-        // Disable automatic preloading of CSS files to prevent warnings
-        preloadStrategy: 'cacheFirst',
         // Skip preloading CSS files that aren't immediately used
         skipWaiting: true,
         clientsClaim: true,
