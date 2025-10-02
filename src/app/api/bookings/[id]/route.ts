@@ -29,9 +29,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   console.log('🔍 User ID:', userId)
   if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 })
 
-  // Fetch booking to determine tenant_id
-  console.log('🔍 Fetching booking details...')
-  const { data: booking, error: bErr } = await supabase
+  // Fetch booking to determine tenant_id using admin client to avoid RLS recursion
+  console.log('🔍 Fetching booking details with admin client...')
+  const { createAdminClient } = await import('@/lib/supabase/server-admin')
+  const adminClient = await createAdminClient()
+  
+  const { data: booking, error: bErr } = await adminClient
     .from('bookings')
     .select('id, tenant_id, start_at, end_at')
     .eq('id', id)
@@ -113,8 +116,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const userId = auth?.user?.id
   if (!userId) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 })
 
-  // Fetch booking to determine tenant_id
-  const { data: booking, error: bErr } = await supabase
+  // Fetch booking to determine tenant_id using admin client to avoid RLS recursion
+  const { createAdminClient } = await import('@/lib/supabase/server-admin')
+  const adminClient = await createAdminClient()
+  
+  const { data: booking, error: bErr } = await adminClient
     .from('bookings')
     .select('id, tenant_id')
     .eq('id', id)
@@ -122,8 +128,6 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (bErr) return NextResponse.json({ error: bErr.message }, { status: 500 })
 
   // Caller must belong to that tenant - use admin client to avoid RLS recursion
-  const { createAdminClient } = await import('@/lib/supabase/server-admin')
-  const adminClient = await createAdminClient()
   
   const { data: membership } = await adminClient
     .from('user_tenants')
