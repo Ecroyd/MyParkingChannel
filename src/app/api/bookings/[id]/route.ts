@@ -33,8 +33,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .single()
   if (bErr) return NextResponse.json({ error: bErr.message }, { status: 500 })
 
-  // Caller must belong to that tenant - use a simpler approach to avoid RLS recursion
-  const { data: membership } = await supabase
+  // Caller must belong to that tenant - use admin client to avoid RLS recursion
+  const { createAdminClient } = await import('@/lib/supabase/server-admin')
+  const adminClient = await createAdminClient()
+  
+  const { data: membership } = await adminClient
     .from('user_tenants')
     .select('tenant_id')
     .eq('user_id', userId)
@@ -118,8 +121,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     .single()
   if (bErr) return NextResponse.json({ error: bErr.message }, { status: 500 })
 
-  // Caller must belong to that tenant - use a simpler approach to avoid RLS recursion
-  const { data: membership } = await supabase
+  // Caller must belong to that tenant - use admin client to avoid RLS recursion
+  const { createAdminClient } = await import('@/lib/supabase/server-admin')
+  const adminClient = await createAdminClient()
+  
+  const { data: membership } = await adminClient
     .from('user_tenants')
     .select('tenant_id')
     .eq('user_id', userId)
