@@ -98,16 +98,18 @@ export async function POST(req: Request) {
     });
     
     const processedRows = csvRows.map((row: any, index: number) => {
-      // Store only the absolute minimum data that the staging table can handle
-      // The staging table likely only has: tenant_id, row_number, raw_data, status, created_by
+      // Use the correct column names from the actual table schema
       const processedRow: any = {
         tenant_id: tenantId,
-        row_number: index + 1,
-        raw_data: row,
+        source_file: `${fileId}.csv`, // Store the file ID as source
+        raw_payload: {
+          row_data: row,
+          row_number: index + 1,
+          mapping: mapping,
+          manual_source: manualSource
+        },
         status: 'pending',
         created_by: user.id,
-        mapping_data: mapping, // Store the mapping so RPC can use it
-        manual_source: manualSource, // Store manual source if provided
       };
 
       return processedRow;
