@@ -54,7 +54,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
     // Find or create owner user
     let ownerId = (await sb.auth.getUser()).data.user?.id;
     const { data: existingUser } = await sb.auth.admin.listUsers();
-    const foundUser = existingUser.users.find(u => u.email === appRow.applicant_email);
+    const foundUser = existingUser.users.find((u: any) => u.email === appRow.applicant_email);
     if (foundUser) {
       ownerId = foundUser.id;
     }

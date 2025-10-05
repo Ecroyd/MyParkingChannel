@@ -3,7 +3,7 @@ import { getServerSupabase } from '@/lib/supabase/server';
 
 export async function POST(req: Request) {
   const { id, updates } = await req.json();
-  const supabase = getServerSupabase();
+  const supabase = await getServerSupabase();
 
   const { data, error } = await supabase
     .from('bookings')

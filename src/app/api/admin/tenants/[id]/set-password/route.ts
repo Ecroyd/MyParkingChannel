@@ -25,7 +25,7 @@ export async function POST(
       return NextResponse.json({ error: "Failed to fetch users" }, { status: 500 });
     }
 
-    const user = users.users.find(u => u.email === email);
+    const user = users.users.find((u: any) => u.email === email);
     if (!user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }

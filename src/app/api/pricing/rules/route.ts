@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "No tenant access found" }, { status: 404 });
   }
 
-  const userTenant = userTenants.find(ut => ut.is_default) || userTenants[0];
+  const userTenant = userTenants.find((ut: any) => ut.is_default) || userTenants[0];
   const tenantId = userTenant.tenant_id;
 
   const url = new URL(req.url);
@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
 
   if (!expand) {
     // Filter by is_active if the column exists, otherwise show all
-    const filteredRules = rules?.filter(r => showAll || r.is_active !== false) || [];
+    const filteredRules = rules?.filter((r: any) => showAll || r.is_active !== false) || [];
     return NextResponse.json({ data: filteredRules });
   }
 
@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No tenant access found" }, { status: 404 });
   }
 
-  const userTenant = userTenants.find(ut => ut.is_default) || userTenants[0];
+  const userTenant = userTenants.find((ut: any) => ut.is_default) || userTenants[0];
   const tenantId = userTenant.tenant_id;
 
   const body = await req.json();

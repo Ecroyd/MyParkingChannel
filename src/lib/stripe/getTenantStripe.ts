@@ -16,7 +16,7 @@ export async function getTenantStripeKeys(tenantId: string): Promise<TenantStrip
   if (error) throw error;
 
   const out: TenantStripeKeys = {};
-  data?.forEach(row => {
+  data?.forEach((row: any) => {
     if (row.key === 'stripe.secret_key') out.secretKey = row.value_ciphertext;
     if (row.key === 'stripe.publishable_key') out.publishableKey = row.value_ciphertext;
   });
@@ -31,5 +31,5 @@ export async function getTenantStripeKeys(tenantId: string): Promise<TenantStrip
 export async function getTenantStripeClient(tenantId: string) {
   const { secretKey } = await getTenantStripeKeys(tenantId);
   if (!secretKey) throw new Error('Stripe secret key missing for tenant');
-  return new Stripe(secretKey, { apiVersion: '2024-06-20' });
+  return new Stripe(secretKey, { apiVersion: '2025-08-27.basil' });
 }

@@ -40,7 +40,7 @@ export default async function BookingRulesPage() {
   }
 
   // Find the default tenant or use the first one
-  const userTenant = userTenants.find(ut => ut.is_default) || userTenants[0]
+  const userTenant = userTenants.find((ut: any) => ut.is_default) || userTenants[0]
 
   return (
     <div className="p-6">

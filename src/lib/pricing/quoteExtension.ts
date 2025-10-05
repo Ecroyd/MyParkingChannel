@@ -27,7 +27,7 @@ export async function quoteExtensionCents(opts: {
       .eq("tenant_id", tenantId);
 
     if (!dailyErr && daily && daily.length === days) {
-      return daily.reduce((s,row) => s + (row.price_cents ?? 0), 0);
+      return daily.reduce((s: number, row: any) => s + (row.price_cents ?? 0), 0);
     }
   } catch (e) {
     // pricing_daily table doesn't exist, continue to fallback

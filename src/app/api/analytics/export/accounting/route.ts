@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
 
     // Create a map of extensions by booking_id
     const extensionsByBooking = new Map();
-    extensions?.forEach(ext => {
+    extensions?.forEach((ext: any) => {
       if (!extensionsByBooking.has(ext.booking_id)) {
         extensionsByBooking.set(ext.booking_id, []);
       }
@@ -86,7 +86,7 @@ export async function GET(req: NextRequest) {
     ]);
 
     // Process each booking
-    bookings?.forEach(booking => {
+    bookings?.forEach((booking: any) => {
       const bookingExtensions = extensionsByBooking.get(booking.id) || [];
       const totalExtensionAmount = bookingExtensions.reduce((sum: number, ext: any) =>
         sum + (ext.charged_amount_cents / 100), 0

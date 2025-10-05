@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "No tenant access found" }, { status: 404 });
   }
 
-  const userTenant = userTenants.find(ut => ut.is_default) || userTenants[0];
+  const userTenant = userTenants.find((ut: any) => ut.is_default) || userTenants[0];
   const tenantId = userTenant.tenant_id;
 
   const { data, error } = await adminSupabase
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No tenant access found" }, { status: 404 });
   }
 
-  const userTenant = userTenants.find(ut => ut.is_default) || userTenants[0];
+  const userTenant = userTenants.find((ut: any) => ut.is_default) || userTenants[0];
   const tenantId = userTenant.tenant_id;
 
   const body = await req.json();

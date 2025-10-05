@@ -1,13 +1,13 @@
 import { cookies } from 'next/headers';
 import { createServerClient as createSSRServerClient } from '@supabase/ssr';
-import { createClient as createAdminClient } from '@supabase/supabase-js';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
-export function getServerSupabase(options?: { admin?: boolean }) {
+export async function getServerSupabase(options?: { admin?: boolean }) {
   if (options?.admin) {
     return supabaseAdmin();
   }
   
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   return createSSRServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -20,7 +20,7 @@ export function getServerSupabase(options?: { admin?: boolean }) {
 }
 
 export function supabaseAdmin() {
-  return createAdminClient(
+  return createSupabaseClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { persistSession: false } }

@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Find the default tenant or use the first one
-    const userTenant = userTenants.find(ut => ut.is_default) || userTenants[0]
+    const userTenant = userTenants.find((ut: any) => ut.is_default) || userTenants[0]
     const tenant = userTenant?.tenants
 
     // Get booking rules for the tenant
@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Find the default tenant or use the first one
-    const userTenant = userTenants.find(ut => ut.is_default) || userTenants[0]
+    const userTenant = userTenants.find((ut: any) => ut.is_default) || userTenants[0]
     const tenant = userTenant?.tenants
     console.log('Tenant:', tenant)
     
