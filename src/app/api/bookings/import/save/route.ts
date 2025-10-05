@@ -98,36 +98,17 @@ export async function POST(req: Request) {
     });
     
     const processedRows = csvRows.map((row: any, index: number) => {
-      // Store only the essential data that the staging table can handle
+      // Store only the absolute minimum data that the staging table can handle
+      // The staging table likely only has: tenant_id, row_number, raw_data, status, created_by
       const processedRow: any = {
         tenant_id: tenantId,
         row_number: index + 1,
         raw_data: row,
         status: 'pending',
         created_by: user.id,
+        mapping_data: mapping, // Store the mapping so RPC can use it
+        manual_source: manualSource, // Store manual source if provided
       };
-
-      // Only add the most basic mapped fields that are likely to exist
-      if (mapping.customer_name && row[mapping.customer_name]) {
-        processedRow.customer_name = row[mapping.customer_name];
-      }
-      if (mapping.start_at && row[mapping.start_at]) {
-        processedRow.start_at = row[mapping.start_at];
-      }
-      if (mapping.end_at && row[mapping.end_at]) {
-        processedRow.end_at = row[mapping.end_at];
-      }
-      if (mapping.reference && row[mapping.reference]) {
-        processedRow.reference = row[mapping.reference];
-      }
-      if (mapping.plate && row[mapping.plate]) {
-        processedRow.plate = row[mapping.plate];
-      }
-
-      // Apply manual source if no source column was mapped
-      if (!mapping.source && manualSource) {
-        processedRow.source = manualSource;
-      }
 
       return processedRow;
     });

@@ -55,6 +55,7 @@ export async function POST(req: Request) {
     }
 
     // Execute commit as service role via security definer RPC
+    // The RPC function will read the raw_data from booking_import_staging and process it
     const { data, error } = await admin.rpc('booking_import_commit', {
       p_tenant_id: tenantId,
       p_actor: user.id,
