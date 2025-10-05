@@ -12,6 +12,9 @@ interface Booking {
   customer_name: string;
   customer_email: string;
   plate: string;
+  car_make: string | null;
+  car_model: string | null;
+  car_color: string | null;
   start_at: string;
   end_at: string;
   status: string;

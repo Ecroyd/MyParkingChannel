@@ -11,6 +11,9 @@ type Booking = {
   customer_name: string;
   customer_email: string;
   plate: string;
+  car_make: string | null;
+  car_model: string | null;
+  car_color: string | null;
   start_at: string;
   end_at: string;
   money_charged: number | null;
@@ -65,20 +68,23 @@ export default function BookingDetailsModal({
         <div className="p-4">
           {loading && <p>Loading…</p>}
 
-          {!loading && booking && tab === 'overview' && (
-            <div className="grid grid-cols-2 gap-4">
-              <Info label="Customer" value={booking.customer_name} />
-              <Info label="Email" value={booking.customer_email} />
-              <Info label="Plate" value={booking.plate} />
-              <Info label="Start" value={new Date(booking.start_at).toLocaleString()} />
-              <Info label="End" value={new Date(booking.end_at).toLocaleString()} />
-              <Info label="Charged" value={toMoney(Math.round((booking.money_charged ?? 0) * 100))} />
-              <Info label="Flight" value={booking.flight_number || '—'} />
-              <div className="col-span-2">
-                <Info label="Notes" value={booking.notes || '—'} />
-              </div>
-            </div>
-          )}
+              {!loading && booking && tab === 'overview' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <Info label="Customer" value={booking.customer_name} />
+                  <Info label="Email" value={booking.customer_email} />
+                  <Info label="Plate" value={booking.plate} />
+                  <Info label="Make" value={booking.car_make || '—'} />
+                  <Info label="Model" value={booking.car_model || '—'} />
+                  <Info label="Colour" value={booking.car_color || '—'} />
+                  <Info label="Start" value={new Date(booking.start_at).toLocaleString()} />
+                  <Info label="End" value={new Date(booking.end_at).toLocaleString()} />
+                  <Info label="Charged" value={toMoney(Math.round((booking.money_charged ?? 0) * 100))} />
+                  <Info label="Flight" value={booking.flight_number || '—'} />
+                  <div className="col-span-2">
+                    <Info label="Notes" value={booking.notes || '—'} />
+                  </div>
+                </div>
+              )}
 
           {!loading && booking && tab === 'edit' && (
             <EditForm booking={booking} onSaved={async () => { await refresh(); setTab('overview'); }} />
@@ -106,6 +112,9 @@ function EditForm({ booking, onSaved }: { booking: any; onSaved: () => void }) {
   const [form, setForm] = React.useState({
     customer_email: booking.customer_email || '',
     plate: booking.plate || '',
+    car_make: booking.car_make || '',
+    car_model: booking.car_model || '',
+    car_color: booking.car_color || '',
     flight_number: booking.flight_number || '',
     notes: booking.notes || '',
   });
@@ -115,15 +124,24 @@ function EditForm({ booking, onSaved }: { booking: any; onSaved: () => void }) {
     setSaving(true);
     const res = await fetch('/api/bookings/update', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, // 👈 important
       body: JSON.stringify({ id: booking.id, updates: form }),
     });
+
+    const json = await res.json().catch(() => ({}));
     setSaving(false);
-    if (res.ok) onSaved();
+
+    if (!res.ok) {
+      alert(json?.error || 'Update failed'); // or toast.error(...)
+      return;
+    }
+
+    onSaved();
   };
 
   return (
     <div className="grid gap-3">
-      {['customer_email','plate','flight_number'].map((k) => (
+      {['customer_email','plate','car_make','car_model','car_color','flight_number'].map((k) => (
         <div key={k}>
           <label className="block text-xs text-gray-500 mb-1">{k.replace('_',' ')}</label>
           <input
