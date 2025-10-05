@@ -107,7 +107,7 @@ export async function POST(req: Request) {
           throw new Error(`Invalid dates: startAt=${startAt}, endAt=${endAt}`);
         }
 
-        // Insert the booking
+        // Insert the booking (only use columns that exist in the bookings table)
         const { data: bookingData, error: insertError } = await admin
           .from('bookings')
           .insert({
@@ -118,10 +118,7 @@ export async function POST(req: Request) {
             end_at: endDate.toISOString(),
             reference: reference || null,
             plate: plate || null,
-            source: manualSource,
-            created_by: user.id,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            source: manualSource
           })
           .select('id')
           .single();
