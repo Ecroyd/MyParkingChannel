@@ -117,7 +117,7 @@ export async function POST(req: Request) {
             start_at: startDate.toISOString(),
             end_at: endDate.toISOString(),
             reference: reference || null,
-            plate: plate || null,
+            plate: plate || 'UNKNOWN', // Provide default value for NOT NULL constraint
             source: manualSource
           })
           .select('id')
