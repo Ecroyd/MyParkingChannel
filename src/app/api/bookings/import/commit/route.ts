@@ -54,6 +54,20 @@ export async function POST(req: Request) {
       }, { status: 403 });
     }
 
+    // First, let's check what data is in the staging table
+    console.log('🔍 IMPORT_COMMIT: Checking staging table data...');
+    const { data: stagingData, error: stagingError } = await admin
+      .from('booking_import_staging')
+      .select('id, tenant_id, status, raw_payload')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'pending');
+    
+    console.log('🔍 IMPORT_COMMIT: Staging table data:', { 
+      count: stagingData?.length || 0, 
+      stagingError,
+      sample: stagingData?.[0] 
+    });
+
     // Execute commit as service role via security definer RPC
     // The RPC function will read the raw_data from booking_import_staging and process it
     const { data, error } = await admin.rpc('booking_import_commit', {
