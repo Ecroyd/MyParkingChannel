@@ -361,9 +361,13 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
       {/* Booking Details Modal */}
       {selectedBookingId && (
         <BookingDetailsModal
-          bookingId={selectedBookingId}
+          booking={filteredBookings.find(b => b.id === selectedBookingId) || null}
           open={!!selectedBookingId}
           onClose={() => setSelectedBookingId(null)}
+          onBookingUpdated={() => {
+            // Refresh the page to get updated data
+            window.location.reload();
+          }}
         />
       )}
     </div>

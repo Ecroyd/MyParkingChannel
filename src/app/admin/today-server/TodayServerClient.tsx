@@ -7,6 +7,7 @@ import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
 
 interface Booking {
   id: string;
+  tenant_id: string;
   reference: string;
   customer_name: string;
   customer_email: string;
@@ -18,6 +19,7 @@ interface Booking {
   money_charged: number;
   source: string;
   flight_number: string;
+  notes: string | null;
 }
 
 interface Tenant {
@@ -288,9 +290,12 @@ export default function TodayServerClient({
       {/* Booking Details Modal */}
       {selectedBookingId && (
         <BookingDetailsModal
-          bookingId={selectedBookingId}
+          booking={[...arrivals, ...departures, ...currentlyParked].find(b => b.id === selectedBookingId) || null}
           open={!!selectedBookingId}
           onClose={() => setSelectedBookingId(null)}
+          onBookingUpdated={() => {
+            router.refresh();
+          }}
         />
       )}
     </>

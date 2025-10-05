@@ -19,39 +19,23 @@ type Booking = {
 };
 
 export default function BookingDetailsModal({
-  bookingId,
+  booking,
   open,
   onClose,
+  onBookingUpdated,
 }: {
-  bookingId: string;
+  booking: Booking | null;
   open: boolean;
   onClose: () => void;
+  onBookingUpdated?: () => void;
 }) {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
   const [tab, setTab] = React.useState<'overview'|'edit'|'extend'>('overview');
-  const [booking, setBooking] = React.useState<Booking | null>(null);
   const [loading, setLoading] = React.useState(false);
 
-  React.useEffect(() => {
-    if (!open) return;
-    (async () => {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('bookings')
-        .select('*')
-        .eq('id', bookingId)
-        .single();
-      if (!error) setBooking(data as unknown as Booking);
-      setLoading(false);
-    })();
-  }, [open, bookingId]);
-
   const refresh = async () => {
-    const { data } = await supabase.from('bookings').select('*').eq('id', bookingId).single();
-    setBooking(data as any);
+    if (onBookingUpdated) {
+      onBookingUpdated();
+    }
   };
 
   if (!open) return null;

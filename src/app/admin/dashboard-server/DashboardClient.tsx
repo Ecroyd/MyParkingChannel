@@ -153,9 +153,13 @@ export default function DashboardClient({
       {/* Booking Details Modal */}
       {selectedBookingId && (
         <BookingDetailsModal
-          bookingId={selectedBookingId}
+          booking={recentBookings.find(b => b.id === selectedBookingId) || null}
           open={!!selectedBookingId}
           onClose={() => setSelectedBookingId(null)}
+          onBookingUpdated={() => {
+            // Refresh the page to get updated data
+            window.location.reload();
+          }}
         />
       )}
     </div>

@@ -11,6 +11,7 @@ import BookingDetailsModal from '@/components/bookings/BookingDetailsModal'
 
 type Booking = {
   id: string
+  tenant_id: string
   reference: string
   customer_name: string
   customer_email: string
@@ -23,8 +24,8 @@ type Booking = {
   status: string
   money_charged: number
   money_received: number
-  flight_number?: string
-  notes?: string
+  flight_number: string | null
+  notes: string | null
   source: string
   created_at: string
 }
@@ -63,8 +64,7 @@ export default function BookingsPageClient({
     setModalOpen(true)
   }
 
-  const handleBookingUpdated = (updatedBooking: Booking) => {
-    setSelectedBooking(updatedBooking)
+  const handleBookingUpdated = () => {
     router.refresh()
   }
 
@@ -220,9 +220,10 @@ export default function BookingsPageClient({
 
       {selectedBooking && (
         <BookingDetailsModal
-          bookingId={selectedBooking.id}
+          booking={selectedBooking}
           open={modalOpen}
           onClose={() => setModalOpen(false)}
+          onBookingUpdated={handleBookingUpdated}
         />
       )}
     </>
