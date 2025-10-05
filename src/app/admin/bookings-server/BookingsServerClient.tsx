@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { CalendarDays, Search, Plus, Filter, Trash2, Eye, Edit } from 'lucide-react';
-import SimpleBookingModal from '@/components/bookings/SimpleBookingModal';
+import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
 import { toast } from 'sonner';
 
 interface BookingsServerClientProps {
@@ -25,8 +25,7 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
   const [customEndDate, setCustomEndDate] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedBookings, setSelectedBookings] = useState<Set<string>>(new Set());
-  const [selectedBooking, setSelectedBooking] = useState<any>(null);
-  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const getDateRange = () => {
@@ -115,8 +114,7 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
   };
 
   const handleBookingClick = (booking: any) => {
-    setSelectedBooking(booking);
-    setModalOpen(true);
+    setSelectedBookingId(booking.id);
   };
 
   const handleSelectBooking = (bookingId: string, checked: boolean) => {
@@ -361,16 +359,11 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
       </Card>
 
       {/* Booking Details Modal */}
-      {modalOpen && selectedBooking && (
-        <SimpleBookingModal
-          booking={selectedBooking}
-          open={modalOpen}
-          onOpenChange={setModalOpen}
-          onBookingUpdated={() => {
-            // Refresh the page to get updated data
-            window.location.reload();
-          }}
-          tenantId={tenant.id}
+      {selectedBookingId && (
+        <BookingDetailsModal
+          bookingId={selectedBookingId}
+          open={!!selectedBookingId}
+          onClose={() => setSelectedBookingId(null)}
         />
       )}
     </div>
