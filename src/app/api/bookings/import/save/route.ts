@@ -98,6 +98,7 @@ export async function POST(req: Request) {
     });
     
     const processedRows = csvRows.map((row: any, index: number) => {
+      // Store only the essential data that the staging table can handle
       const processedRow: any = {
         tenant_id: tenantId,
         row_number: index + 1,
@@ -106,12 +107,22 @@ export async function POST(req: Request) {
         created_by: user.id,
       };
 
-      // Apply mapping
-      Object.entries(mapping).forEach(([field, csvColumn]) => {
-        if (csvColumn && typeof csvColumn === 'string' && row[csvColumn] !== undefined) {
-          processedRow[field] = row[csvColumn];
-        }
-      });
+      // Only add the most basic mapped fields that are likely to exist
+      if (mapping.customer_name && row[mapping.customer_name]) {
+        processedRow.customer_name = row[mapping.customer_name];
+      }
+      if (mapping.start_at && row[mapping.start_at]) {
+        processedRow.start_at = row[mapping.start_at];
+      }
+      if (mapping.end_at && row[mapping.end_at]) {
+        processedRow.end_at = row[mapping.end_at];
+      }
+      if (mapping.reference && row[mapping.reference]) {
+        processedRow.reference = row[mapping.reference];
+      }
+      if (mapping.plate && row[mapping.plate]) {
+        processedRow.plate = row[mapping.plate];
+      }
 
       // Apply manual source if no source column was mapped
       if (!mapping.source && manualSource) {
