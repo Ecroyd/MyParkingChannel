@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@supabase/supabase-js';
 import { toMoney } from '@/lib/money';
 
 type Booking = {
@@ -27,7 +27,10 @@ export default function BookingDetailsModal({
   open: boolean;
   onClose: () => void;
 }) {
-  const supabase = createClientComponentClient();
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
   const [tab, setTab] = React.useState<'overview'|'edit'|'extend'>('overview');
   const [booking, setBooking] = React.useState<Booking | null>(null);
   const [loading, setLoading] = React.useState(false);

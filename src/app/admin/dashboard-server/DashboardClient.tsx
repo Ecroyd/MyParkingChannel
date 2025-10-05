@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import DemandCurve from '@/components/charts/DemandCurve';
-import SimpleBookingModal from '@/components/bookings/SimpleBookingModal';
+import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
 
 interface DashboardClientProps {
   user: any;
@@ -36,12 +36,10 @@ export default function DashboardClient({
   revenueData,
   chartData
 }: DashboardClientProps) {
-  const [selectedBooking, setSelectedBooking] = useState<any>(null);
-  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
 
   const handleBookingClick = (booking: any) => {
-    setSelectedBooking(booking);
-    setModalOpen(true);
+    setSelectedBookingId(booking.id);
   };
 
   return (
@@ -153,16 +151,11 @@ export default function DashboardClient({
       </div>
 
       {/* Booking Details Modal */}
-      {modalOpen && selectedBooking && (
-        <SimpleBookingModal
-          booking={selectedBooking}
-          open={modalOpen}
-          onOpenChange={setModalOpen}
-          onBookingUpdated={() => {
-            // Refresh the page to get updated data
-            window.location.reload();
-          }}
-          tenantId={tenant.id}
+      {selectedBookingId && (
+        <BookingDetailsModal
+          bookingId={selectedBookingId}
+          open={!!selectedBookingId}
+          onClose={() => setSelectedBookingId(null)}
         />
       )}
     </div>
