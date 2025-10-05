@@ -220,12 +220,28 @@ export default function UploadPage() {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.reason || 'Import failed');
+        throw new Error(errorData.error || errorData.details || 'Import failed');
       }
 
       const data = await response.json();
-      setResults(data.results);
-      setStep('results');
+      
+      // Show success/failure feedback
+      if (data.summary) {
+        const { processed, inserted, failed } = data.summary;
+        
+        if (processed === 0) {
+          setError('No bookings were processed. Make sure you have completed the mapping step and uploaded a CSV file.');
+        } else if (failed > 0) {
+          setError(`Import completed with issues: ${inserted} bookings imported, ${failed} failed. Check the logs for details.`);
+        } else {
+          // Success - show results
+          setResults(data.result || []);
+          setStep('results');
+        }
+      } else {
+        setResults(data.result || []);
+        setStep('results');
+      }
     } catch (e: any) {
       setError(e.message);
     } finally {
