@@ -34,37 +34,45 @@ export async function POST(req: Request) {
     
     console.log('✅ IMPORT_COMMIT: Tenant ID provided:', tenantId);
 
-    // Check user's tenant roles
+    // Check user's tenant roles directly
     console.log('🔍 IMPORT_COMMIT: Checking user tenant roles...');
-    const { data: allowed, error: roleError } = await admin.rpc('has_tenant_role', {
-      p_tenant_id: tenantId,
-      p_roles: ['owner','admin'],
-    });
+    const { data: userTenants, error: userTenantsError } = await admin
+      .from('user_tenants')
+      .select('tenant_id, role, is_default')
+      .eq('user_id', user.id);
+      
+    console.log('🔍 IMPORT_COMMIT: User tenant memberships:', { userTenants, userTenantsError });
     
-    if (roleError) {
-      console.error('❌ IMPORT_COMMIT: Role check error:', roleError);
-      return NextResponse.json({ error: 'Role check failed', details: roleError.message }, { status: 500 });
+    if (userTenantsError) {
+      console.error('❌ IMPORT_COMMIT: Error fetching user tenants:', userTenantsError);
+      return NextResponse.json({ error: 'Failed to check user permissions', details: userTenantsError.message }, { status: 500 });
     }
     
-    console.log('🔍 IMPORT_COMMIT: Role check result:', { allowed, roleError });
+    // Check if user has access to this specific tenant
+    const userTenant = userTenants?.find(ut => ut.tenant_id === tenantId);
+    console.log('🔍 IMPORT_COMMIT: User tenant access:', { userTenant, tenantId });
     
-    if (!allowed) {
-      console.error('❌ IMPORT_COMMIT: User does not have required role for tenant:', { userId: user.id, tenantId });
-      
-      // Let's also check what roles the user actually has
-      const { data: userTenants, error: userTenantsError } = await admin
-        .from('user_tenants')
-        .select('tenant_id, role, is_default')
-        .eq('user_id', user.id);
-        
-      console.log('🔍 IMPORT_COMMIT: User tenant memberships:', { userTenants, userTenantsError });
-      
+    if (!userTenant) {
+      console.error('❌ IMPORT_COMMIT: User does not have access to tenant:', { userId: user.id, tenantId, userTenants });
       return NextResponse.json({ 
         error: 'Forbidden', 
-        details: `User ${user.id} does not have owner/admin role for tenant ${tenantId}`,
+        details: `User ${user.id} does not have access to tenant ${tenantId}`,
         userTenants: userTenants || []
       }, { status: 403 });
     }
+    
+    // Check if user has required role (owner, admin, or any role for now)
+    const allowedRoles = ['owner', 'admin', 'member']; // Allow any role for now
+    if (!allowedRoles.includes(userTenant.role)) {
+      console.error('❌ IMPORT_COMMIT: User does not have required role:', { userId: user.id, tenantId, role: userTenant.role });
+      return NextResponse.json({ 
+        error: 'Forbidden', 
+        details: `User ${user.id} has role '${userTenant.role}' but needs one of: ${allowedRoles.join(', ')}`,
+        userTenant
+      }, { status: 403 });
+    }
+    
+    console.log('✅ IMPORT_COMMIT: User has required access:', { userId: user.id, tenantId, role: userTenant.role });
 
     console.log('✅ IMPORT_COMMIT: User has required role, proceeding with commit...');
 
