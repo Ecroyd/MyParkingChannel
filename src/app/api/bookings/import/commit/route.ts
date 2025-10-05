@@ -112,6 +112,11 @@ export async function POST(req: Request) {
         processed: result.processed,
         inserted: result.inserted,
         failed: result.failed
+      },
+      debug: {
+        stagingCount: stagingData?.length || 0,
+        stagingError: stagingError?.message,
+        rpcData: data
       }
     });
   } catch (e: any) {
