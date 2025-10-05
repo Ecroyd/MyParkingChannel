@@ -214,12 +214,7 @@ export default function UploadPage() {
           'X-Tenant-Id': tenantId,
         },
         body: JSON.stringify({
-          fileId: inspectResult.fileId,
-          mapping,
-          manualSource: !mapping.source ? manualSource : undefined, // Use manual source if not mapped from CSV
-          saveMapping,
-          mappingName: saveMapping ? mappingName : undefined,
-          suggestedMappingId,
+          tenantId,
         }),
       });
 
