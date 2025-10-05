@@ -59,7 +59,22 @@ export async function POST(req: Request) {
     }
 
     // Process the CSV data with the mapping
+    console.log('🔍 IMPORT_SAVE: inspectResult structure:', { 
+      hasHeaders: !!inspectResult.headers,
+      hasRows: !!inspectResult.rows,
+      headersType: typeof inspectResult.headers,
+      rowsType: typeof inspectResult.rows,
+      rowsLength: inspectResult.rows?.length,
+      inspectResultKeys: Object.keys(inspectResult || {})
+    });
+    
     const { headers, rows } = inspectResult;
+    
+    if (!rows || !Array.isArray(rows)) {
+      console.error('IMPORT_SAVE_ERROR: No rows data in inspectResult:', { inspectResult });
+      return NextResponse.json({ error: 'No CSV data found. Please upload a CSV file first.' }, { status: 400 });
+    }
+    
     const processedRows = rows.map((row: any, index: number) => {
       const processedRow: any = {
         tenant_id: tenantId,
