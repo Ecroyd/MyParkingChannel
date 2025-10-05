@@ -207,7 +207,28 @@ export default function UploadPage() {
     setError(null);
 
     try {
-      const response = await fetch('/api/bookings/import/commit', {
+      // First, save the mapped data to booking_imports table
+      const saveResponse = await fetch('/api/bookings/import/save', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Tenant-Id': tenantId,
+        },
+        body: JSON.stringify({
+          tenantId,
+          mapping,
+          manualSource: !mapping.source ? manualSource : undefined,
+          inspectResult,
+        }),
+      });
+
+      if (!saveResponse.ok) {
+        const errorData = await saveResponse.json();
+        throw new Error(errorData.error || errorData.details || 'Failed to save mapped data');
+      }
+
+      // Then, commit the import
+      const commitResponse = await fetch('/api/bookings/import/commit', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -218,12 +239,12 @@ export default function UploadPage() {
         }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
+      if (!commitResponse.ok) {
+        const errorData = await commitResponse.json();
         throw new Error(errorData.error || errorData.details || 'Import failed');
       }
 
-      const data = await response.json();
+      const data = await commitResponse.json();
       
       // Show success/failure feedback
       if (data.summary) {
