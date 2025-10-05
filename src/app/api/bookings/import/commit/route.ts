@@ -116,7 +116,14 @@ export async function POST(req: Request) {
       debug: {
         stagingCount: stagingData?.length || 0,
         stagingError: stagingError?.message,
-        rpcData: data
+        rpcData: data,
+        sampleStagingData: stagingData?.[0] ? {
+          id: stagingData[0].id,
+          raw_payload: stagingData[0].raw_payload,
+          customer_name_mapped: stagingData[0].raw_payload?.row_data?.[stagingData[0].raw_payload?.mapping?.customer_name] || 'NOT_FOUND',
+          start_at_mapped: stagingData[0].raw_payload?.row_data?.[stagingData[0].raw_payload?.mapping?.start_at] || 'NOT_FOUND',
+          end_at_mapped: stagingData[0].raw_payload?.row_data?.[stagingData[0].raw_payload?.mapping?.end_at] || 'NOT_FOUND'
+        } : null
       }
     });
   } catch (e: any) {
