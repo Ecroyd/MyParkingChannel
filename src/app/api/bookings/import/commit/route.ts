@@ -150,9 +150,10 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { fileId, mapping, saveMapping, mappingName, suggestedMappingId }: {
+    const { fileId, mapping, manualSource, saveMapping, mappingName, suggestedMappingId }: {
       fileId: string;
       mapping: BookingMapping;
+      manualSource?: string; // Manual source when not mapped from CSV
       saveMapping?: boolean;
       mappingName?: string;
       suggestedMappingId?: string; // ID of the suggested mapping that was used
@@ -239,9 +240,14 @@ export async function POST(req: Request) {
           money_charged: mapping.money_charged ? Number(row[mapping.money_charged]) || 0 : 0,
         };
 
-        // Add source if mapped and valid
+        // Add source - either from CSV mapping or manual selection
         if (mapping.source && row[mapping.source]) {
+          // Use source from CSV column
           const mappedSource = mapSource(row[mapping.source]);
+          if (mappedSource) dbRow.source = mappedSource;
+        } else if (manualSource) {
+          // Use manual source when no CSV column is mapped
+          const mappedSource = mapSource(manualSource);
           if (mappedSource) dbRow.source = mappedSource;
         }
 

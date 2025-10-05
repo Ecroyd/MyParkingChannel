@@ -25,6 +25,11 @@ type BookingMapping = {
   flight_number?: string | null;
 };
 
+type SourceOption = {
+  value: string;
+  label: string;
+};
+
 type SavedMapping = {
   id: string;
   name: string;
@@ -55,6 +60,15 @@ type InspectResult = {
   optionalFields: string[];
 };
 
+// Available source options for manual selection
+const SOURCE_OPTIONS: SourceOption[] = [
+  { value: 'direct', label: 'Direct' },
+  { value: 'holiday_extras', label: 'Holiday Extras' },
+  { value: 'parkvia', label: 'ParkVia' },
+  { value: 'justpark', label: 'JustPark' },
+  { value: 'other', label: 'Other' },
+];
+
 export default function UploadPage() {
   const [step, setStep] = useState<'upload' | 'map' | 'results'>('upload');
   const [file, setFile] = useState<File | null>(null);
@@ -67,6 +81,7 @@ export default function UploadPage() {
     start_at: null,
     end_at: null,
   });
+  const [manualSource, setManualSource] = useState<string>('direct'); // Manual source selection
   const [saveMapping, setSaveMapping] = useState(false);
   const [mappingName, setMappingName] = useState('');
   const [suggestedMappingId, setSuggestedMappingId] = useState<string | null>(null);
@@ -201,6 +216,7 @@ export default function UploadPage() {
         body: JSON.stringify({
           fileId: inspectResult.fileId,
           mapping,
+          manualSource: !mapping.source ? manualSource : undefined, // Use manual source if not mapped from CSV
           saveMapping,
           mappingName: saveMapping ? mappingName : undefined,
           suggestedMappingId,
@@ -463,6 +479,33 @@ export default function UploadPage() {
             ))}
           </div>
         </Card>
+
+        {/* Manual Source Selection */}
+        {!mapping.source && (
+          <Card className="p-4 border-blue-200 bg-blue-50">
+            <h3 className="font-semibold mb-3 text-blue-800">Source Selection</h3>
+            <p className="text-sm text-blue-700 mb-3">
+              Since no source column was mapped from your CSV, please select the source for all bookings:
+            </p>
+            <div className="max-w-sm">
+              <Label htmlFor="manualSource" className="text-sm font-medium">
+                Booking Source
+              </Label>
+              <Select value={manualSource} onValueChange={setManualSource}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select source..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {SOURCE_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </Card>
+        )}
 
         {/* Save Mapping */}
         <Card className="p-4">
