@@ -33,7 +33,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Failed to check user permissions', details: userTenantsError.message }, { status: 500 });
     }
     
-    // Check if user has access to this specific tenant
     const userTenant = userTenants?.find(ut => ut.tenant_id === tenantId);
     
     if (!userTenant) {
@@ -44,7 +43,6 @@ export async function POST(req: Request) {
       }, { status: 403 });
     }
     
-    // Check if user has required role
     const allowedRoles = ['owner', 'admin', 'member'];
     if (!allowedRoles.includes(userTenant.role)) {
       return NextResponse.json({ 
@@ -54,77 +52,118 @@ export async function POST(req: Request) {
       }, { status: 403 });
     }
 
-    // First, let's check what data is in the staging table
-    console.log('🔍 IMPORT_COMMIT: Starting commit process...', { tenantId, userId: user.id });
-    
+    // Get the staging data
     const { data: stagingData, error: stagingError } = await admin
       .from('booking_import_staging')
-      .select('id, tenant_id, status, raw_payload')
+      .select('*')
       .eq('tenant_id', tenantId)
       .eq('status', 'pending');
     
-    console.log('🔍 IMPORT_COMMIT: Staging table query result:', { 
-      count: stagingData?.length || 0, 
-      stagingError: stagingError?.message,
-      hasData: !!stagingData,
-      sampleId: stagingData?.[0]?.id,
-      samplePayload: stagingData?.[0]?.raw_payload ? 'exists' : 'missing'
-    });
-
-    // Execute commit as service role via security definer RPC
-    console.log('🔍 IMPORT_COMMIT: Calling RPC function...', { 
-      functionName: 'booking_import_commit',
-      p_tenant_id: tenantId,
-      p_actor: user.id 
-    });
-    
-    const { data, error } = await admin.rpc('booking_import_commit', {
-      p_tenant_id: tenantId,
-      p_actor: user.id,
-    });
-    
-    console.log('🔍 IMPORT_COMMIT: RPC function result:', { 
-      hasData: !!data,
-      dataLength: data?.length || 0,
-      error: error?.message,
-      result: data?.[0]
-    });
-
-    if (error) {
-      console.error('IMPORT_COMMIT_RPC_ERROR:', error);
-      return NextResponse.json({ error: error.message, details: error }, { status: 400 });
+    if (stagingError) {
+      return NextResponse.json({ error: 'Failed to get staging data', details: stagingError.message }, { status: 500 });
     }
 
-    // Log success with details
-    const result = data?.[0] || { processed: 0, inserted: 0, failed: 0 };
+    if (!stagingData || stagingData.length === 0) {
+      return NextResponse.json({ 
+        ok: true, 
+        result: [],
+        summary: { processed: 0, inserted: 0, failed: 0 }
+      });
+    }
+
+    let processed = 0;
+    let inserted = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    // Process each staging record
+    for (const record of stagingData) {
+      processed++;
+      
+      try {
+        const payload = record.raw_payload;
+        const rowData = payload.row_data;
+        const mapping = payload.mapping;
+        const manualSource = payload.manual_source || 'direct';
+
+        // Extract the mapped values
+        const customerName = rowData[mapping.customer_name] || '';
+        const startAt = rowData[mapping.start_at] || '';
+        const endAt = rowData[mapping.end_at] || '';
+        const customerEmail = rowData[mapping.customer_email] || '';
+        const reference = rowData[mapping.reference] || '';
+        const plate = rowData[mapping.plate] || '';
+
+        // Validate required fields
+        if (!customerName || !startAt || !endAt) {
+          throw new Error(`Missing required fields: customerName=${customerName}, startAt=${startAt}, endAt=${endAt}`);
+        }
+
+        // Parse dates
+        const startDate = new Date(startAt);
+        const endDate = new Date(endAt);
+        
+        if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+          throw new Error(`Invalid dates: startAt=${startAt}, endAt=${endAt}`);
+        }
+
+        // Insert the booking
+        const { data: bookingData, error: insertError } = await admin
+          .from('bookings')
+          .insert({
+            tenant_id: tenantId,
+            customer_name: customerName,
+            customer_email: customerEmail || null,
+            start_at: startDate.toISOString(),
+            end_at: endDate.toISOString(),
+            reference: reference || null,
+            plate: plate || null,
+            source: manualSource,
+            created_by: user.id,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .select('id')
+          .single();
+
+        if (insertError) {
+          throw new Error(`Database insert failed: ${insertError.message}`);
+        }
+
+        // Update staging record to completed
+        await admin
+          .from('booking_import_staging')
+          .update({ status: 'completed' })
+          .eq('id', record.id);
+
+        inserted++;
+
+      } catch (error: any) {
+        failed++;
+        errors.push(`Record ${processed}: ${error.message}`);
+        
+        // Update staging record to failed
+        await admin
+          .from('booking_import_staging')
+          .update({ status: 'failed' })
+          .eq('id', record.id);
+      }
+    }
+
     console.log('✅ IMPORT_COMMIT_SUCCESS:', {
       tenantId,
       userId: user.id,
-      processed: result.processed,
-      inserted: result.inserted,
-      failed: result.failed
+      processed,
+      inserted,
+      failed,
+      errors: errors.slice(0, 5) // Log first 5 errors
     });
 
     return NextResponse.json({ 
       ok: true, 
-      result: data,
-      summary: {
-        processed: result.processed,
-        inserted: result.inserted,
-        failed: result.failed
-      },
-      debug: {
-        stagingCount: stagingData?.length || 0,
-        stagingError: stagingError?.message,
-        rpcData: data,
-        sampleStagingData: stagingData?.[0] ? {
-          id: stagingData[0].id,
-          raw_payload: stagingData[0].raw_payload,
-          customer_name_mapped: stagingData[0].raw_payload?.row_data?.[stagingData[0].raw_payload?.mapping?.customer_name] || 'NOT_FOUND',
-          start_at_mapped: stagingData[0].raw_payload?.row_data?.[stagingData[0].raw_payload?.mapping?.start_at] || 'NOT_FOUND',
-          end_at_mapped: stagingData[0].raw_payload?.row_data?.[stagingData[0].raw_payload?.mapping?.end_at] || 'NOT_FOUND'
-        } : null
-      }
+      result: [{ processed, inserted, failed }],
+      summary: { processed, inserted, failed },
+      errors: errors.slice(0, 10) // Return first 10 errors
     });
   } catch (e: any) {
     console.error('❌ IMPORT_COMMIT_FATAL:', e);

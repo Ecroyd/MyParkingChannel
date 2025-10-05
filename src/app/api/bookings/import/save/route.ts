@@ -22,9 +22,11 @@ export async function POST(req: Request) {
     if (!tenantId) {
       return NextResponse.json({ error: 'tenantId required' }, { status: 400 });
     }
-
-    if (!mapping || !inspectResult) {
-      return NextResponse.json({ error: 'mapping and inspectResult required' }, { status: 400 });
+    if (!mapping) {
+      return NextResponse.json({ error: 'mapping required' }, { status: 400 });
+    }
+    if (!inspectResult) {
+      return NextResponse.json({ error: 'inspectResult required' }, { status: 400 });
     }
 
     // Check user's tenant roles
@@ -37,7 +39,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Failed to check user permissions', details: userTenantsError.message }, { status: 500 });
     }
     
-    // Check if user has access to this specific tenant
     const userTenant = userTenants?.find(ut => ut.tenant_id === tenantId);
     
     if (!userTenant) {
@@ -48,7 +49,6 @@ export async function POST(req: Request) {
       }, { status: 403 });
     }
     
-    // Check if user has required role
     const allowedRoles = ['owner', 'admin', 'member'];
     if (!allowedRoles.includes(userTenant.role)) {
       return NextResponse.json({ 
@@ -58,25 +58,20 @@ export async function POST(req: Request) {
       }, { status: 403 });
     }
 
-    // We need the full CSV data, not just sample rows
-    // The inspect API only returns sample rows, so we need to read the full file from storage
+    // Read the full CSV file from storage
     const { fileId, headers, totalRows } = inspectResult;
     
     if (!fileId || !headers || !totalRows) {
-      console.error('IMPORT_SAVE_ERROR: Missing required data in inspectResult:', { inspectResult });
       return NextResponse.json({ error: 'Missing file data. Please upload a CSV file first.' }, { status: 400 });
     }
 
-    // Read the full CSV file from storage
     const storageKey = `${tenantId}/${fileId}.csv`;
-    console.log('🔍 IMPORT_SAVE: Reading full CSV from storage:', { storageKey, totalRows });
     
     const { data: fileData, error: downloadError } = await admin.storage
       .from('imports')
       .download(storageKey);
 
     if (downloadError) {
-      console.error('IMPORT_SAVE_ERROR: Failed to download CSV file:', downloadError);
       return NextResponse.json({ error: 'Failed to read CSV file from storage.' }, { status: 400 });
     }
 
@@ -90,30 +85,19 @@ export async function POST(req: Request) {
       csvHeaders.forEach((h,i) => rec[h] = cols[i] ?? "");
       return rec;
     });
-
-    console.log('🔍 IMPORT_SAVE: Parsed full CSV:', { 
-      headers: csvHeaders.length, 
-      rows: csvRows.length,
-      expectedTotal: totalRows 
-    });
     
-    const processedRows = csvRows.map((row: any, index: number) => {
-      // Use the correct column names from the actual table schema
-      const processedRow: any = {
-        tenant_id: tenantId,
-        source_file: `${fileId}.csv`, // Store the file ID as source
-        raw_payload: {
-          row_data: row,
-          row_number: index + 1,
-          mapping: mapping,
-          manual_source: manualSource
-        },
-        status: 'pending',
-        created_by: user.id,
-      };
-
-      return processedRow;
-    });
+    const processedRows = csvRows.map((row: any, index: number) => ({
+      tenant_id: tenantId,
+      source_file: `${fileId}.csv`,
+      raw_payload: {
+        row_data: row,
+        row_number: index + 1,
+        mapping: mapping,
+        manual_source: manualSource
+      },
+      status: 'pending',
+      created_by: user.id,
+    }));
 
     // Insert into booking_import_staging table
     const { data, error } = await admin
