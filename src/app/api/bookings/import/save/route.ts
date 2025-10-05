@@ -121,9 +121,9 @@ export async function POST(req: Request) {
       return processedRow;
     });
 
-    // Insert into booking_imports table
+    // Insert into booking_import_staging table
     const { data, error } = await admin
-      .from('booking_imports')
+      .from('booking_import_staging')
       .insert(processedRows)
       .select('id');
 

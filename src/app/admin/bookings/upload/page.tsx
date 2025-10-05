@@ -339,7 +339,7 @@ export default function UploadPage() {
             disabled={!file || !tenantId || loading}
             className="w-full"
           >
-            {loading ? 'Analyzing...' : 'Upload & Analyze'}
+            {loading ? 'Analysing...' : 'Upload & Analyse'}
           </Button>
         </div>
       </Card>
