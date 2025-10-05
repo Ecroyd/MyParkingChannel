@@ -180,7 +180,7 @@ export async function POST(req: Request) {
     slog("commit_start", { tenant_id, fileId, totalRows: rows.length });
 
     // Validate required mappings (reference is optional - will auto-generate if empty)
-    const requiredFields = ['start_at', 'end_at'];
+    const requiredFields = ['customer_name', 'start_at', 'end_at'];
     const missingRequired = requiredFields.filter(field => !mapping[field as keyof BookingMapping]);
     if (missingRequired.length > 0) {
       return NextResponse.json({ 
@@ -199,16 +199,17 @@ export async function POST(req: Request) {
         // Extract values using mapping
         const rawReference = mapping.reference ? row[mapping.reference] : '';
         const reference = rawReference?.trim() || crypto.randomUUID(); // Auto-generate if empty
+        const customer_name = mapping.customer_name ? row[mapping.customer_name] : null;
         const plate = mapping.plate ? row[mapping.plate] : null;
         const start_at = mapping.start_at ? row[mapping.start_at] : null;
         const end_at = mapping.end_at ? row[mapping.end_at] : null;
         
-        // Validate required fields (only start_at, end_at are truly required)
-        if (!start_at?.trim() || !end_at?.trim()) {
+        // Validate required fields (customer_name, start_at, end_at are required)
+        if (!customer_name?.trim() || !start_at?.trim() || !end_at?.trim()) {
           rejects.push({
             row: index + 1,
             reason: 'Missing required fields',
-            data: { reference, plate, start_at, end_at }
+            data: { reference, customer_name, plate, start_at, end_at }
           });
           continue;
         }
@@ -233,7 +234,7 @@ export async function POST(req: Request) {
           plate: plate ? plate.toUpperCase().trim() : null,
           start_at: startDate.toISOString(),
           end_at: endDate.toISOString(),
-          customer_name: mapping.customer_name ? (row[mapping.customer_name] || "Unknown") : "Unknown",
+          customer_name: customer_name.trim(),
           customer_email: mapping.customer_email ? row[mapping.customer_email] : null,
           flight_number: mapping.flight_number ? row[mapping.flight_number] : null,
           money_received: mapping.money_received ? Number(row[mapping.money_received]) || 0 : 0,

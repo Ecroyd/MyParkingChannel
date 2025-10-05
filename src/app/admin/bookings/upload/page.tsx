@@ -243,9 +243,13 @@ export default function UploadPage() {
     setMappingName(savedMapping.name);
   };
 
+  const getMissingRequiredFields = () => {
+    const required = ['customer_name', 'start_at', 'end_at'];
+    return required.filter(field => !mapping[field as keyof BookingMapping]);
+  };
+
   const isMappingValid = () => {
-    const required = ['reference', 'plate', 'start_at', 'end_at'];
-    return required.every(field => mapping[field as keyof BookingMapping]);
+    return getMissingRequiredFields().length === 0;
   };
 
   const renderUploadStep = () => (
@@ -407,9 +411,22 @@ export default function UploadPage() {
           <h3 className="font-semibold mb-4 flex items-center gap-2">
             Required Fields
             <Badge variant={isMappingValid() ? "default" : "destructive"}>
-              {isMappingValid() ? "✓ Complete" : "Missing"}
+              {isMappingValid() ? "✓ Complete" : `${getMissingRequiredFields().length} Missing`}
             </Badge>
           </h3>
+          
+          {!isMappingValid() && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-sm text-red-700 font-medium mb-1">Missing required fields:</p>
+              <ul className="text-sm text-red-600 list-disc list-inside">
+                {getMissingRequiredFields().map(field => (
+                  <li key={field}>
+                    {field.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {inspectResult.requiredFields

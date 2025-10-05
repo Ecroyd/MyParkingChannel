@@ -137,8 +137,8 @@ export async function POST(req: Request) {
         } : null
       },
       savedMappings: savedMappings || [],
-      requiredFields: ['reference', 'plate', 'start_at', 'end_at'],
-      optionalFields: ['customer_name', 'customer_email', 'money_received', 'money_charged', 'source', 'flight_number']
+      requiredFields: ['customer_name', 'start_at', 'end_at'],
+      optionalFields: ['reference', 'plate', 'customer_email', 'money_received', 'money_charged', 'source', 'flight_number']
     });
 
   } catch (e: any) {
