@@ -58,24 +58,46 @@ export async function POST(req: Request) {
       }, { status: 403 });
     }
 
-    // Process the CSV data with the mapping
-    console.log('🔍 IMPORT_SAVE: inspectResult structure:', { 
-      hasHeaders: !!inspectResult.headers,
-      hasRows: !!inspectResult.rows,
-      headersType: typeof inspectResult.headers,
-      rowsType: typeof inspectResult.rows,
-      rowsLength: inspectResult.rows?.length,
-      inspectResultKeys: Object.keys(inspectResult || {})
+    // We need the full CSV data, not just sample rows
+    // The inspect API only returns sample rows, so we need to read the full file from storage
+    const { fileId, headers, totalRows } = inspectResult;
+    
+    if (!fileId || !headers || !totalRows) {
+      console.error('IMPORT_SAVE_ERROR: Missing required data in inspectResult:', { inspectResult });
+      return NextResponse.json({ error: 'Missing file data. Please upload a CSV file first.' }, { status: 400 });
+    }
+
+    // Read the full CSV file from storage
+    const storageKey = `${tenantId}/${fileId}.csv`;
+    console.log('🔍 IMPORT_SAVE: Reading full CSV from storage:', { storageKey, totalRows });
+    
+    const { data: fileData, error: downloadError } = await admin.storage
+      .from('imports')
+      .download(storageKey);
+
+    if (downloadError) {
+      console.error('IMPORT_SAVE_ERROR: Failed to download CSV file:', downloadError);
+      return NextResponse.json({ error: 'Failed to read CSV file from storage.' }, { status: 400 });
+    }
+
+    // Parse the full CSV file
+    const csvText = await fileData.text();
+    const lines = csvText.split(/\r?\n/).filter(Boolean);
+    const csvHeaders = lines[0].split(",").map(h => h.trim());
+    const csvRows = lines.slice(1).map(line => {
+      const cols = line.split(",").map(v => v.trim());
+      const rec: Record<string,string> = {};
+      csvHeaders.forEach((h,i) => rec[h] = cols[i] ?? "");
+      return rec;
+    });
+
+    console.log('🔍 IMPORT_SAVE: Parsed full CSV:', { 
+      headers: csvHeaders.length, 
+      rows: csvRows.length,
+      expectedTotal: totalRows 
     });
     
-    const { headers, rows } = inspectResult;
-    
-    if (!rows || !Array.isArray(rows)) {
-      console.error('IMPORT_SAVE_ERROR: No rows data in inspectResult:', { inspectResult });
-      return NextResponse.json({ error: 'No CSV data found. Please upload a CSV file first.' }, { status: 400 });
-    }
-    
-    const processedRows = rows.map((row: any, index: number) => {
+    const processedRows = csvRows.map((row: any, index: number) => {
       const processedRow: any = {
         tenant_id: tenantId,
         row_number: index + 1,
