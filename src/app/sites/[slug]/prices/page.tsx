@@ -77,8 +77,6 @@ export default async function PricesPage({ params }: PageProps) {
 
   const features = [
     { icon: Shield, text: "24/7 CCTV Monitoring", included: true },
-    { icon: Car, text: "ANPR Entry System", included: true },
-    { icon: Clock, text: "Free Shuttle Service", included: true },
     { icon: Wifi, text: "Free WiFi", included: true },
     { icon: Check, text: "Secure Payment", included: true },
     { icon: Check, text: "Free Cancellation (24h)", included: true },

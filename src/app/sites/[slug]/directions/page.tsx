@@ -111,7 +111,7 @@ export default async function DirectionsPage({ params }: PageProps) {
                       </div>
                       <p className="font-mono text-sky-700 text-lg mb-2">{p.what3words}</p>
                       <a
-                        href={`https://what3words.com/${p.what3words.replace('///', '')}`}
+                        href={`https://what3words.com/${p.what3words.replace(/^\/\/\//, '')}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-sm text-sky-600 hover:text-sky-700 font-medium"
@@ -168,20 +168,6 @@ export default async function DirectionsPage({ params }: PageProps) {
                   <div>
                     <p className="font-medium text-slate-900">24/7 Access</p>
                     <p className="text-sm text-slate-600">Available around the clock</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full mt-2"></div>
-                  <div>
-                    <p className="font-medium text-slate-900">ANPR Entry</p>
-                    <p className="text-sm text-slate-600">Automatic number plate recognition</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full mt-2"></div>
-                  <div>
-                    <p className="font-medium text-slate-900">Free Shuttle</p>
-                    <p className="text-sm text-slate-600">Regular service to terminal</p>
                   </div>
                 </div>
               </div>

@@ -177,7 +177,7 @@ export default async function TenantHome({
             
             {/* Features/USPs */}
             <ul className="mt-6 grid grid-cols-2 gap-2 text-sm text-gray-700 mb-8">
-              {(p?.features ?? ["CCTV", "24/7 Access", "Free Shuttle", "ANPR-protected"]).map((f: string) => (
+              {(p?.features ?? ["CCTV", "24/7 Access"]).map((f: string) => (
                 <li key={f} className="rounded-xl border px-3 py-2 bg-white/70 backdrop-blur shadow-sm">
                   {f}
                 </li>
