@@ -1,8 +1,7 @@
 import { getSiteContext } from "@/lib/site";
 import { Header, Footer } from "../_components/SiteChrome";
 import { MapPin, Navigation, Clock, Car } from "lucide-react";
-import What3WordsMap from "@/components/maps/What3WordsMap";
-import SimpleMap from "@/components/maps/SimpleMap";
+import LocationMap from "@/components/maps/LocationMap";
 import type { Metadata } from "next";
 
 interface PageProps {
@@ -178,22 +177,14 @@ export default async function DirectionsPage({ params }: PageProps) {
           <div className="space-y-6">
             <div className="rounded-2xl border bg-white/70 backdrop-blur shadow-lg p-6">
               <h2 className="text-xl font-semibold text-slate-900 mb-4">Location Map</h2>
-              {fullAddress || p?.what3words ? (
-                <SimpleMap 
-                  className="h-80 w-full"
-                  lat={p?.latitude || 51.5074}
-                  lng={p?.longitude || -0.1278}
-                  zoom={15}
-                  title={p?.business_name || "Parking Location"}
-                />
-              ) : (
-                <div className="h-80 bg-slate-100 rounded-lg flex items-center justify-center">
-                  <div className="text-center">
-                    <MapPin className="h-12 w-12 text-slate-400 mx-auto mb-2" />
-                    <p className="text-slate-600">Map will be available once address is configured</p>
-                  </div>
-                </div>
-              )}
+              <LocationMap 
+                className="h-80 w-full"
+                lat={p?.latitude}
+                lng={p?.longitude}
+                zoom={15}
+                title={p?.business_name || "Parking Location"}
+                address={fullAddress}
+              />
             </div>
 
             {/* Contact Information */}
