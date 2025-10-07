@@ -315,6 +315,11 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
                           <Badge className={getStatusColor(booking.status)}>
                             {booking.status.replace('_', ' ').toUpperCase()}
                           </Badge>
+                          {booking.is_incomplete && (
+                            <Badge variant="warning" className="bg-yellow-100 text-yellow-800">
+                              Incomplete ({booking.missing_fields?.join(', ')})
+                            </Badge>
+                          )}
                           {booking.reference && (
                             <span className="text-sm text-gray-500">#{booking.reference}</span>
                           )}
@@ -327,7 +332,7 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
                             <span className="font-medium">Period:</span> {formatDate(booking.start_at)} - {formatDate(booking.end_at)}
                           </div>
                           <div>
-                            <span className="font-medium">Amount:</span> £{booking.money_received || 0}
+                            <span className="font-medium">Amount:</span> £{booking.money_charged || 0}
                           </div>
                         </div>
                       </div>

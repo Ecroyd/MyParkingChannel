@@ -19,6 +19,8 @@ type Booking = {
   money_charged: number | null;
   notes: string | null;
   flight_number: string | null;
+  is_incomplete?: boolean;
+  missing_fields?: string[];
 };
 
 export default function BookingDetailsModal({
@@ -47,7 +49,14 @@ export default function BookingDetailsModal({
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center">
       <div className="bg-white w-full max-w-3xl rounded-2xl shadow-xl">
         <div className="p-4 border-b flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Booking {booking?.reference}</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-semibold">Booking {booking?.reference}</h2>
+            {booking?.is_incomplete && (
+              <span className="inline-flex px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded">
+                Incomplete ({booking.missing_fields?.join(', ')})
+              </span>
+            )}
+          </div>
           <button className="text-sm" onClick={onClose}>Close</button>
         </div>
 
@@ -117,15 +126,17 @@ function EditForm({ booking, onSaved }: { booking: any; onSaved: () => void }) {
     car_color: booking.car_color || '',
     flight_number: booking.flight_number || '',
     notes: booking.notes || '',
+    start_at: booking.start_at ? new Date(booking.start_at).toISOString().slice(0, 16) : '',
+    end_at: booking.end_at ? new Date(booking.end_at).toISOString().slice(0, 16) : '',
   });
   const [saving, setSaving] = React.useState(false);
 
   const save = async () => {
     setSaving(true);
-    const res = await fetch('/api/bookings/update', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }, // 👈 important
-      body: JSON.stringify({ id: booking.id, updates: form }),
+    const res = await fetch(`/api/bookings/${booking.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(form),
     });
 
     const json = await res.json().catch(() => ({}));
@@ -141,6 +152,28 @@ function EditForm({ booking, onSaved }: { booking: any; onSaved: () => void }) {
 
   return (
     <div className="grid gap-3">
+      {/* Date fields */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Start Date & Time</label>
+          <input
+            type="datetime-local"
+            className="w-full border rounded p-2"
+            value={form.start_at}
+            onChange={e=>setForm(prev=>({ ...prev, start_at: e.target.value }))}
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">End Date & Time</label>
+          <input
+            type="datetime-local"
+            className="w-full border rounded p-2"
+            value={form.end_at}
+            onChange={e=>setForm(prev=>({ ...prev, end_at: e.target.value }))}
+          />
+        </div>
+      </div>
+      
       {['customer_email','plate','car_make','car_model','car_color','flight_number'].map((k) => (
         <div key={k}>
           <label className="block text-xs text-gray-500 mb-1">{k.replace('_',' ')}</label>

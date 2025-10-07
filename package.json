@@ -6,7 +6,7 @@
     "node": "20.x"
   },
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3002",
     "build": "next build",
     "start": "next start",
     "lint": "eslint ."
@@ -42,10 +42,12 @@
     "clsx": "^2.1.1",
     "critters": "^0.0.23",
     "crypto-js": "^4.2.0",
+    "csv-parse": "^6.1.0",
     "csv-parser": "^3.0.0",
     "csv-stringify": "^6.6.0",
     "date-fns": "^2.30.0",
     "date-fns-tz": "^2.0.0",
+    "dayjs": "^1.11.18",
     "framer-motion": "^12.23.12",
     "jose": "^6.1.0",
     "leaflet": "^1.9.4",

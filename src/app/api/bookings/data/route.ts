@@ -50,6 +50,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch bookings' }, { status: 500 });
     }
 
+    console.log(`[bookings/data] Found ${bookings?.length || 0} bookings for tenant ${tenantId} from ${from} to ${to}`);
+    if (bookings && bookings.length > 0) {
+      console.log('[bookings/data] Sample booking:', bookings[0]);
+    }
+
     return NextResponse.json({ 
       bookings: bookings || [],
       tenantId 

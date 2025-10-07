@@ -19,8 +19,7 @@ export const ADMIN_NAV: NavNode[] = [
     href: "/admin/bookings-server",
     section: "Core",
     children: [
-      { key: "bookings-upload", label: "Upload CSV", href: "/admin/bookings/upload" },
-      { key: "uploads", label: "File Uploads", href: "/admin/uploads" },
+      { key: "bookings-upload", label: "Import Data", href: "/admin/bookings/upload" },
     ],
   },
   { key: "booking-rules", label: "Booking Rules", href: "/admin/booking-rules", section: "Core" },
@@ -50,6 +49,8 @@ export const ADMIN_NAV: NavNode[] = [
       { key: "setup", label: "Initial Setup", href: "/admin/setup" },
     ],
   },
+  { key: "domains", label: "Domains", href: "/admin/domains", section: "Settings" },
+  { key: "payments", label: "Payments", href: "/admin/payments", section: "Settings" },
 ];
 
 

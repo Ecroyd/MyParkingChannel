@@ -119,6 +119,7 @@ export default function DemandCurve({
           throw new Error(`HTTP error! status: ${response.status}`);
         }
         const result = await response.json();
+        console.log('DemandCurve: Fetched bookings:', result.bookings?.length || 0, result.bookings);
         setBookings(result.bookings || []);
       } catch (error) {
         console.error("Error fetching bookings:", error);
@@ -157,6 +158,15 @@ export default function DemandCurve({
     const rows: DayRow[] = [];
     const chSet = new Set<string>();
 
+    console.log('DemandCurve: Processing', bookings.length, 'bookings for', days.length, 'days');
+    if (bookings.length > 0) {
+      console.log('DemandCurve: Sample booking:', {
+        start: bookings[0].start_at,
+        end: bookings[0].end_at,
+        source: bookings[0].source
+      });
+    }
+
     for (const day of days) {
       const dayStr = format(day, "yyyy-MM-dd");
       const row: DayRow = { date: dayStr, capacity, total: 0 };
@@ -165,8 +175,16 @@ export default function DemandCurve({
         const s = new Date(b.start_at);
         const e = new Date(b.end_at);
 
-        // booking counts on this day if it overlaps [00:00..23:59] of that day
-        if (s <= day && e >= day) {
+        // Create day boundaries (start and end of day)
+        const dayStart = new Date(day);
+        dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = new Date(day);
+        dayEnd.setHours(23, 59, 59, 999);
+
+        // A booking is active on this day if it overlaps with this day
+        // This means: booking started before end of day AND booking ends after start of day
+        // This gives us cumulative occupancy (cars parked on this day)
+        if (s <= dayEnd && e >= dayStart) {
           const name = keyFromSource((b.source ?? "unknown").trim() || "unknown");
           chSet.add(name);
           row[name] = (row[name] as number | undefined ?? 0) + 1;
@@ -174,6 +192,11 @@ export default function DemandCurve({
         }
       }
 
+      if (row.total > 0) {
+        console.log(`DemandCurve: Day ${dayStr} has ${row.total} active bookings (cumulative occupancy):`, row);
+      } else {
+        console.log(`DemandCurve: Day ${dayStr} has 0 active bookings`);
+      }
       rows.push(row);
     }
 

@@ -121,7 +121,14 @@ export default function TodayServerClient({
           {booking.reference}
         </td>
         <td className="px-4 py-3 text-sm text-gray-900">
-          {booking.customer_name}
+          <div className="flex items-center gap-2">
+            {booking.customer_name}
+            {booking.is_incomplete && (
+              <span className="inline-flex px-1.5 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 rounded">
+                Incomplete
+              </span>
+            )}
+          </div>
         </td>
         <td className="px-4 py-3 text-sm text-gray-900">
           {booking.plate}
@@ -130,7 +137,7 @@ export default function TodayServerClient({
           {new Date(time).toLocaleTimeString('en-GB', { timeZone: 'UTC' })}
         </td>
         <td className="px-4 py-3 text-sm text-gray-900">
-          £{booking.money_received || 0}
+          £{booking.money_charged || 0}
         </td>
         <td className="px-4 py-3">
           <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColor}`}>

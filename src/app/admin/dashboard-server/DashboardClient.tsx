@@ -135,11 +135,18 @@ export default function DashboardClient({
                 onClick={() => handleBookingClick(booking)}
               >
                 <div>
-                  <p className="font-medium text-gray-900">{booking.customer_name}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium text-gray-900">{booking.customer_name}</p>
+                    {booking.is_incomplete && (
+                      <span className="inline-flex px-1.5 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 rounded">
+                        Incomplete
+                      </span>
+                    )}
+                  </div>
                   <p className="text-sm text-gray-500">{booking.plate}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-medium text-gray-900">£{booking.money_received || 0}</p>
+                  <p className="text-sm font-medium text-gray-900">£{booking.money_charged || 0}</p>
                   <p className="text-xs text-gray-500">
                     {new Date(booking.start_at).toLocaleDateString('en-GB', { timeZone: 'UTC' })}
                   </p>

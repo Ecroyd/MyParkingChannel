@@ -1,7 +1,8 @@
 import { getServerSupabase } from '@/lib/supabase/server';
-import UploadClient from './UploadClient';
+import { createAdminClient } from '@/lib/supabase/server-admin';
+import PaymentsClient from './PaymentsClient';
 
-export default async function UploadPage() {
+export default async function PaymentsPage() {
   const supabase = await getServerSupabase();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   
@@ -27,10 +28,18 @@ export default async function UploadPage() {
     return <div>No tenant found</div>;
   }
 
+  // Get Stripe connection status
+  const adminClient = await createAdminClient();
+  const { data: stripeConnection } = await adminClient
+    .from('tenant_stripe')
+    .select('*')
+    .eq('tenant_id', userTenant.tenant_id)
+    .single();
+
   return (
-    <UploadClient 
+    <PaymentsClient 
       tenant={userTenant.tenants}
-      tenantId={userTenant.tenant_id}
+      stripeConnection={stripeConnection}
     />
   );
 }

@@ -13,19 +13,32 @@ const baseConfig = {
     optimizeCss: true,
   },
   async headers() {
+    const isDev = process.env.NODE_ENV === 'development';
+    
     const securityHeaders = [
       {
         key: "Content-Security-Policy",
-        value: `
-          default-src 'self';
-          script-src 'self' 'unsafe-inline' https://js.stripe.com;
-          style-src 'self' 'unsafe-inline';
-          img-src 'self' data: blob: https:;
-          media-src 'self' https:;
-          font-src 'self' data: https:;
-          connect-src 'self' https://*.supabase.co wss://*.supabase.co https://js.stripe.com https://api.stripe.com;
-          frame-src 'self' https://js.stripe.com;
-        `.replace(/\n/g, " "), // remove line breaks for HTTP header
+        value: isDev 
+          ? `
+            default-src 'self';
+            script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com;
+            style-src 'self' 'unsafe-inline';
+            img-src 'self' data: blob: https:;
+            media-src 'self' https:;
+            font-src 'self' data: https:;
+            connect-src 'self' https://*.supabase.co wss://*.supabase.co https://js.stripe.com https://api.stripe.com;
+            frame-src 'self' https://js.stripe.com;
+          `.replace(/\n/g, " ") // remove line breaks for HTTP header
+          : `
+            default-src 'self';
+            script-src 'self' 'unsafe-inline' https://js.stripe.com;
+            style-src 'self' 'unsafe-inline';
+            img-src 'self' data: blob: https:;
+            media-src 'self' https:;
+            font-src 'self' data: https:;
+            connect-src 'self' https://*.supabase.co wss://*.supabase.co https://js.stripe.com https://api.stripe.com;
+            frame-src 'self' https://js.stripe.com;
+          `.replace(/\n/g, " ") // remove line breaks for HTTP header
       }
     ];
 
