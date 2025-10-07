@@ -123,7 +123,7 @@ export default function TodayServerClient({
         <td className="px-4 py-3 text-sm text-gray-900">
           <div className="flex items-center gap-2">
             {booking.customer_name}
-            {booking.is_incomplete && (
+            {(booking as any).is_incomplete && (
               <span className="inline-flex px-1.5 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 rounded">
                 Incomplete
               </span>

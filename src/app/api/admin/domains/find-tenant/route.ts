@@ -21,9 +21,13 @@ export async function GET(req: NextRequest) {
     }
 
     // Find user by email
-    const { data: targetUser, error: userError } = await adminClient.auth.admin.getUserByEmail(email)
+    const { data: targetUser, error: userError } = await adminClient
+      .from('auth.users')
+      .select('id, email')
+      .eq('email', email)
+      .single();
     
-    if (userError || !targetUser.user) {
+    if (userError || !targetUser) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
@@ -40,7 +44,7 @@ export async function GET(req: NextRequest) {
           slug
         )
       `)
-      .eq('user_id', targetUser.user.id)
+      .eq('user_id', targetUser.id)
 
     if (tenantsError) {
       return NextResponse.json({ error: tenantsError.message }, { status: 500 })
@@ -49,8 +53,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ 
       success: true,
       user: {
-        id: targetUser.user.id,
-        email: targetUser.user.email
+        id: targetUser.id,
+        email: targetUser.email
       },
       tenants: userTenants || []
     })

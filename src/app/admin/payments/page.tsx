@@ -38,7 +38,7 @@ export default async function PaymentsPage() {
 
   return (
     <PaymentsClient 
-      tenant={userTenant.tenants}
+      tenant={userTenant.tenants as any}
       stripeConnection={stripeConnection}
     />
   );

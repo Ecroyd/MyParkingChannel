@@ -46,7 +46,7 @@ export async function createTenantPaymentIntent({
 
     // Initialize Stripe with tenant's secret key
     const stripe = new Stripe(secretData.secret_value, {
-      apiVersion: '2023-10-16',
+      apiVersion: '2025-08-27.basil',
     });
 
     // Create payment intent
@@ -58,7 +58,7 @@ export async function createTenantPaymentIntent({
         tenant_id: tenantId,
         booking_id: bookingId,
       },
-      customer_email: customerEmail,
+      // customer_email removed in newer Stripe API
       automatic_payment_methods: {
         enabled: true,
       },
@@ -118,7 +118,7 @@ export async function createTenantRefund({
 
     // Initialize Stripe with tenant's secret key
     const stripe = new Stripe(secretData.secret_value, {
-      apiVersion: '2023-10-16',
+      apiVersion: '2025-08-27.basil',
     });
 
     // Create refund

@@ -316,7 +316,7 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
                             {booking.status.replace('_', ' ').toUpperCase()}
                           </Badge>
                           {booking.is_incomplete && (
-                            <Badge variant="warning" className="bg-yellow-100 text-yellow-800">
+                            <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
                               Incomplete ({booking.missing_fields?.join(', ')})
                             </Badge>
                           )}

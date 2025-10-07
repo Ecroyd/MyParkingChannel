@@ -29,7 +29,7 @@ export default async function UploadPage() {
 
   return (
     <UploadClient 
-      tenant={userTenant.tenants}
+      tenant={userTenant.tenants as any}
       tenantId={userTenant.tenant_id}
     />
   );

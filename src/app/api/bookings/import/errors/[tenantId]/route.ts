@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server-admin";
 import { getServerSupabase } from "@/lib/supabase/server";
 
-export async function GET(req: Request, { params }: { params: { tenantId: string } }) {
+export async function GET(req: Request, { params }: { params: Promise<{ tenantId: string }> }) {
   try {
+    const { tenantId } = await params;
+    
     const supabase = await getServerSupabase();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     
@@ -15,7 +17,7 @@ export async function GET(req: Request, { params }: { params: { tenantId: string
     const { data, error } = await adminClient
       .from('booking_import_errors')
       .select('*')
-      .eq('tenant_id', params.tenantId)
+      .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false });
 
     if (error) {

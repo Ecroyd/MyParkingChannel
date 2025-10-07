@@ -13,6 +13,7 @@ interface Tenant {
   id: string;
   name: string;
   slug: string;
+  timezone?: string;
 }
 
 interface UploadClientProps {
@@ -114,7 +115,7 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
     console.log("Auto-detected proposal:", proposal);
     
     // Merge proposal into current mapping but don't overwrite values you've already typed
-    setMap(prev => ({ ...proposal, timezone: prev.timezone || proposal.timezone }));
+    setMap(prev => ({ ...proposal }));
     setAutoMsg("Auto-detected mapping applied. Please review the letters, then Preview.");
     
     // If you have saved mappings, show the closest match:
@@ -295,7 +296,7 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
                       const id = e.target.value;
                       setSelectedMappingId(id);
         const m = mappings.find(x=>x.id===id);
-        if (m?.mapping) setMap(prev => ({ ...prev, ...m.mapping })); // apply saved mapping
+        if (m?.map) setMap(prev => ({ ...prev, ...m.map })); // apply saved mapping
                     }}
                   >
                     <option value="">Load saved mapping…</option>
