@@ -15,6 +15,7 @@ export const clientEnv = {
 export const serverEnv = {
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY!,
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY!,
+  STRIPE_CLIENT_ID: process.env.STRIPE_CLIENT_ID!,
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET!,
 } as const;
 
@@ -30,6 +31,11 @@ export function validateEnv() {
     'SUPABASE_SERVICE_ROLE_KEY',
     'STRIPE_SECRET_KEY',
   ] as const;
+
+  // Only require STRIPE_CLIENT_ID in development
+  if (process.env.NODE_ENV !== 'production') {
+    requiredServerVars.push('STRIPE_CLIENT_ID' as any);
+  }
 
   // Check client vars
   for (const varName of requiredClientVars) {
