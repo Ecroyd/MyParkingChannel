@@ -30,11 +30,11 @@ export function validateEnv() {
   const requiredServerVars = [
     'SUPABASE_SERVICE_ROLE_KEY',
     'STRIPE_SECRET_KEY',
-  ] as const;
+  ];
 
   // Only require STRIPE_CLIENT_ID in development
   if (process.env.NODE_ENV !== 'production') {
-    requiredServerVars.push('STRIPE_CLIENT_ID' as any);
+    requiredServerVars.push('STRIPE_CLIENT_ID');
   }
 
   // Check client vars
