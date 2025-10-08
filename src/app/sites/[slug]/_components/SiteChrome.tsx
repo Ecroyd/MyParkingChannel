@@ -49,26 +49,34 @@ export function Header({ title, logoUrl, tenantSlug }: { title: string; logoUrl?
         {/* Mobile Menu Button */}
         <button
           onClick={toggleMobileMenu}
-          className="md:hidden p-2 rounded-lg hover:bg-slate-100 transition-colors"
+          className="md:hidden p-3 rounded-lg hover:bg-slate-100 transition-colors border border-slate-200 bg-white shadow-sm"
           aria-label="Toggle mobile menu"
+          style={{ 
+            minWidth: '44px', 
+            minHeight: '44px',
+            WebkitTapHighlightColor: 'transparent',
+            WebkitTouchCallout: 'none',
+            WebkitUserSelect: 'none',
+            userSelect: 'none'
+          }}
         >
           {isMobileMenuOpen ? (
-            <X className="h-6 w-6" />
+            <X className="h-6 w-6 text-slate-700" />
           ) : (
-            <Menu className="h-6 w-6" />
+            <Menu className="h-6 w-6 text-slate-700" />
           )}
         </button>
       </div>
 
       {/* Mobile Navigation Menu */}
       {isMobileMenuOpen && (
-        <div className="md:hidden border-t border-slate-200 bg-white/95 backdrop-blur">
-          <nav className="px-4 py-3 space-y-2">
+        <div className="md:hidden border-t border-slate-200 bg-white shadow-lg">
+          <nav className="px-4 py-4 space-y-1">
             {navLinks.map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
-                className="block px-3 py-2 text-sm hover:text-sky-600 hover:bg-slate-50 rounded-lg transition-colors"
+                className="block px-4 py-3 text-base font-medium text-slate-700 hover:text-sky-600 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-slate-200"
                 onClick={() => setIsMobileMenuOpen(false)}
               >
                 {link.label}

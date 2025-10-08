@@ -5,6 +5,7 @@ import { Analytics } from "@vercel/analytics/next";
 
 export const metadata: Metadata = {
   title: 'Parking Channel',
+  viewport: 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no',
 };
 
 const isDev = process.env.NODE_ENV === 'development';

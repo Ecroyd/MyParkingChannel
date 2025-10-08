@@ -13,7 +13,7 @@ export default function TestStripeConnectPage() {
 
       <Button asChild>
         <a
-          href="https://connect.stripe.com/oauth/v2/authorize?client_id=ca_TBxx6uZatvGwdVLNpsVQaXlY39p3gXTv&response_type=code&scope=read_write&redirect_uri=https://myparkingchannel.app/api/stripe/callback&state=test-tenant"
+          href="https://connect.stripe.com/oauth/v2/authorize?client_id=ca_TBxx6uZatvGwdVLNpsVQaXlY39p3gXTv&response_type=code&scope=read_write"
           className="px-6 py-3 text-white bg-blue-600 rounded-lg hover:bg-blue-700"
         >
           Connect Stripe Account (Test Mode)
