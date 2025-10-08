@@ -14,8 +14,9 @@ export async function GET(req: Request) {
     clientId = "ca_TBxxxSmeoiiU1clxQQUO0SzIXuYw335v"; // your LIVE client ID
     redirectUri = "https://myparkingchannel.app/api/stripe/callback";
   } else {
-    // Test platform client (no redirect_uri parameter)
+    // Test platform client
     clientId = "ca_TBxx6uZatvGwdVLNpsVQaXlY39p3gXTv"; // your TEST client ID
+    redirectUri = "https://myparkingchannel.app/api/stripe/callback";
   }
 
   // Build the query string
@@ -26,7 +27,7 @@ export async function GET(req: Request) {
     state: `${tenantId}:${mode}`,
   });
 
-  // Only include redirect_uri for live mode
+  // Include redirect_uri for both test and live modes
   if (redirectUri) {
     query.append("redirect_uri", redirectUri);
   }
