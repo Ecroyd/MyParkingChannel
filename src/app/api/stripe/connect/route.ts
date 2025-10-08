@@ -5,6 +5,7 @@ export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const tenantId = searchParams.get('tenant_id');
+    const mode = searchParams.get('mode') || 'test'; // Default to test mode
 
     if (!tenantId) {
       return NextResponse.json({ error: 'Tenant ID is required' }, { status: 400 });
@@ -44,16 +45,26 @@ export async function GET(req: Request) {
     // Build Stripe OAuth URL directly
     const stripeOAuthUrl = new URL('https://connect.stripe.com/oauth/v2/authorize');
     
-    // Use different client IDs based on environment
-    const clientId = process.env.NODE_ENV === 'production' 
-      ? 'ca_TBxxxSmeoiiU1clxQQUO0SzIXuYw335v'  // Live client ID
-      : process.env.STRIPE_CLIENT_ID;            // Development client ID
+    // Use different client IDs based on mode and environment
+    let clientId: string;
+    
+    if (mode === 'test') {
+      // Test mode - use test client ID
+      clientId = process.env.NODE_ENV === 'production' 
+        ? 'ca_TBxx6uZatvGwdVLNpsVQaXlY39p3gXTv'  // Production test client ID
+        : process.env.STRIPE_CLIENT_ID!;          // Development test client ID
+    } else {
+      // Live mode - use live client ID
+      clientId = process.env.NODE_ENV === 'production' 
+        ? 'ca_TBxxxSmeoiiU1clxQQUO0SzIXuYw335v'  // Production live client ID
+        : process.env.STRIPE_CLIENT_ID!;          // Development (fallback to test)
+    }
     
     stripeOAuthUrl.searchParams.set('client_id', clientId!);
     stripeOAuthUrl.searchParams.set('response_type', 'code');
     stripeOAuthUrl.searchParams.set('scope', 'read_write');
     stripeOAuthUrl.searchParams.set('redirect_uri', `${process.env.NEXT_PUBLIC_SITE_URL}/api/stripe/callback`);
-    stripeOAuthUrl.searchParams.set('state', tenantId);
+    stripeOAuthUrl.searchParams.set('state', `${tenantId}:${mode}`); // Include mode in state
 
     return NextResponse.redirect(stripeOAuthUrl.toString());
   } catch (error: any) {

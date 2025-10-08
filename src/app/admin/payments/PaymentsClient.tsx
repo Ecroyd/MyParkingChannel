@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { 
   CreditCard, 
   ExternalLink, 
@@ -40,6 +41,7 @@ export default function PaymentsClient({ tenant, stripeConnection }: PaymentsCli
   const [loading, setLoading] = useState(false);
   const [accountInfo, setAccountInfo] = useState<any>(null);
   const [showInfoModal, setShowInfoModal] = useState(false);
+  const [mode, setMode] = useState<'test' | 'live'>('test'); // Default to test mode
   const { toast } = useToast();
 
   useEffect(() => {
@@ -62,7 +64,8 @@ export default function PaymentsClient({ tenant, stripeConnection }: PaymentsCli
 
   const handleConnect = () => {
     setLoading(true);
-    window.location.href = `/api/stripe/connect?tenant_id=${tenant.id}`;
+    const modeParam = mode === 'test' ? '&mode=test' : '&mode=live';
+    window.location.href = `/api/stripe/connect?tenant_id=${tenant.id}${modeParam}`;
   };
 
   const handleDisconnect = async () => {
@@ -106,6 +109,33 @@ export default function PaymentsClient({ tenant, stripeConnection }: PaymentsCli
           Manage your Stripe account for payment processing and payouts.
         </p>
       </div>
+
+      {/* Mode Toggle */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-medium">Payment Mode</h3>
+              <p className="text-sm text-gray-600">
+                {mode === 'live' 
+                  ? 'Live payments - real money transactions' 
+                  : 'Test mode - safe sandbox environment'
+                }
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-600">Test</span>
+              <Switch
+                checked={mode === 'live'}
+                onCheckedChange={(checked) => {
+                  setMode(checked ? 'live' : 'test');
+                }}
+              />
+              <span className="text-sm text-gray-600">Live</span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Connection Status */}
       <Card>

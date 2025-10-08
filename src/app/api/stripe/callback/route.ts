@@ -1,46 +1,49 @@
-import { NextResponse } from 'next/server';
-import { createAdminClient } from '@/lib/supabase/server-admin';
+import { NextResponse } from "next/server";
+import { createAdminClient } from "@/lib/supabase/server-admin";
 
 export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state") || "";
+  if (!code) return NextResponse.json({ error: "Missing code" }, { status: 400 });
+
   try {
-    const { searchParams } = new URL(req.url);
-    const code = searchParams.get('code');
-    const tenantId = searchParams.get('state');
-    const error = searchParams.get('error');
+    // Determine mode from state (e.g., "tenantId:test" or "tenantId:live")
+    const isTest = state.toLowerCase().includes("test");
 
-    if (error) {
-      console.error('Stripe OAuth Error:', error);
-      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_SITE_URL}/admin/payments?error=stripe_connection_failed`);
+    // Select the correct Stripe secret key
+    const stripeSecret = isTest
+      ? process.env.STRIPE_SECRET_KEY_TEST
+      : process.env.STRIPE_SECRET_KEY_LIVE;
+
+    if (!stripeSecret) {
+      throw new Error("Missing Stripe secret key for mode: " + (isTest ? "test" : "live"));
     }
 
-    if (!code || !tenantId) {
-      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_SITE_URL}/admin/payments?error=missing_parameters`);
-    }
-
-    // Exchange code for access token using direct API call
-    const tokenResponse = await fetch('https://connect.stripe.com/oauth/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    // Exchange authorization code for access token
+    const res = await fetch("https://connect.stripe.com/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        client_secret: process.env.STRIPE_SECRET_KEY!,
-        code: code,
-        grant_type: 'authorization_code',
+        client_secret: stripeSecret,
+        code,
+        grant_type: "authorization_code",
       }),
     });
 
-    if (!tokenResponse.ok) {
-      console.error('Stripe token exchange failed:', await tokenResponse.text());
-      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_SITE_URL}/admin/payments?error=token_exchange_failed`);
+    const data = await res.json();
+    if (!res.ok) {
+      console.error("Stripe OAuth error:", data);
+      return NextResponse.json({ error: data.error_description || "OAuth failed" }, { status: 400 });
     }
 
-    const tokenData = await tokenResponse.json();
-    const stripeAccountId = tokenData.stripe_user_id;
-    const accessToken = tokenData.access_token;
+    const stripeAccountId = data.stripe_user_id;
+    const tenantId = state.split(":")[0] || "unknown";
 
     // Get account details using the access token
     const accountResponse = await fetch(`https://api.stripe.com/v1/accounts/${stripeAccountId}`, {
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
+        'Authorization': `Bearer ${data.access_token}`,
       },
     });
 
@@ -61,8 +64,9 @@ export async function GET(req: Request) {
         tenant_id: tenantId,
         stripe_account_id: stripeAccountId,
         stripe_publishable_key: accountData.publishable_key,
-        stripe_secret_key: accessToken,
+        stripe_secret_key: data.access_token,
         connected: true,
+        mode: isTest ? "test" : "live", // Store the mode (test or live)
       });
 
     if (stripeError) {
@@ -86,9 +90,9 @@ export async function GET(req: Request) {
       // Don't fail the connection for this, just log it
     }
 
-    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_SITE_URL}/admin/payments?success=stripe_connected&tenant=${tenantId}`);
-  } catch (error: any) {
-    console.error('Stripe Callback Error:', error);
-    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_SITE_URL}/admin/payments?error=callback_failed`);
+    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_SITE_URL}/admin/payments?success=stripe_connected&tenant=${tenantId}&mode=${isTest ? "test" : "live"}&connected=true`);
+  } catch (err) {
+    console.error("Stripe callback error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
