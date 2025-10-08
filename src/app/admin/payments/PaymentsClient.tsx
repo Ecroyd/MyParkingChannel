@@ -130,6 +130,10 @@ export default function PaymentsClient({ tenant, stripeConnection }: PaymentsCli
                 onCheckedChange={(checked) => {
                   setMode(checked ? 'live' : 'test');
                 }}
+                className={`${mode === 'test' 
+                  ? 'data-[state=checked]:bg-orange-500 data-[state=unchecked]:bg-orange-300' 
+                  : 'data-[state=checked]:bg-green-500 data-[state=unchecked]:bg-gray-300'
+                }`}
               />
               <span className={`text-sm ${mode === 'live' ? 'text-green-700 font-medium' : 'text-gray-600'}`}>Live</span>
             </div>
