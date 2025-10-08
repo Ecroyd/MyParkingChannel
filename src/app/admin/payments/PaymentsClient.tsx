@@ -111,7 +111,7 @@ export default function PaymentsClient({ tenant, stripeConnection }: PaymentsCli
       </div>
 
       {/* Mode Toggle */}
-      <Card>
+      <Card className={mode === 'test' ? 'bg-orange-50 border-orange-200' : ''}>
         <CardContent className="pt-6">
           <div className="flex items-center justify-between">
             <div>
@@ -124,14 +124,14 @@ export default function PaymentsClient({ tenant, stripeConnection }: PaymentsCli
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-600">Test</span>
+              <span className={`text-sm ${mode === 'test' ? 'text-orange-700 font-medium' : 'text-gray-600'}`}>Test</span>
               <Switch
                 checked={mode === 'live'}
                 onCheckedChange={(checked) => {
                   setMode(checked ? 'live' : 'test');
                 }}
               />
-              <span className="text-sm text-gray-600">Live</span>
+              <span className={`text-sm ${mode === 'live' ? 'text-green-700 font-medium' : 'text-gray-600'}`}>Live</span>
             </div>
           </div>
         </CardContent>
