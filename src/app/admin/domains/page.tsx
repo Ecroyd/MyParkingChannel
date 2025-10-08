@@ -20,10 +20,17 @@ export default function DomainManager() {
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
-  // 🔹 Load tenants for dropdown
+  // 🔹 Load tenants for dropdown (only ones user has access to)
   useEffect(() => {
     const loadTenants = async () => {
-      const { data, error } = await supabase.from('tenants').select('id, name, slug').order('name');
+      const { data, error } = await supabase
+        .from('user_tenants')
+        .select(`
+          tenant_id,
+          tenants!inner(id, name, slug)
+        `)
+        .order('tenants(name)');
+      
       if (error) {
         toast({
           title: 'Error',
@@ -31,7 +38,9 @@ export default function DomainManager() {
           variant: 'destructive'
         });
       } else {
-        setTenants(data || []);
+        // Extract tenant data from the joined query
+        const tenantData = data?.map(item => item.tenants).filter(Boolean) || [];
+        setTenants(tenantData as unknown as Tenant[]);
       }
     };
     loadTenants();
@@ -138,7 +147,7 @@ export default function DomainManager() {
           <div>
             <label className="text-sm font-medium">Custom Domain</label>
             <Input
-              placeholder="e.g. parkingexeterairport.co.uk"
+              placeholder="e.g. flyparks.co.uk"
               value={domain}
               onChange={(e) => setDomain(e.target.value)}
             />
@@ -198,7 +207,7 @@ export default function DomainManager() {
         <CardContent className="space-y-3">
           <div className="text-sm text-gray-600 space-y-2">
             <p><strong>Step 1:</strong> Select the tenant from the dropdown</p>
-            <p><strong>Step 2:</strong> Enter the custom domain (e.g., parkingexeterairport.co.uk)</p>
+            <p><strong>Step 2:</strong> Enter the custom domain (e.g., flyparks.co.uk)</p>
             <p><strong>Step 3:</strong> Click "Add Domain" to link the domain to the tenant</p>
             <p><strong>Step 4:</strong> Configure the domain in Vercel to point to your app</p>
           </div>
