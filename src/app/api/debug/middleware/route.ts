@@ -29,13 +29,14 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    if (domainRecord?.tenants?.slug) {
-      const rewritePath = `/sites/${domainRecord.tenants.slug}${url.pathname}`
+    if (domainRecord?.tenants && Array.isArray(domainRecord.tenants) && domainRecord.tenants.length > 0) {
+      const tenant = domainRecord.tenants[0]
+      const rewritePath = `/sites/${tenant.slug}${url.pathname}`
       return NextResponse.json({
         domain: testDomain,
         found: true,
         tenantId: domainRecord.tenant_id,
-        tenantSlug: domainRecord.tenants.slug,
+        tenantSlug: tenant.slug,
         rewritePath,
         message: `Domain ${testDomain} would be rewritten to ${rewritePath}`
       })

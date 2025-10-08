@@ -1,5 +1,4 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { createAdminClient } from '@/lib/supabase/server-admin'
 
 export async function middleware(req: NextRequest) {
   const url = new URL(req.url)
@@ -27,36 +26,42 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next()
   }
 
-  try {
-    // Look up domain in Supabase
-    const supabaseAdmin = createAdminClient()
-    const { data: domainRecord } = await supabaseAdmin
-      .from('tenant_domains')
-      .select('tenant_id, tenants(slug)')
-      .eq('domain', host)
-      .maybeSingle()
-
-    if (domainRecord?.tenants?.slug) {
-      // Re-route to tenant site dynamically
-      const newUrl = new URL(req.url)
-      newUrl.pathname = `/sites/${domainRecord.tenants.slug}${url.pathname}`
-      
-      if (process.env.NEXT_PUBLIC_DEBUG_SITE === '1') {
-        console.log('[MW] Rewriting:', {
-          from: req.url,
-          to: newUrl.toString(),
-          tenantSlug: domainRecord.tenants.slug
-        })
-      }
-      
-      return NextResponse.rewrite(newUrl)
+  // For Edge Runtime compatibility, we'll use a different approach
+  // Instead of direct Supabase calls in middleware, we'll use the existing
+  // tenant resolution logic that's already working in the app
+  
+  // Check if this is a subdomain of the base domain
+  const baseDomain = process.env.NEXT_PUBLIC_APP_BASE_DOMAIN
+  if (baseDomain && host.endsWith(baseDomain) && host !== baseDomain) {
+    const slug = host.replace(`.${baseDomain}`, '')
+    const newUrl = new URL(req.url)
+    newUrl.pathname = `/sites/${slug}${url.pathname}`
+    
+    if (process.env.NEXT_PUBLIC_DEBUG_SITE === '1') {
+      console.log('[MW] Subdomain rewrite:', {
+        from: req.url,
+        to: newUrl.toString(),
+        slug
+      })
     }
-
-    return NextResponse.next()
-  } catch (error) {
-    console.error('[MW] Error in middleware:', error)
-    return NextResponse.next()
+    
+    return NextResponse.rewrite(newUrl)
   }
+
+  // For custom domains, rewrite to the site/[domain] route
+  // This route will handle the domain resolution and redirect to the correct tenant site
+  const newUrl = new URL(req.url)
+  newUrl.pathname = `/site/${host}${url.pathname}`
+  
+  if (process.env.NEXT_PUBLIC_DEBUG_SITE === '1') {
+    console.log('[MW] Custom domain rewrite:', {
+      from: req.url,
+      to: newUrl.toString(),
+      domain: host
+    })
+  }
+  
+  return NextResponse.rewrite(newUrl)
 }
 
 export const config = {
