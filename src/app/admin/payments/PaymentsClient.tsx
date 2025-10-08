@@ -11,7 +11,8 @@ import {
   AlertCircle, 
   Loader2,
   DollarSign,
-  Settings
+  Settings,
+  Info
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -38,6 +39,7 @@ interface PaymentsClientProps {
 export default function PaymentsClient({ tenant, stripeConnection }: PaymentsClientProps) {
   const [loading, setLoading] = useState(false);
   const [accountInfo, setAccountInfo] = useState<any>(null);
+  const [showInfoModal, setShowInfoModal] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -230,6 +232,25 @@ export default function PaymentsClient({ tenant, stripeConnection }: PaymentsCli
                   </>
                 )}
               </Button>
+              
+              {/* Privacy Note */}
+              <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-start justify-between">
+                  <p className="text-sm text-blue-800">
+                    <strong>Privacy & Security:</strong> Stripe securely handles all payment data. 
+                    My Parking Channel only receives permission to process bookings and payouts on your behalf; 
+                    we can't withdraw or access your Stripe balance.
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowInfoModal(true)}
+                    className="ml-2 p-1 h-auto text-blue-600 hover:text-blue-800"
+                  >
+                    <Info className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
         </CardContent>
@@ -277,6 +298,44 @@ export default function PaymentsClient({ tenant, stripeConnection }: PaymentsCli
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Info Modal */}
+      {showInfoModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Why We Need Stripe Access</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowInfoModal(false)}
+                className="p-1"
+              >
+                ×
+              </Button>
+            </div>
+            <div className="space-y-3 text-sm text-gray-700">
+              <p>
+                <strong>Payment Processing:</strong> We need to create charges for parking bookings and process payments directly to your Stripe account.
+              </p>
+              <p>
+                <strong>Refunds:</strong> We can process refunds through our admin interface when customers cancel bookings or request refunds.
+              </p>
+              <p>
+                <strong>Payouts:</strong> We can view your payout history and status to help you track your earnings.
+              </p>
+              <p>
+                <strong>Security:</strong> We never store your payment data - Stripe handles all sensitive information securely. We can't withdraw money from your account or access your bank details.
+              </p>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <Button onClick={() => setShowInfoModal(false)}>
+                Got it
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
