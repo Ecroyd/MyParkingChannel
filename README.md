@@ -81,9 +81,17 @@ APP_BASE_DOMAIN=yourdomain.com
 ENCRYPTION_KEY=your_32_character_encryption_key
 
 # Stripe Connect (Required for payments)
-STRIPE_SECRET_KEY=sk_test_***
-STRIPE_PUBLISHABLE_KEY=pk_test_***
+# For development (test mode)
+STRIPE_SECRET_KEY_TEST=sk_test_***
+STRIPE_PUBLISHABLE_KEY_TEST=pk_test_***
+
+# For production (live mode)
+STRIPE_SECRET_KEY_LIVE=sk_live_***
+STRIPE_PUBLISHABLE_KEY_LIVE=pk_live_***
+
+# App configuration
 NEXT_PUBLIC_ROOT_URL=https://yourdomain.com
+STRIPE_API_VERSION=2025-09-30.clover
 
 # Optional: For development
 NEXT_PUBLIC_APP_BASE_DOMAIN=localhost:3000

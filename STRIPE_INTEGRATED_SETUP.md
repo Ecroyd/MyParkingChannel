@@ -17,12 +17,23 @@ Add these to your Vercel project (Project → Settings → Environment Variables
 
 ```bash
 # Required
-STRIPE_SECRET_KEY=sk_test_***                 # Platform secret key
+# For development (test mode)
+STRIPE_SECRET_KEY_TEST=sk_test_***             # Test platform secret key
+STRIPE_PUBLISHABLE_KEY_TEST=pk_test_***       # Test publishable key
+
+# For production (live mode)  
+STRIPE_SECRET_KEY_LIVE=sk_live_***             # Live platform secret key
+STRIPE_PUBLISHABLE_KEY_LIVE=pk_live_***       # Live publishable key
+
+# App configuration
 NEXT_PUBLIC_ROOT_URL=https://myparkingchannel.app
 STRIPE_API_VERSION=2025-09-30.clover          # Latest API version
 
 # Optional (for webhooks)
 STRIPE_WEBHOOK_SECRET=whsec_***
+
+# Optional: Force live mode in development
+# STRIPE_MODE=live
 ```
 
 ## Database Schema
