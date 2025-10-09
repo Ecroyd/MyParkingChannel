@@ -41,18 +41,20 @@ export async function GET(req: NextRequest) {
 
     console.log('🔍 Profile lookup:', { profile, error: profileError })
 
+    const tenant = Array.isArray(tenantDomain.tenants) ? tenantDomain.tenants[0] : tenantDomain.tenants
+
     const isPublished = 
-      tenantDomain.tenants.status === 'active' && 
+      tenant.status === 'active' && 
       (profile?.is_active === true || profile?.status === 'active')
 
     return NextResponse.json({
       domain,
       found: true,
       tenant: {
-        id: tenantDomain.tenants.id,
-        slug: tenantDomain.tenants.slug,
-        name: tenantDomain.tenants.name,
-        status: tenantDomain.tenants.status
+        id: tenant.id,
+        slug: tenant.slug,
+        name: tenant.name,
+        status: tenant.status
       },
       profile: profile ? {
         is_active: profile.is_active,
