@@ -1,24 +1,12 @@
 // src/app/site/[domain]/page.tsx
 import { redirect } from 'next/navigation'
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
 
 async function getTenantByDomain(domain: string) {
   console.log('🔍 [SITE] Starting domain lookup for:', domain)
   
-  const cookieStore = await cookies()
-  
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get: (n: string) => cookieStore.get(n)?.value,
-        set: () => {},
-        remove: () => {},
-      },
-    }
-  )
+  // Use admin client to bypass RLS policies
+  const { createAdminClient } = await import('@/lib/supabase/server')
+  const supabase = await createAdminClient()
 
   // First try to find tenant by domain in tenant_domains table
   console.log('🔍 [SITE] Checking tenant_domains table...')
