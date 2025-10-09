@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation'
 
 async function getTenantByDomain(domain: string) {
   console.log('🔍 [SITE] Starting domain lookup for:', domain)
+  console.log('🔍 [SITE] Domain type:', typeof domain)
+  console.log('🔍 [SITE] Domain length:', domain?.length)
   
   // For now, let's use a simple approach - hardcode the known tenant
   // This is a temporary fix while we debug the admin client issue
@@ -16,7 +18,7 @@ async function getTenantByDomain(domain: string) {
   }
   
   // Also handle the case where domain might be the full URL
-  if (domain.includes('parkingexeterairport.co.uk')) {
+  if (domain && domain.includes('parkingexeterairport.co.uk')) {
     console.log('✅ [SITE] Using hardcoded tenant for domain containing parkingexeterairport.co.uk')
     return { 
       id: 'bab45dab-19e8-4230-b18e-ee1f663608e5', 
@@ -24,6 +26,8 @@ async function getTenantByDomain(domain: string) {
       name: 'Fly Parks Exeter' 
     }
   }
+  
+  console.log('❌ [SITE] Domain does not match hardcoded fallback:', domain)
   
   // Try admin client for other domains
   try {

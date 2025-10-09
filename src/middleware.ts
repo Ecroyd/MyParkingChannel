@@ -35,7 +35,7 @@ export async function middleware(req: NextRequest) {
     url.pathname.startsWith('/images/') ||
     url.pathname.startsWith('/sites/')
   ) {
-    console.log('[MW] Skipping middleware for:', host, url.pathname)
+    console.log('[MW] Skipping middleware for:', host, url.pathname, 'reason: sites path')
     return NextResponse.next()
   }
 
