@@ -1,45 +1,62 @@
-import { getServerSupabase } from '@/lib/supabase/server';
-import { createAdminClient } from '@/lib/supabase/server-admin';
-import PaymentsClient from './PaymentsClient';
+// app/admin/payments/page.tsx
+'use client';
 
-export default async function PaymentsPage() {
-  const supabase = await getServerSupabase();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  
-  if (authError || !user) {
-    return <div>Unauthorized</div>;
+import { useEffect, useState } from 'react';
+
+export default function PaymentsAdmin() {
+  const [status, setStatus] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  async function refresh() {
+    setLoading(true);
+    const s = await fetch('/api/payments/connect/status').then(r => r.json());
+    setStatus(s);
+    setLoading(false);
   }
 
-  // Get user's tenant
-  const { data: userTenant, error: tenantError } = await supabase
-    .from('user_tenants')
-    .select(`
-      tenant_id,
-      tenants (
-        id,
-        name,
-        slug
-      )
-    `)
-    .eq('user_id', user.id)
-    .single();
+  useEffect(() => { refresh(); }, []);
 
-  if (tenantError || !userTenant) {
-    return <div>No tenant found</div>;
+  async function connectStripe() {
+    const res = await fetch('/api/payments/connect/onboard', { method: 'POST' });
+    const json = await res.json();
+    if (json.url) window.location.href = json.url;
   }
-
-  // Get Stripe connection status
-  const adminClient = await createAdminClient();
-  const { data: stripeConnection } = await adminClient
-    .from('tenant_stripe')
-    .select('*')
-    .eq('tenant_id', userTenant.tenant_id)
-    .single();
 
   return (
-    <PaymentsClient 
-      tenant={userTenant.tenants as any}
-      stripeConnection={stripeConnection}
-    />
+    <main className="mx-auto max-w-2xl p-6">
+      <h1 className="text-2xl font-semibold mb-4">Payments</h1>
+
+      <section className="rounded-xl border p-4">
+        <h2 className="font-medium mb-2">Stripe Connection</h2>
+        {loading && <div>Loading…</div>}
+        {!loading && !status?.connected && (
+          <div className="space-y-3">
+            <p className="text-sm">You're not connected yet.</p>
+            <button className="rounded bg-black text-white px-4 py-2" onClick={connectStripe}>
+              Connect with Stripe
+            </button>
+            <button className="ml-2 rounded border px-3 py-2" onClick={refresh}>
+              Refresh
+            </button>
+          </div>
+        )}
+        {!loading && status?.connected && (
+          <div className="space-y-2 text-sm">
+            <div>Connected: <b>true</b></div>
+            <div>charges_enabled: <b>{String(status.charges_enabled)}</b></div>
+            <div>payouts_enabled: <b>{String(status.payouts_enabled)}</b></div>
+            <div>details_submitted: <b>{String(status.details_submitted)}</b></div>
+            <div className="mt-2">
+              <button className="rounded border px-3 py-2" onClick={connectStripe}>
+                Update Stripe Details
+              </button>
+              <button className="ml-2 rounded border px-3 py-2" onClick={refresh}>
+                Refresh
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+    </main>
   );
 }

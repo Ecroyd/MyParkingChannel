@@ -10,12 +10,18 @@ type Product = {
   default_price?: string | null;
 };
 
-export default function Storefront({ params }: { params: { accountId: string } }) {
-  const { accountId } = params;
+export default function Storefront({ params }: { params: Promise<{ accountId: string }> }) {
+  const [accountId, setAccountId] = useState<string>('');
+
+  useEffect(() => {
+    params.then(({ accountId }) => setAccountId(accountId));
+  }, [params]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!accountId) return;
+    
     (async () => {
       const res = await fetch(`/api/stripe/accounts/${accountId}/products`);
       const json = await res.json();
@@ -25,6 +31,8 @@ export default function Storefront({ params }: { params: { accountId: string } }
   }, [accountId]);
 
   async function checkout(p: Product) {
+    if (!accountId) return;
+    
     // For demo, we build price_data on the server (direct charge) instead of reusing default_price
     const res = await fetch(`/api/stripe/accounts/${accountId}/checkout`, {
       method: 'POST',

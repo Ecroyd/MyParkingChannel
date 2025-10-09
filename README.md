@@ -155,10 +155,12 @@ For payment processing, set up Stripe Connect:
 
 1. **Get Stripe Keys**: Create a Stripe account and get your API keys
 2. **Set Environment Variables**: Add Stripe keys to your environment
-3. **Test the Setup**: Visit `/admin/connect` to create and test connected accounts
+3. **Test the Setup**: Visit `/admin/payments` to connect Stripe accounts
 4. **Complete Onboarding**: Follow the Stripe onboarding flow for each tenant
 
-See [STRIPE_CONNECT_SETUP.md](./STRIPE_CONNECT_SETUP.md) for detailed instructions.
+The system integrates with your existing pricing engine - no product duplication required.
+
+See [STRIPE_INTEGRATED_SETUP.md](./STRIPE_INTEGRATED_SETUP.md) for detailed instructions.
 
 ## API Endpoints
 
@@ -181,13 +183,11 @@ See [STRIPE_CONNECT_SETUP.md](./STRIPE_CONNECT_SETUP.md) for detailed instructio
 - `POST /api/webhooks/holidayextras` - Holiday Extras webhook handler
 - `POST /api/stripe/webhook` - Stripe webhook handler
 
-### Stripe Connect
-- `POST /api/stripe/accounts/create` - Create connected account
-- `GET /api/stripe/accounts/[id]/status` - Get account status
-- `POST /api/stripe/accounts/[id]/onboard` - Create onboarding link
-- `GET /api/stripe/accounts/[id]/products` - List products
-- `POST /api/stripe/accounts/[id]/products` - Create product
-- `POST /api/stripe/accounts/[id]/checkout` - Create checkout session
+### Stripe Connect (Integrated)
+- `POST /api/payments/connect/onboard` - Create/onboard connected account
+- `GET /api/payments/connect/status` - Get connection status
+- `POST /api/payments/checkout` - Create checkout for booking
+- `POST /api/payments/booking-extension` - Pay for booking extension
 
 ### Cron Jobs
 - `GET /api/cron/pull-parkvia` - Sync ParkVia data
