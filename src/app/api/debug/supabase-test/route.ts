@@ -49,9 +49,9 @@ export async function GET(req: NextRequest) {
       success: true,
       environment: envCheck,
       adminClient: adminClient ? 'CREATED' : 'FAILED',
-      adminError: adminError?.message || null,
+      adminError: adminError instanceof Error ? adminError.message : null,
       queryResult,
-      queryError: queryError?.message || null,
+      queryError: queryError instanceof Error ? queryError.message : null,
       timestamp: new Date().toISOString()
     })
 

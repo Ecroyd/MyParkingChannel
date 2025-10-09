@@ -37,8 +37,8 @@ export async function GET(req: NextRequest) {
       tenant: tenant || null,
       profile: profile || null,
       errors: {
-        tenantError,
-        profileError
+        tenantError: tenantError?.message || null,
+        profileError: profileError?.message || null
       },
       isPublished: tenant?.status === 'active' && (profile?.is_active === true || profile?.status === 'active')
     })
