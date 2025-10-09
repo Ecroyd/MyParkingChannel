@@ -9,6 +9,7 @@ A multi-tenant parking management system built with Next.js 14, Supabase, and Ty
 - **Booking Management**: Create, update, and track parking bookings
 - **Hardware Integration**: ANPR and QR code gate systems
 - **Third-party Integrations**: ParkVia and Holiday Extras channel management
+- **Stripe Connect Integration**: Payment processing with connected accounts
 - **Bulk Upload**: CSV/XLSX import for booking data
 - **Role-based Access**: Owner, Admin, and Staff roles
 - **Audit Logging**: Complete audit trail for all operations
@@ -79,6 +80,11 @@ SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 APP_BASE_DOMAIN=yourdomain.com
 ENCRYPTION_KEY=your_32_character_encryption_key
 
+# Stripe Connect (Required for payments)
+STRIPE_SECRET_KEY=sk_test_***
+STRIPE_PUBLISHABLE_KEY=pk_test_***
+NEXT_PUBLIC_ROOT_URL=https://yourdomain.com
+
 # Optional: For development
 NEXT_PUBLIC_APP_BASE_DOMAIN=localhost:3000
 ```
@@ -139,8 +145,20 @@ Visit `http://localhost:3000` to start the application.
 
 - **ParkVia**: Set up API credentials and webhook endpoints
 - **Holiday Extras**: Configure channel accounts
+- **Stripe Connect**: Payment processing with connected accounts
 - **Webhooks**: Receive real-time booking updates
 - **Cron Jobs**: Scheduled data synchronization
+
+### 5. Stripe Connect Setup
+
+For payment processing, set up Stripe Connect:
+
+1. **Get Stripe Keys**: Create a Stripe account and get your API keys
+2. **Set Environment Variables**: Add Stripe keys to your environment
+3. **Test the Setup**: Visit `/admin/connect` to create and test connected accounts
+4. **Complete Onboarding**: Follow the Stripe onboarding flow for each tenant
+
+See [STRIPE_CONNECT_SETUP.md](./STRIPE_CONNECT_SETUP.md) for detailed instructions.
 
 ## API Endpoints
 
@@ -161,6 +179,15 @@ Visit `http://localhost:3000` to start the application.
 ### Webhooks
 - `POST /api/webhooks/parkvia` - ParkVia webhook handler
 - `POST /api/webhooks/holidayextras` - Holiday Extras webhook handler
+- `POST /api/stripe/webhook` - Stripe webhook handler
+
+### Stripe Connect
+- `POST /api/stripe/accounts/create` - Create connected account
+- `GET /api/stripe/accounts/[id]/status` - Get account status
+- `POST /api/stripe/accounts/[id]/onboard` - Create onboarding link
+- `GET /api/stripe/accounts/[id]/products` - List products
+- `POST /api/stripe/accounts/[id]/products` - Create product
+- `POST /api/stripe/accounts/[id]/checkout` - Create checkout session
 
 ### Cron Jobs
 - `GET /api/cron/pull-parkvia` - Sync ParkVia data

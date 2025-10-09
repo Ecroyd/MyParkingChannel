@@ -1,61 +1,55 @@
+// app/api/stripe/webhook/route.ts
 import { NextResponse } from 'next/server';
-import Stripe from 'stripe';
-import { supabaseAdmin } from '@/lib/supabase/server';
-
-export const runtime = 'nodejs'; // needed for raw body in Next
+import { stripe } from '@/lib/stripe';
+import { headers } from 'next/headers';
 
 export async function POST(req: Request) {
-  const sig = req.headers.get('stripe-signature')!;
-  const rawBody = await req.text();
+  const body = await req.text();
+  const signature = headers().get('stripe-signature');
 
-  let event: Stripe.Event;
-  try {
-    event = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-08-27.basil' })
-      .webhooks.constructEvent(rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET!);
-  } catch (err: any) {
-    return new NextResponse(`Webhook Error: ${err.message}`, { status: 400 });
+  if (!signature) {
+    return NextResponse.json({ error: 'Missing stripe-signature header' }, { status: 400 });
   }
 
-  if (event.type === 'payment_intent.succeeded') {
-    const intent = event.data.object as Stripe.PaymentIntent;
-    const tenantId = (intent.metadata?.tenantId as string) || '';
-    const bookingId = (intent.metadata?.bookingId as string) || '';
-    const newEndAt = intent.metadata?.newEndAt as string;
+  if (!process.env.STRIPE_WEBHOOK_SECRET) {
+    return NextResponse.json({ error: 'Missing STRIPE_WEBHOOK_SECRET' }, { status: 500 });
+  }
 
-    const sb = supabaseAdmin();
+  let event;
 
-    // 1) Update the extension row
-    const { data: ext, error: updErr } = await sb
-      .from('booking_extensions')
-      .update({
-        charged_amount_cents: intent.amount_received ?? intent.amount ?? 0,
-        stripe_payment_status: 'succeeded',
-      })
-      .eq('stripe_payment_intent_id', intent.id)
-      .select('booking_id, quote_amount_cents, new_end_at')
-      .single();
+  try {
+    event = stripe.webhooks.constructEvent(
+      body,
+      signature,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
+  } catch (err: any) {
+    console.error('Webhook signature verification failed:', err.message);
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
+  }
 
-    if (!updErr && ext) {
-      // 2) Update the booking (end_at & money_charged)
-      // Get current money_charged (numeric), add quoted (int cents)/100
-      const { data: booking } = await sb
-        .from('bookings')
-        .select('money_charged')
-        .eq('id', ext.booking_id)
-        .single();
-
-      const currentCharged = Number(booking?.money_charged ?? 0);
-      const addAmount = Number(ext.quote_amount_cents ?? 0) / 100;
-
-      await sb
-        .from('bookings')
-        .update({
-          end_at: ext.new_end_at || newEndAt,
-          money_charged: currentCharged + addAmount,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', ext.booking_id);
-    }
+  // Handle the event
+  switch (event.type) {
+    case 'checkout.session.completed':
+      const session = event.data.object;
+      console.log('Payment successful:', session.id);
+      // TODO: Update your database, send confirmation emails, etc.
+      break;
+    
+    case 'account.updated':
+      const account = event.data.object;
+      console.log('Account updated:', account.id);
+      // TODO: Update account status in your database
+      break;
+    
+    case 'payment_intent.succeeded':
+      const paymentIntent = event.data.object;
+      console.log('Payment succeeded:', paymentIntent.id);
+      // TODO: Update booking status, send receipts, etc.
+      break;
+    
+    default:
+      console.log(`Unhandled event type: ${event.type}`);
   }
 
   return NextResponse.json({ received: true });
