@@ -12,7 +12,7 @@ export async function middleware(req: NextRequest) {
     timestamp: new Date().toISOString()
   })
 
-  // Ignore admin routes, assets, API routes, and main app domain
+  // Ignore admin routes, assets, API routes, main app domain, and sites routes
   if (
     host.includes('myparkingchannel.app') || 
     host.startsWith('admin') ||
@@ -32,7 +32,8 @@ export async function middleware(req: NextRequest) {
     url.pathname.startsWith('/window.svg') ||
     url.pathname.startsWith('/next.svg') ||
     url.pathname.startsWith('/marker-') ||
-    url.pathname.startsWith('/images/')
+    url.pathname.startsWith('/images/') ||
+    url.pathname.startsWith('/sites/')
   ) {
     console.log('[MW] Skipping middleware for:', host, url.pathname)
     return NextResponse.next()

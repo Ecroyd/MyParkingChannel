@@ -15,6 +15,16 @@ async function getTenantByDomain(domain: string) {
     }
   }
   
+  // Also handle the case where domain might be the full URL
+  if (domain.includes('parkingexeterairport.co.uk')) {
+    console.log('✅ [SITE] Using hardcoded tenant for domain containing parkingexeterairport.co.uk')
+    return { 
+      id: 'bab45dab-19e8-4230-b18e-ee1f663608e5', 
+      slug: 'flyparksexeter', 
+      name: 'Fly Parks Exeter' 
+    }
+  }
+  
   // Try admin client for other domains
   try {
     const { createAdminClient } = await import('@/lib/supabase/server-admin')
@@ -60,6 +70,7 @@ export default async function Page({ params }: { params: Promise<{ domain: strin
       SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL ? 'SET' : 'NOT SET',
       SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'SET' : 'NOT SET'
     })
+    console.error('❌ [SITE] This should not happen with hardcoded fallback')
     redirect('/') // fallback to home
   }
 
