@@ -4,12 +4,13 @@ export async function middleware(req: NextRequest) {
   const url = new URL(req.url)
   const host = url.hostname
 
-  if (process.env.NEXT_PUBLIC_DEBUG_SITE === '1') {
-    console.log('[MW]', {
-      host,
-      pathname: req.nextUrl.pathname,
-    })
-  }
+  // Enhanced logging for debugging
+  console.log('[MW] Processing request:', {
+    host,
+    pathname: req.nextUrl.pathname,
+    userAgent: req.headers.get('user-agent')?.substring(0, 50),
+    timestamp: new Date().toISOString()
+  })
 
   // Ignore admin routes, assets, API routes, and main app domain
   if (
@@ -23,13 +24,10 @@ export async function middleware(req: NextRequest) {
     url.pathname.startsWith('/workbox-') ||
     url.pathname.startsWith('/manifest')
   ) {
+    console.log('[MW] Skipping middleware for:', host, url.pathname)
     return NextResponse.next()
   }
 
-  // For Edge Runtime compatibility, we'll use a different approach
-  // Instead of direct Supabase calls in middleware, we'll use the existing
-  // tenant resolution logic that's already working in the app
-  
   // Check if this is a subdomain of the base domain
   const baseDomain = process.env.NEXT_PUBLIC_APP_BASE_DOMAIN
   if (baseDomain && host.endsWith(baseDomain) && host !== baseDomain) {
@@ -37,13 +35,12 @@ export async function middleware(req: NextRequest) {
     const newUrl = new URL(req.url)
     newUrl.pathname = `/sites/${slug}${url.pathname}`
     
-    if (process.env.NEXT_PUBLIC_DEBUG_SITE === '1') {
-      console.log('[MW] Subdomain rewrite:', {
-        from: req.url,
-        to: newUrl.toString(),
-        slug
-      })
-    }
+    console.log('[MW] Subdomain rewrite:', {
+      from: req.url,
+      to: newUrl.toString(),
+      slug,
+      baseDomain
+    })
     
     return NextResponse.rewrite(newUrl)
   }
@@ -53,13 +50,12 @@ export async function middleware(req: NextRequest) {
   const newUrl = new URL(req.url)
   newUrl.pathname = `/site/${host}${url.pathname}`
   
-  if (process.env.NEXT_PUBLIC_DEBUG_SITE === '1') {
-    console.log('[MW] Custom domain rewrite:', {
-      from: req.url,
-      to: newUrl.toString(),
-      domain: host
-    })
-  }
+  console.log('[MW] Custom domain rewrite:', {
+    from: req.url,
+    to: newUrl.toString(),
+    domain: host,
+    originalPath: url.pathname
+  })
   
   return NextResponse.rewrite(newUrl)
 }
