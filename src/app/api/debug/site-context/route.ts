@@ -21,7 +21,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({
         slug,
         found: false,
-        message: 'Site context not found - tenant may not be published or profile not active'
+        message: 'Site context not found - tenant may not be published or profile not active',
+        suggestion: 'Create a tenant_public_profile record with is_active=true'
       })
     }
 
@@ -41,6 +42,9 @@ export async function GET(req: NextRequest) {
 
   } catch (error: any) {
     console.error('❌ Debug site-context API error:', error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ 
+      error: error.message,
+      suggestion: 'Check if tenant exists and has proper configuration'
+    }, { status: 500 })
   }
 }
