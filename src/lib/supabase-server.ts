@@ -2,8 +2,8 @@
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 
-export function getServerSupabase() {
-  const cookieStore = cookies();
+export async function getServerSupabase() {
+  const cookieStore = await cookies();
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY!; // if you already have RLS-safe helpers, use those instead
   if (!url || !key) throw new Error('[config] Missing Supabase server creds');
@@ -15,7 +15,7 @@ export function getServerSupabase() {
 }
 
 export async function getAuthedUserTenantId() {
-  const supabase = getServerSupabase();
+  const supabase = await getServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
@@ -33,7 +33,7 @@ export async function getAuthedUserTenantId() {
 }
 
 export async function getTenantStripeAccountId(tenantId: string) {
-  const supabase = getServerSupabase();
+  const supabase = await getServerSupabase();
   const { data, error } = await supabase
     .from('tenant_stripe')
     .select('stripe_account_id, connected')
@@ -45,7 +45,7 @@ export async function getTenantStripeAccountId(tenantId: string) {
 }
 
 export async function setTenantStripeAccountId(tenantId: string, accountId: string, connected = false) {
-  const supabase = getServerSupabase();
+  const supabase = await getServerSupabase();
   const { error } = await supabase
     .from('tenant_stripe')
     .upsert({ tenant_id: tenantId, stripe_account_id: accountId, connected, updated_at: new Date().toISOString() });

@@ -29,7 +29,7 @@ export async function POST(req: Request) {
   const { accountId } = await getTenantStripeAccountId(tenantId);
   if (!accountId) return NextResponse.json({ error: 'Stripe not connected' }, { status: 400 });
 
-  const supabase = getServerSupabase();
+  const supabase = await getServerSupabase();
 
   // Determine price from either an existing booking or new quote
   let amount_cents: number;

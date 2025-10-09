@@ -21,7 +21,7 @@ export async function POST(req: Request) {
   }
 
   const tenantId = await getAuthedUserTenantId();
-  const supabase = getServerSupabase();
+  const supabase = await getServerSupabase();
 
   const { data: b } = await supabase
     .from('bookings')

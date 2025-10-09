@@ -1,10 +1,11 @@
 // app/api/stripe/accounts/[id]/checkout/route.ts
 import { NextResponse } from 'next/server';
-import { stripe, asConnected, ROOT_URL } from '@/lib/stripe';
+import { stripe, useConnected, ROOT_URL } from '@/lib/stripe';
 
-type Params = { params: { id: string } };
+type Params = { params: Promise<{ id: string }> };
 
 export async function POST(req: Request, { params }: Params) {
+  const { id } = await params;
   const { priceData, quantity = 1, applicationFeeAmount = 123 } = await req.json();
 
   if (!priceData?.currency || !priceData?.unit_amount || !priceData?.product_name) {
@@ -30,10 +31,10 @@ export async function POST(req: Request, { params }: Params) {
       payment_intent_data: {
         application_fee_amount: Number(applicationFeeAmount), // your platform fee
       },
-      success_url: `${ROOT_URL}/success?session_id={CHECKOUT_SESSION_ID}&acct=${params.id}`,
-      cancel_url: `${ROOT_URL}/${params.id}/storefront?cancelled=1`,
+      success_url: `${ROOT_URL}/success?session_id={CHECKOUT_SESSION_ID}&acct=${id}`,
+      cancel_url: `${ROOT_URL}/${id}/storefront?cancelled=1`,
     },
-    asConnected(params.id),
+    useConnected(id),
   );
 
   return NextResponse.json({ id: session.id, url: session.url });

@@ -2,10 +2,10 @@
 import { NextResponse } from 'next/server';
 import { stripe } from '@/lib/stripe';
 
-type Params = { params: { id: string } };
+type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_: Request, { params }: Params) {
-  const { id } = params;
+  const { id } = await params;
   const account = await stripe.accounts.retrieve(id);
 
   // Minimal status snapshot for UI:
