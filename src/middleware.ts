@@ -22,7 +22,17 @@ export async function middleware(req: NextRequest) {
     url.pathname.startsWith('/favicon.ico') ||
     url.pathname.startsWith('/sw.js') ||
     url.pathname.startsWith('/workbox-') ||
-    url.pathname.startsWith('/manifest')
+    url.pathname.startsWith('/manifest') ||
+    url.pathname.startsWith('/icons/') ||
+    url.pathname.startsWith('/fallback-') ||
+    url.pathname.startsWith('/file.svg') ||
+    url.pathname.startsWith('/globe.svg') ||
+    url.pathname.startsWith('/logo.svg') ||
+    url.pathname.startsWith('/vercel.svg') ||
+    url.pathname.startsWith('/window.svg') ||
+    url.pathname.startsWith('/next.svg') ||
+    url.pathname.startsWith('/marker-') ||
+    url.pathname.startsWith('/images/')
   ) {
     console.log('[MW] Skipping middleware for:', host, url.pathname)
     return NextResponse.next()

@@ -49,7 +49,11 @@ export async function GET(req: Request) {
 
     if (!accountResponse.ok) {
       console.error('Failed to fetch account details:', await accountResponse.text());
-      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_SITE_URL}/admin/payments?error=account_details_failed`);
+      // Get the current host to build the correct redirect URL
+      const host = req.headers.get('host') || 'myparkingchannel.app';
+      const protocol = 'https'; // Always use HTTPS for production
+      const redirectUrl = `${protocol}://${host}/admin/payments?error=account_details_failed`;
+      return NextResponse.redirect(redirectUrl);
     }
 
     const accountData = await accountResponse.json();
@@ -71,7 +75,11 @@ export async function GET(req: Request) {
 
     if (stripeError) {
       console.error('Database Error:', stripeError);
-      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_SITE_URL}/admin/payments?error=database_error`);
+      // Get the current host to build the correct redirect URL
+      const host = req.headers.get('host') || 'myparkingchannel.app';
+      const protocol = 'https'; // Always use HTTPS for production
+      const redirectUrl = `${protocol}://${host}/admin/payments?error=database_error`;
+      return NextResponse.redirect(redirectUrl);
     }
 
     // Store webhook secret in tenant_secrets using your existing structure
@@ -90,7 +98,12 @@ export async function GET(req: Request) {
       // Don't fail the connection for this, just log it
     }
 
-    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_SITE_URL}/admin/payments?success=stripe_connected&tenant=${tenantId}&mode=${isTest ? "test" : "live"}&connected=true`);
+    // Get the current host to build the correct redirect URL
+    const host = req.headers.get('host') || 'myparkingchannel.app';
+    const protocol = 'https'; // Always use HTTPS for production
+    const redirectUrl = `${protocol}://${host}/admin/payments?success=stripe_connected&tenant=${tenantId}&mode=${isTest ? "test" : "live"}&connected=true`;
+    
+    return NextResponse.redirect(redirectUrl);
   } catch (err) {
     console.error("Stripe callback error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

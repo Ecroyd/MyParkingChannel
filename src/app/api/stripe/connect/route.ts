@@ -9,10 +9,15 @@ export async function GET(req: Request) {
   let redirectUri = "";
   let baseUrl = "https://connect.stripe.com/oauth/v2/authorize";
 
+  // Get the current host to build the correct redirect URI
+  const host = req.headers.get('host') || 'myparkingchannel.app';
+  const protocol = 'https'; // Always use HTTPS for production
+  const baseRedirectUri = `${protocol}://${host}/api/stripe/callback`;
+
   if (mode === "live") {
     // Live platform client
     clientId = "ca_TBxxxSmeoiiU1clxQQUO0SzIXuYw335v"; // your LIVE client ID
-    redirectUri = "https://myparkingchannel.app/api/stripe/callback";
+    redirectUri = baseRedirectUri;
   } else {
     // Test platform client (no redirect_uri for test mode)
     clientId = "ca_TBxx6uZatvGwdVLNpsVQaXlY39p3gXTv"; // your TEST client ID
