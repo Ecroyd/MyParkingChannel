@@ -19,10 +19,10 @@ export async function getTenantContext(slug: string) {
     .eq("tenant_id", tenant.id)
     .maybeSingle();
 
-  // Check if site is published - both tenant.status and profile.is_active must be true
+  // Check if site is published - tenant must be active, profile is optional
   const isPublished = 
     tenant.status === 'active' && 
-    (profile?.is_active === true || profile?.status === 'active');
+    (profile === null || profile?.is_active === true || profile?.status === 'active');
   
   if (!isPublished) {
     return null;
