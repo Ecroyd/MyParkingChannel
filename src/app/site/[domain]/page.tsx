@@ -5,7 +5,7 @@ async function getTenantByDomain(domain: string) {
   console.log('🔍 [SITE] Starting domain lookup for:', domain)
   
   // Use admin client to bypass RLS policies
-  const { createAdminClient } = await import('@/lib/supabase/server')
+  const { createAdminClient } = await import('@/lib/supabase/server-admin')
   const supabase = await createAdminClient()
 
   // First try to find tenant by domain in tenant_domains table
