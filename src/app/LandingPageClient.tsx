@@ -41,7 +41,11 @@ export default function LandingPageClient() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
-              <h1 className="text-xl font-bold text-slate-900">My Parking Channel</h1>
+              <img 
+                src="/my parking channel logo.png" 
+                alt="My Parking Channel" 
+                className="h-10 w-auto max-w-48 object-contain"
+              />
             </div>
             <div className="flex items-center space-x-4">
               <Link href="/login">
@@ -291,7 +295,13 @@ export default function LandingPageClient() {
         <div className="max-w-6xl mx-auto">
           <div className="grid md:grid-cols-4 gap-8">
             <div>
-              <h3 className="text-lg font-semibold mb-4">My Parking Channel</h3>
+              <div className="mb-4">
+                <img 
+                  src="/my parking channel logo.png" 
+                  alt="My Parking Channel" 
+                  className="h-8 w-auto max-w-40 object-contain"
+                />
+              </div>
               <p className="text-slate-400">
                 The modern channel manager for car parks. Streamline operations, 
                 maximize revenue, and enhance customer experience.
