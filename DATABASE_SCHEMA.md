@@ -232,3 +232,5 @@ Based on the code analysis:
 - `POST /api/pricing/rules` - Create pricing rule
 
 The system is designed to work with both simple and complex pricing setups, automatically detecting which tables exist and using the appropriate logic.
+
+
