@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { LogIn, LogOut, Car, DollarSign } from 'lucide-react';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
+import DateRangeSelector from '@/components/admin/DateRangeSelector';
 
 interface Booking {
   id: string;
@@ -51,13 +52,18 @@ interface TodayServerClientProps {
 
 export default function TodayServerClient({ 
   tenant, 
-  kpis, 
-  arrivals, 
-  departures, 
-  currentlyParked 
+  kpis: initialKpis, 
+  arrivals: initialArrivals, 
+  departures: initialDepartures, 
+  currentlyParked: initialCurrentlyParked 
 }: TodayServerClientProps) {
   const router = useRouter();
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [kpis, setKpis] = useState(initialKpis);
+  const [arrivals, setArrivals] = useState(initialArrivals);
+  const [departures, setDepartures] = useState(initialDepartures);
+  const [currentlyParked, setCurrentlyParked] = useState(initialCurrentlyParked);
 
   const handleBookingClick = (booking: Booking) => {
     setSelectedBookingId(booking.id);
@@ -65,6 +71,30 @@ export default function TodayServerClient({
 
   const handleBookingUpdated = () => {
     router.refresh();
+  };
+
+  const fetchDataForDateRange = async (from: string, to: string) => {
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/admin/today?from=${from}&to=${to}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch data');
+      }
+      const data = await response.json();
+      
+      setKpis(data.kpis);
+      setArrivals(data.arrivals);
+      setDepartures(data.departures);
+      setCurrentlyParked(data.currentlyParked);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDateRangeChange = (dateRange: { from: string; to: string }) => {
+    fetchDataForDateRange(dateRange.from, dateRange.to);
   };
 
   const StatCard = ({ label, value, delta, variant, rightSlot }: {
@@ -159,19 +189,28 @@ export default function TodayServerClient({
           </div>
         </div>
 
+        {/* Date Range Selector */}
+        <DateRangeSelector onDateRangeChange={handleDateRangeChange} />
+
+        {/* Loading State */}
+        {loading && (
+          <div className="flex items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+            <span className="ml-2 text-gray-600">Loading data...</span>
+          </div>
+        )}
+
         {/* KPIs */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard 
-            label="Arrivals Today" 
+            label="Arrivals" 
             value={kpis.arrivals} 
-            delta="+12" 
             variant="success" 
             rightSlot={<LogIn className="h-4 w-4 text-blue-500" />} 
           />
           <StatCard 
-            label="Departures Today" 
+            label="Departures" 
             value={kpis.departures} 
-            delta="+9" 
             variant="danger" 
             rightSlot={<LogOut className="h-4 w-4 text-red-500" />} 
           />
@@ -190,7 +229,7 @@ export default function TodayServerClient({
 
         {/* Revenue Summary */}
         <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">Today's Revenue</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Revenue</h3>
           <p className="text-3xl font-bold text-green-600">£{kpis.totalRevenue.toFixed(2)}</p>
         </div>
 
@@ -198,7 +237,7 @@ export default function TodayServerClient({
         <section className="bg-white rounded-lg border border-gray-200">
           <div className="p-4 border-b border-gray-200">
             <h2 className="text-lg font-semibold text-gray-900">Arrivals</h2>
-            <p className="text-sm text-gray-600">Today's incoming bookings</p>
+            <p className="text-sm text-gray-600">Incoming bookings</p>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -219,7 +258,7 @@ export default function TodayServerClient({
                 {arrivals.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
-                      No arrivals today
+                      No arrivals in this period
                     </td>
                   </tr>
                 )}
@@ -232,7 +271,7 @@ export default function TodayServerClient({
         <section className="bg-white rounded-lg border border-gray-200">
           <div className="p-4 border-b border-gray-200">
             <h2 className="text-lg font-semibold text-gray-900">Departures</h2>
-            <p className="text-sm text-gray-600">Today's outgoing bookings</p>
+            <p className="text-sm text-gray-600">Outgoing bookings</p>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -253,7 +292,7 @@ export default function TodayServerClient({
                 {departures.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
-                      No departures today
+                      No departures in this period
                     </td>
                   </tr>
                 )}
