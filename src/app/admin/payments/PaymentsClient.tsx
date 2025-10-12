@@ -12,17 +12,43 @@ export default function PaymentsClient({}: PaymentsClientProps) {
 
   async function refresh() {
     setLoading(true);
-    const s = await fetch('/api/payments/connect/status').then(r => r.json());
-    setStatus(s);
+    try {
+      const response = await fetch('/api/payments/connect/status');
+      if (!response.ok) {
+        console.error('API Error:', response.status, response.statusText);
+        setStatus({ connected: false, error: `API Error: ${response.status}` });
+        setLoading(false);
+        return;
+      }
+      const s = await response.json();
+      setStatus(s);
+    } catch (error) {
+      console.error('Fetch error:', error);
+      setStatus({ connected: false, error: 'Failed to fetch status' });
+    }
     setLoading(false);
   }
 
   useEffect(() => { refresh(); }, []);
 
   async function connectStripe() {
-    const res = await fetch('/api/payments/connect/onboard', { method: 'POST' });
-    const json = await res.json();
-    if (json.url) window.location.href = json.url;
+    try {
+      const res = await fetch('/api/payments/connect/onboard', { method: 'POST' });
+      if (!res.ok) {
+        console.error('Onboard API Error:', res.status, res.statusText);
+        alert(`Failed to create Stripe account: ${res.status}`);
+        return;
+      }
+      const json = await res.json();
+      if (json.url) {
+        window.location.href = json.url;
+      } else {
+        alert('No onboarding URL received');
+      }
+    } catch (error) {
+      console.error('Connect error:', error);
+      alert('Failed to connect to Stripe');
+    }
   }
 
   return (
@@ -32,6 +58,11 @@ export default function PaymentsClient({}: PaymentsClientProps) {
       {!loading && !status?.connected && (
         <div className="space-y-3">
           <p className="text-sm">You're not connected yet.</p>
+          {status?.error && (
+            <div className="bg-red-50 border border-red-200 rounded p-3">
+              <p className="text-sm text-red-800">{status.error}</p>
+            </div>
+          )}
           <button className="rounded bg-black text-white px-4 py-2" onClick={connectStripe}>
             Connect with Stripe
           </button>
