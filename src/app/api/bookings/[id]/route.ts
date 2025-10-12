@@ -55,7 +55,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   })
   console.log('🔍 Received update data:', body)
   
-  const allowed = ['plate','flight_number','status','start_at','end_at','money_received','money_charged','source','customer_name','customer_email','notes','car_make','car_model','car_color'] as const
+  const allowed = ['plate','flight_number','status','start_at','end_at','money_received','money_charged','source','customer_name','customer_email','customer_phone','notes','car_make','car_model','car_color'] as const
   const patch: Record<string, any> = {}
   for (const k of allowed) {
     if (k in body && body[k] !== undefined && body[k] !== null && body[k] !== '') {

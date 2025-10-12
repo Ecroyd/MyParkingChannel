@@ -20,35 +20,39 @@ export default function DateRangeSelector({
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
 
-  // Calculate date range
+  // Calculate date range in local time (no timezone conversion)
   const getDateRange = () => {
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
-    
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+
     let result;
     switch (dateRange) {
       case 'today':
         result = { from: todayStr, to: todayStr };
         break;
       case 'tomorrow':
-        const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
-        const tomorrowStr = tomorrow.toISOString().split('T')[0];
-        result = { from: tomorrowStr, to: tomorrowStr };
+        const tomorrow = new Date(now);
+        tomorrow.setDate(now.getDate() + 1);
+        result = { from: tomorrow.toISOString().split('T')[0], to: tomorrow.toISOString().split('T')[0] };
         break;
       case 'next7days':
-        const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+        const nextWeek = new Date(now);
+        nextWeek.setDate(now.getDate() + 7);
         result = { from: todayStr, to: nextWeek.toISOString().split('T')[0] };
         break;
       case 'next14days':
-        const nextTwoWeeks = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
+        const nextTwoWeeks = new Date(now);
+        nextTwoWeeks.setDate(now.getDate() + 14);
         result = { from: todayStr, to: nextTwoWeeks.toISOString().split('T')[0] };
         break;
       case 'next30days':
-        const nextMonth = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+        const nextMonth = new Date(now);
+        nextMonth.setDate(now.getDate() + 30);
         result = { from: todayStr, to: nextMonth.toISOString().split('T')[0] };
         break;
       case 'next90days':
-        const nextQuarter = new Date(today.getTime() + 90 * 24 * 60 * 60 * 1000);
+        const nextQuarter = new Date(now);
+        nextQuarter.setDate(now.getDate() + 90);
         result = { from: todayStr, to: nextQuarter.toISOString().split('T')[0] };
         break;
       case 'custom':
@@ -61,7 +65,6 @@ export default function DateRangeSelector({
       default:
         result = { from: todayStr, to: todayStr };
     }
-    
     return result;
   };
 

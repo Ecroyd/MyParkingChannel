@@ -1,31 +1,66 @@
 // app/api/payments/connect/onboard/route.ts
 import { NextResponse } from 'next/server';
 import { stripe, ROOT_URL } from '@/lib/stripe';
-import { getAuthedUserTenantId, getTenantStripeAccountId, setTenantStripeAccountId } from '@/lib/supabase-server';
+import { getAuthedUserTenantId, getTenantStripeAccountId, setTenantStripeAccountId, getServerSupabase } from '@/lib/supabase-server';
 
 export async function POST() {
-  const tenantId = await getAuthedUserTenantId();
+  try {
+    const tenantId = await getAuthedUserTenantId();
 
-  let { accountId } = await getTenantStripeAccountId(tenantId);
-  if (!accountId) {
-    // Create controller-based connected account – per your spec
-    const acct = await stripe.accounts.create({
-      controller: {
-        fees: { payer: 'account' },
-        losses: { payments: 'stripe' },
-        stripe_dashboard: { type: 'full' },
-      },
+    let { accountId } = await getTenantStripeAccountId(tenantId);
+    
+    // Always create a new account to avoid issues with old accounts
+    if (!accountId) {
+      console.log('Creating new Stripe account for tenant:', tenantId);
+      // Create controller-based connected account – per your spec
+      const acct = await stripe.accounts.create({
+        controller: {
+          fees: { payer: 'account' },
+          losses: { payments: 'stripe' },
+          stripe_dashboard: { type: 'full' },
+        },
+      });
+      accountId = acct.id;
+      await setTenantStripeAccountId(tenantId, accountId, false);
+    } else {
+      // If we have an account ID, verify it exists and is accessible
+      try {
+        await stripe.accounts.retrieve(accountId);
+        console.log('Using existing account:', accountId);
+      } catch (error: any) {
+        console.log('Old account invalid, creating new one:', error.message);
+        // Clear the old account and create a new one
+        const supabase = await getServerSupabase();
+        await supabase
+          .from('tenant_stripe')
+          .delete()
+          .eq('tenant_id', tenantId);
+        
+        const acct = await stripe.accounts.create({
+          controller: {
+            fees: { payer: 'account' },
+            losses: { payments: 'stripe' },
+            stripe_dashboard: { type: 'full' },
+          },
+        });
+        accountId = acct.id;
+        await setTenantStripeAccountId(tenantId, accountId, false);
+      }
+    }
+
+    console.log('Creating account link for account:', accountId);
+    const link = await stripe.accountLinks.create({
+      account: accountId,
+      type: 'account_onboarding',
+      return_url: `${ROOT_URL}/admin/payments?step=return`,
+      refresh_url: `${ROOT_URL}/admin/payments?step=refresh`,
     });
-    accountId = acct.id;
-    await setTenantStripeAccountId(tenantId, accountId, false);
+
+    return NextResponse.json({ accountId, url: link.url });
+  } catch (error: any) {
+    console.error('Onboard error:', error);
+    return NextResponse.json({ 
+      error: error.message || 'Failed to create Stripe account' 
+    }, { status: 500 });
   }
-
-  const link = await stripe.accountLinks.create({
-    account: accountId,
-    type: 'account_onboarding',
-    return_url: `${ROOT_URL}/admin/payments?step=return`,
-    refresh_url: `${ROOT_URL}/admin/payments?step=refresh`,
-  });
-
-  return NextResponse.json({ accountId, url: link.url });
 }

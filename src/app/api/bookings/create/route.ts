@@ -8,6 +8,7 @@ type Body = {
   reference?: string
   customer_name: string
   customer_email: string
+  customer_phone?: string
   plate: string
   startAt: string // ISO or datetime-local string
   endAt: string   // ISO or datetime-local string
@@ -69,12 +70,16 @@ export async function POST(req: NextRequest) {
   }
   if (!tenantId) return NextResponse.json({ error: 'No tenant context' }, { status: 400 })
 
-  // 3) normalize times → TIMESTAMPTZ
+  // 3) normalize times → TIMESTAMPTZ (treat as UK timezone)
   const start_at = new Date(body.startAt)
   const end_at = new Date(body.endAt)
   if (Number.isNaN(start_at.getTime()) || Number.isNaN(end_at.getTime())) {
     return NextResponse.json({ error: 'Invalid dates' }, { status: 400 })
   }
+  
+  // Convert to UK timezone (treat input dates as UK time)
+  const start_at_uk = new Date(start_at.toLocaleString("en-US", {timeZone: "Europe/London"}))
+  const end_at_uk = new Date(end_at.toLocaleString("en-US", {timeZone: "Europe/London"}))
 
   // 4) Check booking rules
   const { data: rules, error: rulesError } = await supabase
@@ -87,8 +92,8 @@ export async function POST(req: NextRequest) {
   }
 
   const ruleEvaluation = evaluateBookingRules(rules as BookingRule[], {
-    start_at: start_at.toISOString(),
-    end_at: end_at.toISOString()
+    start_at: start_at_uk.toISOString(),
+    end_at: end_at_uk.toISOString()
   })
 
   // If booking is blocked by rules, return error
@@ -129,9 +134,10 @@ export async function POST(req: NextRequest) {
     reference: body.reference?.trim() || `M-${Date.now()}`,
     customer_name: body.customer_name,
     customer_email: body.customer_email,
+    customer_phone: body.customer_phone || null,
     plate: body.plate ? body.plate.toUpperCase().replace(/\s+/g, '') : null,
-    start_at,
-    end_at,
+    start_at: start_at_uk.toISOString(),
+    end_at: end_at_uk.toISOString(),
     status: 'reserved',
     source: 'manual',
     money_charged: totalAmount,
@@ -144,8 +150,8 @@ export async function POST(req: NextRequest) {
       reference: body.reference?.trim() || `M-${Date.now()}`,
       plate: body.plate ? body.plate.toUpperCase().replace(/\s+/g, '') : '',
       customer_email: body.customer_email,
-      start_at: start_at.toISOString(),
-      end_at: end_at.toISOString()
+      start_at: start_at_uk.toISOString(),
+      end_at: end_at_uk.toISOString()
     })
   }
 

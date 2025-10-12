@@ -24,6 +24,7 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
   const [endDate, setEndDate] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
   const [vehicleReg, setVehicleReg] = useState("");
   const [loading, setLoading] = useState(false);
   const [pricing, setPricing] = useState<PricingInfo | null>(null);
@@ -120,21 +121,31 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
           tenant_id: tenantId,
           customer_name: customerName,
           customer_email: customerEmail,
+          customer_phone: customerPhone,
           plate: vehicleReg.toUpperCase(),
           start_at: new Date(startDate).toISOString(),
           end_at: new Date(endDate).toISOString(),
-          source: "website",
+          source: "other",
         }),
       });
 
       const bookingResult = await bookingResponse.json();
 
       if (!bookingResponse.ok) {
-        toast({
-          title: "Booking Failed",
-          description: bookingResult.error || "Unable to create booking. Please try again.",
-          variant: "destructive",
-        });
+        // Check if it's a blocked booking
+        if (bookingResult.blocked) {
+          toast({
+            title: "Booking Not Available",
+            description: bookingResult.error || "Bookings are not available for those dates and times. Any questions please get in touch.",
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Booking Failed",
+            description: bookingResult.error || "Unable to create booking. Please try again.",
+            variant: "destructive",
+          });
+        }
         return;
       }
 
@@ -259,6 +270,18 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
                 onChange={(e) => setCustomerEmail(e.target.value)}
                 placeholder="john@example.com"
                 required
+                className="text-sm"
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="customerPhone" className="text-sm">Phone Number (optional)</Label>
+              <Input
+                id="customerPhone"
+                type="tel"
+                value={customerPhone}
+                onChange={(e) => setCustomerPhone(e.target.value)}
+                placeholder="+44 1234 567890"
                 className="text-sm"
               />
             </div>

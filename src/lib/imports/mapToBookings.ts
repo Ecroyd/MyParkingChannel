@@ -16,6 +16,7 @@ export function mapStagingToBookings(stagingRecord: any) {
     reference: stagingRecord.reference,
     customer_name: stagingRecord.customer_name,
     customer_email: '', // Default empty, can be populated later
+    customer_phone: stagingRecord.phone || null,
     plate: stagingRecord.vehicle_reg,
     car_make: stagingRecord.vehicle_make,
     car_model: stagingRecord.vehicle_model,

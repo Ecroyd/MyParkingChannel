@@ -18,6 +18,7 @@ const Schema = z.object({
   reference: z.string().optional(),
   customer_name: z.string().min(2, 'Name required'),
   customer_email: z.string().email('Valid email required'),
+  customer_phone: z.string().optional(),
   plate: z.string().optional(),
   startAt: z.string().min(1, 'Start required'),
   endAt: z.string().min(1, 'End required'),
@@ -43,6 +44,7 @@ export default function NewBookingDialog({
       reference: '',
       customer_name: '',
       customer_email: '',
+      customer_phone: '',
       plate: '',
       startAt: '',
       endAt: '',
@@ -113,6 +115,17 @@ export default function NewBookingDialog({
                 <FormItem>
                   <FormLabel>Email</FormLabel>
                   <FormControl><Input type="email" {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="customer_phone"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Phone (optional)</FormLabel>
+                  <FormControl><Input type="tel" placeholder="+44 1234 567890" {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>
               )}

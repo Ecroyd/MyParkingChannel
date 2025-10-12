@@ -82,6 +82,9 @@ export default function TodayServerClient({
       }
       const data = await response.json();
       
+      console.log("🧩 Received bookings:", data);
+      console.log("🔄 Updating state…");
+      
       setKpis(data.kpis);
       setArrivals(data.arrivals);
       setDepartures(data.departures);
@@ -94,6 +97,12 @@ export default function TodayServerClient({
   };
 
   const handleDateRangeChange = (dateRange: { from: string; to: string }) => {
+    console.log("📅 Selected range from DateRangeSelector:", dateRange);
+    
+    // Also show interpreted times
+    console.log("From interpreted as:", new Date(dateRange.from).toISOString());
+    console.log("To interpreted as:", new Date(dateRange.to).toISOString());
+    
     fetchDataForDateRange(dateRange.from, dateRange.to);
   };
 

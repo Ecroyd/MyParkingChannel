@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/server-admin';
 import { createServerClient } from '@/lib/supabase/server';
 import TodayServerClient from './TodayServerClient';
+import { getTenantDateRange } from '@/lib/timezone';
 
 export default async function TodayServerPage() {
   const supabase = await createServerClient();
@@ -38,18 +39,17 @@ export default async function TodayServerPage() {
       return <div>Error: Tenant not found</div>;
     }
 
-    // Get today's date range
-    const today = new Date();
-    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+    // Get today's date range in tenant timezone
+    const tenantTimezone = tenant.timezone || 'Europe/London';
+    const { startOfDayUTC, endOfDayUTC } = getTenantDateRange(tenantTimezone);
 
     // Get today's arrivals (bookings starting today)
     const { data: arrivals, error: arrivalsError } = await adminClient
       .from('bookings')
       .select('*')
       .eq('tenant_id', tenantId)
-      .gte('start_at', startOfDay.toISOString())
-      .lt('start_at', endOfDay.toISOString())
+      .gte('start_at', startOfDayUTC.toISOString())
+      .lt('start_at', endOfDayUTC.toISOString())
       .order('start_at', { ascending: false });
 
     // Get today's departures (bookings ending today)
@@ -57,18 +57,18 @@ export default async function TodayServerPage() {
       .from('bookings')
       .select('*')
       .eq('tenant_id', tenantId)
-      .gte('end_at', startOfDay.toISOString())
-      .lt('end_at', endOfDay.toISOString())
+      .gte('end_at', startOfDayUTC.toISOString())
+      .lt('end_at', endOfDayUTC.toISOString())
       .order('end_at', { ascending: false });
 
     // Get currently parked cars (started before now, ending after now)
-    const now = new Date();
+    const nowUTC = new Date();
     const { data: currentlyParked, error: currentlyParkedError } = await adminClient
       .from('bookings')
       .select('*')
       .eq('tenant_id', tenantId)
-      .lte('start_at', now.toISOString())
-      .gte('end_at', now.toISOString())
+      .lte('start_at', nowUTC.toISOString())
+      .gte('end_at', nowUTC.toISOString())
       .in('status', ['reserved', 'checked_in']);
 
     // Calculate today's revenue
@@ -76,8 +76,8 @@ export default async function TodayServerPage() {
       .from('bookings')
       .select('money_received')
       .eq('tenant_id', tenantId)
-      .gte('start_at', startOfDay.toISOString())
-      .lt('start_at', endOfDay.toISOString())
+      .gte('start_at', startOfDayUTC.toISOString())
+      .lt('start_at', endOfDayUTC.toISOString())
       .not('money_received', 'is', null);
 
     const totalRevenue = todayBookings?.reduce((sum, booking) => sum + (booking.money_received || 0), 0) || 0;

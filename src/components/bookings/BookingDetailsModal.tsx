@@ -10,6 +10,7 @@ type Booking = {
   reference: string;
   customer_name: string;
   customer_email: string;
+  customer_phone: string | null;
   plate: string;
   car_make: string | null;
   car_model: string | null;
@@ -81,6 +82,7 @@ export default function BookingDetailsModal({
                 <div className="grid grid-cols-2 gap-4">
                   <Info label="Customer" value={booking.customer_name} />
                   <Info label="Email" value={booking.customer_email} />
+                  <Info label="Phone" value={booking.customer_phone || '—'} />
                   <Info label="Plate" value={booking.plate} />
                   <Info label="Make" value={booking.car_make || '—'} />
                   <Info label="Model" value={booking.car_model || '—'} />
@@ -120,6 +122,7 @@ function Info({ label, value }: { label: string; value: React.ReactNode }) {
 function EditForm({ booking, onSaved }: { booking: any; onSaved: () => void }) {
   const [form, setForm] = React.useState({
     customer_email: booking.customer_email || '',
+    customer_phone: booking.customer_phone || '',
     plate: booking.plate || '',
     car_make: booking.car_make || '',
     car_model: booking.car_model || '',
@@ -174,7 +177,7 @@ function EditForm({ booking, onSaved }: { booking: any; onSaved: () => void }) {
         </div>
       </div>
       
-      {['customer_email','plate','car_make','car_model','car_color','flight_number'].map((k) => (
+      {['customer_email','customer_phone','plate','car_make','car_model','car_color','flight_number'].map((k) => (
         <div key={k}>
           <label className="block text-xs text-gray-500 mb-1">{k.replace('_',' ')}</label>
           <input

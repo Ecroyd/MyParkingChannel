@@ -40,11 +40,11 @@ export const POST = withTenant(async (tenant: TenantContext, request: Request) =
           car_color: mapping.car_color ? row[mapping.car_color] : undefined,
           start_at: zonedTimeToUtc(
             parseISO(row[mapping.start_at]), 
-            tenant.timezone
+            'Europe/London' // Always use UK timezone for all tenants
           ).toISOString(),
           end_at: zonedTimeToUtc(
             parseISO(row[mapping.end_at]), 
-            tenant.timezone
+            'Europe/London' // Always use UK timezone for all tenants
           ).toISOString(),
           money_charged: mapping.money_charged ? parseFloat(row[mapping.money_charged]) : 0,
           money_received: mapping.money_received ? parseFloat(row[mapping.money_received]) : 0,

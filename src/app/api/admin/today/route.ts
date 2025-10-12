@@ -1,9 +1,17 @@
 import { createAdminClient } from '@/lib/supabase/server-admin';
 import { createServerClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { getDateRangeForQuery } from '@/lib/timezone';
 
 export async function GET(request: NextRequest) {
   try {
+    console.log("🛰 API received date range query:", request.url);
+    const url = new URL(request.url);
+    const from = url.searchParams.get('from');
+    const to = url.searchParams.get('to');
+    console.log("Parsed from:", from, "as", new Date(from || '').toISOString());
+    console.log("Parsed to:", to, "as", new Date(to || '').toISOString());
+    
     const supabase = await createServerClient();
     const adminClient = await createAdminClient();
 
@@ -47,28 +55,43 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Date range parameters required' }, { status: 400 });
     }
 
-    // Parse dates
-    const startOfDay = new Date(fromDate);
-    const endOfDay = new Date(toDate);
-    endOfDay.setHours(23, 59, 59, 999); // End of day
+    // Parse dates and convert to UTC for database queries
+    const { fromUTC: startOfDayUTC, toUTC: endOfDayUTC } = getDateRangeForQuery(fromDate, toDate, tenant.timezone);
+    
+    console.log("📊 Query range:", { 
+      from: startOfDayUTC.toISOString(), 
+      to: endOfDayUTC.toISOString() 
+    });
 
-    // Get arrivals (bookings starting in the date range)
+    // Get arrivals (bookings STARTING in the date range)
     const { data: arrivals, error: arrivalsError } = await adminClient
       .from('bookings')
       .select('*')
       .eq('tenant_id', tenantId)
-      .gte('start_at', startOfDay.toISOString())
-      .lte('start_at', endOfDay.toISOString())
+      .gte('start_at', startOfDayUTC.toISOString())
+      .lte('start_at', endOfDayUTC.toISOString())
       .order('start_at', { ascending: false });
+    
+    console.log("📦 Arrivals (starting in range):", arrivals?.map(b => ({
+      ref: b.reference,
+      start_at: b.start_at,
+      end_at: b.end_at
+    })) || []);
 
-    // Get departures (bookings ending in the date range)
+    // Get departures (bookings ENDING in the date range)
     const { data: departures, error: departuresError } = await adminClient
       .from('bookings')
       .select('*')
       .eq('tenant_id', tenantId)
-      .gte('end_at', startOfDay.toISOString())
-      .lte('end_at', endOfDay.toISOString())
+      .gte('end_at', startOfDayUTC.toISOString())
+      .lte('end_at', endOfDayUTC.toISOString())
       .order('end_at', { ascending: false });
+    
+    console.log("📦 Departures (ending in range):", departures?.map(b => ({
+      ref: b.reference,
+      start_at: b.start_at,
+      end_at: b.end_at
+    })) || []);
 
     // Get currently parked cars (started before now, ending after now)
     const now = new Date();
@@ -79,14 +102,21 @@ export async function GET(request: NextRequest) {
       .lte('start_at', now.toISOString())
       .gte('end_at', now.toISOString())
       .in('status', ['reserved', 'checked_in']);
+    
+    console.log("📦 Currently parked (active now):", currentlyParked?.map(b => ({
+      ref: b.reference,
+      start_at: b.start_at,
+      end_at: b.end_at,
+      status: b.status
+    })) || []);
 
     // Calculate revenue for the date range
     const { data: rangeBookings, error: revenueError } = await adminClient
       .from('bookings')
       .select('money_received')
       .eq('tenant_id', tenantId)
-      .gte('start_at', startOfDay.toISOString())
-      .lte('start_at', endOfDay.toISOString())
+      .gte('start_at', startOfDayUTC.toISOString())
+      .lte('start_at', endOfDayUTC.toISOString())
       .not('money_received', 'is', null);
 
     const totalRevenue = rangeBookings?.reduce((sum, booking) => sum + (booking.money_received || 0), 0) || 0;
