@@ -1,62 +1,86 @@
 // app/admin/payments/page.tsx
-'use client';
+import { createServerClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server-admin';
+import Link from 'next/link';
+import { Card, CardContent } from '@/components/ui/card';
+import PaymentsClient from './PaymentsClient';
 
-import { useEffect, useState } from 'react';
+export default async function PaymentsAdmin() {
+  const supabase = await createServerClient();
+  const adminClient = await createAdminClient();
 
-export default function PaymentsAdmin() {
-  const [status, setStatus] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-
-  async function refresh() {
-    setLoading(true);
-    const s = await fetch('/api/payments/connect/status').then(r => r.json());
-    setStatus(s);
-    setLoading(false);
+  // Get current user
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  
+  if (userError || !user) {
+    return (
+      <main className="mx-auto max-w-2xl p-6">
+        <h1 className="text-2xl font-semibold mb-4">Payments</h1>
+        <Card className="shadow-soft">
+          <CardContent className="p-6">
+            <div className="text-center space-y-4">
+              <p className="text-gray-600">Please log in to continue</p>
+              <Link href="/login" className="inline-flex items-center rounded-md border px-3 py-2 text-sm">
+                Go to Login
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      </main>
+    );
   }
 
-  useEffect(() => { refresh(); }, []);
+  // Get user's tenants
+  console.log('🔍 Payments: Checking user_tenants for user:', user.id)
+  const { data: userTenants, error: userTenantsError } = await adminClient
+    .from('user_tenants')
+    .select('tenant_id, role, is_default')
+    .eq('user_id', user.id);
 
-  async function connectStripe() {
-    const res = await fetch('/api/payments/connect/onboard', { method: 'POST' });
-    const json = await res.json();
-    if (json.url) window.location.href = json.url;
+  if (userTenantsError) {
+    console.log('❌ Payments: Error fetching user tenants:', userTenantsError)
+    return (
+      <main className="mx-auto max-w-2xl p-6">
+        <h1 className="text-2xl font-semibold mb-4">Payments</h1>
+        <Card className="shadow-soft">
+          <CardContent className="p-6">
+            <div className="text-center space-y-4">
+              <p className="text-gray-600">Error loading tenant data</p>
+              <p className="text-sm text-gray-500">{userTenantsError.message}</p>
+            </div>
+          </CardContent>
+        </Card>
+      </main>
+    );
   }
+
+  console.log('📊 Payments: User tenants found:', userTenants?.length || 0, userTenants)
+
+  // Find the default tenant or use the first one
+  const userTenant = userTenants?.find(ut => ut.is_default) || userTenants?.[0];
+
+  if (!userTenant?.tenant_id) {
+    console.log('ℹ️ Payments: No tenant found for user')
+    return (
+      <main className="mx-auto max-w-2xl p-6">
+        <h1 className="text-2xl font-semibold mb-4">Payments</h1>
+        <Card className="shadow-soft">
+          <CardContent className="p-6">
+            <div className="text-center space-y-4">
+              <p className="text-gray-600">No tenant access found</p>
+            </div>
+          </CardContent>
+        </Card>
+      </main>
+    );
+  }
+
+  console.log('✅ Payments: Using tenant:', userTenant.tenant_id)
 
   return (
     <main className="mx-auto max-w-2xl p-6">
       <h1 className="text-2xl font-semibold mb-4">Payments</h1>
-
-      <section className="rounded-xl border p-4">
-        <h2 className="font-medium mb-2">Stripe Connection</h2>
-        {loading && <div>Loading…</div>}
-        {!loading && !status?.connected && (
-          <div className="space-y-3">
-            <p className="text-sm">You're not connected yet.</p>
-            <button className="rounded bg-black text-white px-4 py-2" onClick={connectStripe}>
-              Connect with Stripe
-            </button>
-            <button className="ml-2 rounded border px-3 py-2" onClick={refresh}>
-              Refresh
-            </button>
-          </div>
-        )}
-        {!loading && status?.connected && (
-          <div className="space-y-2 text-sm">
-            <div>Connected: <b>true</b></div>
-            <div>charges_enabled: <b>{String(status.charges_enabled)}</b></div>
-            <div>payouts_enabled: <b>{String(status.payouts_enabled)}</b></div>
-            <div>details_submitted: <b>{String(status.details_submitted)}</b></div>
-            <div className="mt-2">
-              <button className="rounded border px-3 py-2" onClick={connectStripe}>
-                Update Stripe Details
-              </button>
-              <button className="ml-2 rounded border px-3 py-2" onClick={refresh}>
-                Refresh
-              </button>
-            </div>
-          </div>
-        )}
-      </section>
+      <PaymentsClient />
     </main>
   );
 }

@@ -110,42 +110,68 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
     setLoading(true);
 
     try {
-      const response = await fetch("/api/bookings/create", {
+      // First create the booking
+      const bookingResponse = await fetch("/api/public/bookings", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          tenantId,
-          startDate,
-          endDate,
-          customerName,
-          customerEmail,
-          vehicleReg: vehicleReg.toUpperCase(),
-          moneyCharged: calculatedPrice,
+          tenant_id: tenantId,
+          customer_name: customerName,
+          customer_email: customerEmail,
+          plate: vehicleReg.toUpperCase(),
+          start_at: new Date(startDate).toISOString(),
+          end_at: new Date(endDate).toISOString(),
           source: "website",
         }),
       });
 
-      const result = await response.json();
+      const bookingResult = await bookingResponse.json();
 
-      if (result.success) {
-        toast({
-          title: "Booking Confirmed!",
-          description: `Your booking has been created successfully. Reference: ${result.data.reference}`,
-        });
-        
-        // Reset form
-        setStartDate("");
-        setEndDate("");
-        setCustomerName("");
-        setCustomerEmail("");
-        setVehicleReg("");
-        setCalculatedPrice(null);
-      } else {
+      if (!bookingResponse.ok) {
         toast({
           title: "Booking Failed",
-          description: result.error || "Unable to create booking. Please try again.",
+          description: bookingResult.error || "Unable to create booking. Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Now process payment
+      const paymentResponse = await fetch("/api/payments/public-checkout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          start_at: new Date(startDate).toISOString(),
+          end_at: new Date(endDate).toISOString(),
+          customer_name: customerName,
+          reference: bookingResult.booking?.reference || "new",
+          application_fee_cents: Math.round(calculatedPrice * 0.1 * 100), // 10% platform fee
+        }),
+      });
+
+      const paymentResult = await paymentResponse.json();
+
+      if (!paymentResponse.ok) {
+        toast({
+          title: "Payment Failed",
+          description: paymentResult.error || "Unable to process payment. Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Redirect to Stripe checkout
+      if (paymentResult.url) {
+        window.location.href = paymentResult.url;
+      } else {
+        toast({
+          title: "Payment Error",
+          description: "No payment URL received. Please try again.",
           variant: "destructive",
         });
       }
