@@ -64,7 +64,7 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
   const [fileAnalysed, setFileAnalysed] = React.useState(false);
   const [overwrite, setOverwrite] = React.useState<boolean>(false);
   const [statusMsg, setStatusMsg] = React.useState<string>("");
-  const [mappings, setMappings] = React.useState<{id:string;name:string;map:any}[]>([]);
+  const [mappings, setMappings] = React.useState<{id:string;name:string;mapping:any}[]>([]);
   const [selectedMappingId, setSelectedMappingId] = React.useState<string>("");
   const [autoMsg, setAutoMsg] = React.useState<string>("");
   const [sourceMapping, setSourceMapping] = React.useState<string>("other");
@@ -120,7 +120,9 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
     
     // If you have saved mappings, show the closest match:
     if (mappings.length) {
-      const best = bestMatchAgainstSaved(proposal, mappings);
+      // Transform mappings to have 'map' property for compatibility with bestMatchAgainstSaved
+      const transformedMappings = mappings.map(m => ({ ...m, map: m.mapping }));
+      const best = bestMatchAgainstSaved(proposal, transformedMappings);
       if (best) setStatusMsg(`Closest saved mapping: "${best.name}" (${best.score}% match). Use the dropdown to load it if preferred.`);
     }
   }
@@ -296,7 +298,7 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
                       const id = e.target.value;
                       setSelectedMappingId(id);
         const m = mappings.find(x=>x.id===id);
-        if (m?.map) setMap(prev => ({ ...prev, ...m.map })); // apply saved mapping
+        if (m?.mapping) setMap(prev => ({ ...prev, ...m.mapping })); // apply saved mapping
                     }}
                   >
                     <option value="">Load saved mapping…</option>
@@ -398,7 +400,7 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
               {selectedMappingId && (
                 <DiffBlock 
                   current={map} 
-                  saved={(mappings.find(m=>m.id===selectedMappingId)?.map)||{}} 
+                  saved={(mappings.find(m=>m.id===selectedMappingId)?.mapping)||{}} 
                 />
               )}
             </>

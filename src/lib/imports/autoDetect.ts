@@ -234,12 +234,13 @@ export function autoDetectMap(rows: any[][]): MapState {
 // ---------- Comparison helpers ----------
 
 export function compareMaps(a: MapState, b: MapState) {
+  // Only compare fields that exist in both MapState and ImportProfileMap
   const fields = [
     "source","reference","customer_lastname","customer_title","customer_firstname",
-    "start_mode","start_timestamp","start_date","start_time",
-    "end_mode","end_timestamp","end_date","end_time",
+    "start_timestamp","start_date","start_time",
+    "end_timestamp","end_date","end_time",
     "vehicle_reg","vehicle_colour","vehicle_make","vehicle_model",
-    "flight_number","phone","status","price","money_received","notes","timezone",
+    "flight_number","phone","status","price","money_received","notes",
   ] as const;
 
   const diffs: Array<{field:string; a:any; b:any; equal:boolean}> = [];
