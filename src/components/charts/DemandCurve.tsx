@@ -13,6 +13,9 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { format, eachDayOfInterval } from "date-fns";
+import DateRangeModal from '@/components/admin/DateRangeModal';
+import { useDateRangeModal } from '@/hooks/useDateRangeModal';
+import { Calendar } from 'lucide-react';
 
 type Booking = {
   start_at: string;  // timestamptz
@@ -59,6 +62,7 @@ export default function DemandCurve({
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState('next14days');
+  const { isOpen, currentDateRange, openModal, closeModal, handleDateRangeChange } = useDateRangeModal();
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
 
@@ -319,6 +323,14 @@ export default function DemandCurve({
         </BarChart>
       </ResponsiveContainer>
       </div>
+
+      {/* Date Range Modal */}
+      <DateRangeModal
+        isOpen={isOpen}
+        onClose={closeModal}
+        onDateRangeChange={handleDateRangeChange}
+        title="Select Date Range for Demand Curve"
+      />
     </div>
   );
 }

@@ -3,12 +3,12 @@ export function baseSitesURL() {
   const isProduction = process.env.NODE_ENV === 'production';
   const raw = isProduction 
     ? 'https://myparkingchannel.app'
-    : process.env.NEXT_PUBLIC_SITES_BASE_DOMAIN!;
+    : (process.env.NEXT_PUBLIC_SITES_BASE_DOMAIN || 'http://localhost:3000');
   
   try { return new URL(raw); } catch { throw new Error(`Bad NEXT_PUBLIC_SITES_BASE_DOMAIN: ${raw}`); }
 }
 
-/** e.g. slug -> https://slug.myparkingchannel.app  |  http://slug.lvh.me:3002 */
+/** e.g. slug -> https://slug.myparkingchannel.app  |  http://slug.localhost:3000 */
 export function siteUrlForTenantSlug(slug: string, path = "/") {
   const base = baseSitesURL();
   const host = `${slug}.${base.host}`;
@@ -18,7 +18,7 @@ export function siteUrlForTenantSlug(slug: string, path = "/") {
 /** Return slug from a hostname iff it matches *.baseHost, else null */
 export function slugFromHost(host: string): string | null {
   const base = baseSitesURL();
-  const baseHost = base.host;                       // e.g. "lvh.me:3002" or "myparkingchannel.app"
+  const baseHost = base.host;                       // e.g. "localhost:3000" or "myparkingchannel.app"
   if (host === baseHost) return null;
   if (!host.endsWith("." + baseHost)) return null;
   return host.slice(0, -(baseHost.length + 1));     // leftmost label(s)

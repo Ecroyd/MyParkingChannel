@@ -28,35 +28,17 @@ export function getTenantDateRange(tenantTimezone: string = 'Europe/London', dat
 }
 
 export function getDateRangeForQuery(fromDate: string, toDate: string, tenantTimezone: string = 'Europe/London') {
-  console.log("🔍 getDateRangeForQuery called with:", { fromDate, toDate, tenantTimezone });
-
   // Parse the plain calendar days as naive JS dates
   const start = new Date(`${fromDate}T00:00:00`);
   const end = new Date(`${toDate}T23:59:59`);
 
-  // Step A — show what JS thinks before any conversion
-  console.log("🧠 Raw JS parse:", {
-    start_raw: start.toISOString(),
-    end_raw: end.toISOString(),
-  });
-
-  // Step B — interpret those as tenant-local times
+  // Interpret those as tenant-local times
   const startLocal = new Date(start.toLocaleString('en-US', { timeZone: tenantTimezone }));
   const endLocal = new Date(end.toLocaleString('en-US', { timeZone: tenantTimezone }));
 
-  console.log("🌍 Interpreted as tenant-local:", {
-    start_local: startLocal.toISOString(),
-    end_local: endLocal.toISOString(),
-  });
-
-  // Step C — compute what you will actually return to Supabase
+  // Convert to UTC for database queries
   const fromUTC = startLocal;
   const toUTC = endLocal;
-
-  console.log("📦 Returned for DB query:", {
-    fromUTC: fromUTC.toISOString(),
-    toUTC: toUTC.toISOString(),
-  });
 
   return {
     from: start,

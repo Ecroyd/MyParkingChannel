@@ -3,14 +3,13 @@ import { createServerClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { getDateRangeForQuery } from '@/lib/timezone';
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
   try {
-    console.log("🛰 API received date range query:", request.url);
     const url = new URL(request.url);
     const from = url.searchParams.get('from');
     const to = url.searchParams.get('to');
-    console.log("Parsed from:", from, "as", new Date(from || '').toISOString());
-    console.log("Parsed to:", to, "as", new Date(to || '').toISOString());
     
     const supabase = await createServerClient();
     const adminClient = await createAdminClient();
@@ -58,10 +57,6 @@ export async function GET(request: NextRequest) {
     // Parse dates and convert to UTC for database queries
     const { fromUTC: startOfDayUTC, toUTC: endOfDayUTC } = getDateRangeForQuery(fromDate, toDate, tenant.timezone);
     
-    console.log("📊 Query range:", { 
-      from: startOfDayUTC.toISOString(), 
-      to: endOfDayUTC.toISOString() 
-    });
 
     // Get arrivals (bookings STARTING in the date range)
     const { data: arrivals, error: arrivalsError } = await adminClient
@@ -72,11 +67,6 @@ export async function GET(request: NextRequest) {
       .lte('start_at', endOfDayUTC.toISOString())
       .order('start_at', { ascending: false });
     
-    console.log("📦 Arrivals (starting in range):", arrivals?.map(b => ({
-      ref: b.reference,
-      start_at: b.start_at,
-      end_at: b.end_at
-    })) || []);
 
     // Get departures (bookings ENDING in the date range)
     const { data: departures, error: departuresError } = await adminClient
@@ -87,11 +77,6 @@ export async function GET(request: NextRequest) {
       .lte('end_at', endOfDayUTC.toISOString())
       .order('end_at', { ascending: false });
     
-    console.log("📦 Departures (ending in range):", departures?.map(b => ({
-      ref: b.reference,
-      start_at: b.start_at,
-      end_at: b.end_at
-    })) || []);
 
     // Get currently parked cars (started before now, ending after now)
     const now = new Date();
@@ -103,12 +88,6 @@ export async function GET(request: NextRequest) {
       .gte('end_at', now.toISOString())
       .in('status', ['reserved', 'checked_in']);
     
-    console.log("📦 Currently parked (active now):", currentlyParked?.map(b => ({
-      ref: b.reference,
-      start_at: b.start_at,
-      end_at: b.end_at,
-      status: b.status
-    })) || []);
 
     // Calculate revenue for the date range
     const { data: rangeBookings, error: revenueError } = await adminClient
@@ -129,6 +108,7 @@ export async function GET(request: NextRequest) {
       capacityLeft: (tenant.default_capacity || 0) - (currentlyParked?.length || 0),
       totalRevenue
     };
+
 
     return NextResponse.json({
       tenant,

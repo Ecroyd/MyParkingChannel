@@ -74,16 +74,21 @@ export default function TodayServerClient({
   };
 
   const fetchDataForDateRange = async (from: string, to: string) => {
+    // Clear previous data
+    setKpis({ arrivals: 0, departures: 0, checkedIn: 0, capacityLeft: 0, totalRevenue: 0 });
+    setArrivals([]);
+    setDepartures([]);
+    setCurrentlyParked([]);
     setLoading(true);
+    
     try {
-      const response = await fetch(`/api/admin/today?from=${from}&to=${to}`);
+      const response = await fetch(`/api/admin/today?from=${from}&to=${to}`, { 
+        cache: "no-store" 
+      });
       if (!response.ok) {
         throw new Error('Failed to fetch data');
       }
       const data = await response.json();
-      
-      console.log("🧩 Received bookings:", data);
-      console.log("🔄 Updating state…");
       
       setKpis(data.kpis);
       setArrivals(data.arrivals);
@@ -97,12 +102,6 @@ export default function TodayServerClient({
   };
 
   const handleDateRangeChange = (dateRange: { from: string; to: string }) => {
-    console.log("📅 Selected range from DateRangeSelector:", dateRange);
-    
-    // Also show interpreted times
-    console.log("From interpreted as:", new Date(dateRange.from).toISOString());
-    console.log("To interpreted as:", new Date(dateRange.to).toISOString());
-    
     fetchDataForDateRange(dateRange.from, dateRange.to);
   };
 
@@ -199,7 +198,9 @@ export default function TodayServerClient({
         </div>
 
         {/* Date Range Selector */}
-        <DateRangeSelector onDateRangeChange={handleDateRangeChange} />
+        <div className="max-w-xs">
+          <DateRangeSelector onDateRangeChange={handleDateRangeChange} />
+        </div>
 
         {/* Loading State */}
         {loading && (

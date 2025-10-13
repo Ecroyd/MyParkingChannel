@@ -3,6 +3,9 @@
 import { useState } from 'react';
 import DemandCurve from '@/components/charts/DemandCurve';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
+import DateRangeModal from '@/components/admin/DateRangeModal';
+import { useDateRangeModal } from '@/hooks/useDateRangeModal';
+import { Calendar } from 'lucide-react';
 
 interface DashboardClientProps {
   user: any;
@@ -37,6 +40,7 @@ export default function DashboardClient({
   chartData
 }: DashboardClientProps) {
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
+  const { isOpen, currentDateRange, openModal, closeModal, handleDateRangeChange } = useDateRangeModal();
 
   const handleBookingClick = (booking: any) => {
     setSelectedBookingId(booking.id);
@@ -50,8 +54,22 @@ export default function DashboardClient({
           <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
           <p className="text-gray-600">Welcome back, {user?.email}</p>
         </div>
-        <div className="text-sm text-gray-500">
-          {tenant?.name} • {tenant?.slug}
+        <div className="flex items-center gap-4">
+          <div className="text-sm text-gray-500">
+            {tenant?.name} • {tenant?.slug}
+          </div>
+          {currentDateRange && (
+            <div className="text-sm text-gray-600">
+              {currentDateRange.from} to {currentDateRange.to}
+            </div>
+          )}
+          <button
+            onClick={openModal}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
+          >
+            <Calendar className="w-4 h-4" />
+            Date Range
+          </button>
         </div>
       </div>
 
@@ -169,6 +187,14 @@ export default function DashboardClient({
           }}
         />
       )}
+
+      {/* Date Range Modal */}
+      <DateRangeModal
+        isOpen={isOpen}
+        onClose={closeModal}
+        onDateRangeChange={handleDateRangeChange}
+        title="Select Date Range for Dashboard"
+      />
     </div>
   );
 }

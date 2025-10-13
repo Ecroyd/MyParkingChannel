@@ -1,137 +1,196 @@
 'use client';
 
 import { useState } from 'react';
-
-interface DateRange {
-  from: string;
-  to: string;
-}
+import { ChevronDownIcon } from 'lucide-react';
 
 interface DateRangeSelectorProps {
-  onDateRangeChange: (dateRange: DateRange) => void;
-  initialRange?: string;
+  onDateRangeChange: (dateRange: { from: string; to: string }) => void;
 }
 
-export default function DateRangeSelector({ 
-  onDateRangeChange, 
-  initialRange = 'today' 
-}: DateRangeSelectorProps) {
-  const [dateRange, setDateRange] = useState(initialRange);
+export default function DateRangeSelector({ onDateRangeChange }: DateRangeSelectorProps) {
+  const [selectedRange, setSelectedRange] = useState('today');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
+  const [showCustom, setShowCustom] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
 
-  // Calculate date range in local time (no timezone conversion)
-  const getDateRange = () => {
-    const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
-
-    let result;
-    switch (dateRange) {
+  const handleRangeChange = (range: string) => {
+    setSelectedRange(range);
+    setShowCustom(false);
+    
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    
+    let from: string;
+    let to: string;
+    
+    switch (range) {
       case 'today':
-        result = { from: todayStr, to: todayStr };
+        from = todayStr;
+        to = todayStr;
         break;
       case 'tomorrow':
-        const tomorrow = new Date(now);
-        tomorrow.setDate(now.getDate() + 1);
-        result = { from: tomorrow.toISOString().split('T')[0], to: tomorrow.toISOString().split('T')[0] };
+        const tomorrow = new Date(today);
+        tomorrow.setDate(today.getDate() + 1);
+        from = tomorrow.toISOString().split('T')[0];
+        to = tomorrow.toISOString().split('T')[0];
         break;
       case 'next7days':
-        const nextWeek = new Date(now);
-        nextWeek.setDate(now.getDate() + 7);
-        result = { from: todayStr, to: nextWeek.toISOString().split('T')[0] };
+        const nextWeek = new Date(today);
+        nextWeek.setDate(today.getDate() + 7);
+        from = todayStr;
+        to = nextWeek.toISOString().split('T')[0];
         break;
       case 'next14days':
-        const nextTwoWeeks = new Date(now);
-        nextTwoWeeks.setDate(now.getDate() + 14);
-        result = { from: todayStr, to: nextTwoWeeks.toISOString().split('T')[0] };
+        const nextTwoWeeks = new Date(today);
+        nextTwoWeeks.setDate(today.getDate() + 14);
+        from = todayStr;
+        to = nextTwoWeeks.toISOString().split('T')[0];
         break;
       case 'next30days':
-        const nextMonth = new Date(now);
-        nextMonth.setDate(now.getDate() + 30);
-        result = { from: todayStr, to: nextMonth.toISOString().split('T')[0] };
-        break;
-      case 'next90days':
-        const nextQuarter = new Date(now);
-        nextQuarter.setDate(now.getDate() + 90);
-        result = { from: todayStr, to: nextQuarter.toISOString().split('T')[0] };
+        const nextMonth = new Date(today);
+        nextMonth.setDate(today.getDate() + 30);
+        from = todayStr;
+        to = nextMonth.toISOString().split('T')[0];
         break;
       case 'custom':
-        if (customStartDate && customEndDate) {
-          result = { from: customStartDate, to: customEndDate };
-        } else {
-          result = { from: todayStr, to: todayStr };
-        }
-        break;
+        setShowCustom(true);
+        return;
       default:
-        result = { from: todayStr, to: todayStr };
-    }
-    return result;
-  };
-
-  const handleDateRangeChange = (newRange: string) => {
-    setDateRange(newRange);
-    
-    // If switching to custom, don't trigger change yet
-    if (newRange === 'custom') {
-      return;
+        from = todayStr;
+        to = todayStr;
     }
     
-    const range = getDateRange();
-    onDateRangeChange(range);
+    onDateRangeChange({ from, to });
   };
 
-  const handleCustomDateChange = () => {
+  const handleCustomDateSubmit = () => {
     if (customStartDate && customEndDate) {
-      const range = { from: customStartDate, to: customEndDate };
-      onDateRangeChange(range);
+      onDateRangeChange({ from: customStartDate, to: customEndDate });
+    }
+  };
+
+  const getDisplayText = () => {
+    switch (selectedRange) {
+      case 'today': return 'Today';
+      case 'tomorrow': return 'Tomorrow';
+      case 'next7days': return 'Next 7 Days';
+      case 'next14days': return 'Next 14 Days';
+      case 'next30days': return 'Next 30 Days';
+      case 'custom': return 'Custom Range';
+      default: return 'Today';
     }
   };
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-4">
-      <div className="flex items-center gap-2">
-        <label htmlFor="dateRange" className="text-sm font-medium text-gray-700">
-          Date Range:
-        </label>
-        <select
-          id="dateRange"
-          value={dateRange}
-          onChange={(e) => handleDateRangeChange(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        >
-          <option value="today">Today</option>
-          <option value="tomorrow">Tomorrow</option>
-          <option value="next7days">Next 7 Days</option>
-          <option value="next14days">Next 14 Days</option>
-          <option value="next30days">Next 30 Days</option>
-          <option value="next90days">Next 90 Days</option>
-          <option value="custom">Custom Range</option>
-        </select>
-      </div>
-      
-      {dateRange === 'custom' && (
-        <div className="flex items-center gap-2">
-          <input
-            type="date"
-            value={customStartDate}
-            onChange={(e) => setCustomStartDate(e.target.value)}
-            className="rounded-md border border-gray-300 px-3 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            placeholder="Start date"
-          />
-          <span className="text-sm text-gray-500">to</span>
-          <input
-            type="date"
-            value={customEndDate}
-            onChange={(e) => setCustomEndDate(e.target.value)}
-            className="rounded-md border border-gray-300 px-3 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            placeholder="End date"
-          />
-          <button
-            onClick={handleCustomDateChange}
-            className="px-3 py-1 bg-blue-500 text-white text-sm rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            Apply
-          </button>
+    <div className="relative">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center justify-between w-full px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+      >
+        <span>{getDisplayText()}</span>
+        <ChevronDownIcon className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg">
+          <div className="py-1">
+            <button
+              onClick={() => {
+                handleRangeChange('today');
+                setIsOpen(false);
+              }}
+              className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+            >
+              Today
+            </button>
+            <button
+              onClick={() => {
+                handleRangeChange('tomorrow');
+                setIsOpen(false);
+              }}
+              className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+            >
+              Tomorrow
+            </button>
+            <button
+              onClick={() => {
+                handleRangeChange('next7days');
+                setIsOpen(false);
+              }}
+              className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+            >
+              Next 7 Days
+            </button>
+            <button
+              onClick={() => {
+                handleRangeChange('next14days');
+                setIsOpen(false);
+              }}
+              className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+            >
+              Next 14 Days
+            </button>
+            <button
+              onClick={() => {
+                handleRangeChange('next30days');
+                setIsOpen(false);
+              }}
+              className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+            >
+              Next 30 Days
+            </button>
+            <button
+              onClick={() => {
+                handleRangeChange('custom');
+                setIsOpen(false);
+              }}
+              className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+            >
+              Custom Range
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showCustom && (
+        <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+          <h4 className="text-sm font-medium text-gray-900 mb-3">Select Custom Date Range</h4>
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="flex-1">
+              <label htmlFor="start-date" className="block text-sm font-medium text-gray-700 mb-1">
+                Start Date
+              </label>
+              <input
+                id="start-date"
+                type="date"
+                value={customStartDate}
+                onChange={(e) => setCustomStartDate(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <div className="flex-1">
+              <label htmlFor="end-date" className="block text-sm font-medium text-gray-700 mb-1">
+                End Date
+              </label>
+              <input
+                id="end-date"
+                type="date"
+                value={customEndDate}
+                onChange={(e) => setCustomEndDate(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <div className="flex items-end">
+              <button
+                onClick={handleCustomDateSubmit}
+                disabled={!customStartDate || !customEndDate}
+                className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-sm font-medium"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

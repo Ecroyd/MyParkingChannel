@@ -48,7 +48,7 @@ export async function POST(req: Request) {
   const isProduction = process.env.NODE_ENV === 'production';
   const baseDomain = isProduction 
     ? 'https://myparkingchannel.app'
-    : (process.env.NEXT_PUBLIC_SITES_BASE_DOMAIN || "http://localhost:3002");
+    : (process.env.NEXT_PUBLIC_SITES_BASE_DOMAIN || "http://localhost:3000");
   const link = `${baseDomain}/t/${slug || ""}`;
   return NextResponse.json({ ok: true, tenantId: tId, previewUrl: link });
 }
