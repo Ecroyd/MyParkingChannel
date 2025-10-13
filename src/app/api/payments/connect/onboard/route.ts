@@ -1,17 +1,29 @@
 // app/api/payments/connect/onboard/route.ts
 import { NextResponse } from 'next/server';
-import { stripe, ROOT_URL } from '@/lib/stripe';
+import { stripe, ROOT_URL, isStripeConfigured } from '@/lib/stripe';
 import { getAuthedUserTenantId, getTenantStripeAccountId, setTenantStripeAccountId, getServerSupabase } from '@/lib/supabase-server';
 
 export async function POST() {
   try {
+    console.log('🔍 [PAYMENTS] Starting onboarding process...');
+    console.log('🔍 [PAYMENTS] Stripe configured:', isStripeConfigured());
+    
+    if (!isStripeConfigured()) {
+      console.error('❌ [PAYMENTS] Stripe is not properly configured');
+      return NextResponse.json({ 
+        error: 'Stripe is not properly configured. Please check environment variables.' 
+      }, { status: 500 });
+    }
+    
     const tenantId = await getAuthedUserTenantId();
+    console.log('🔍 [PAYMENTS] Tenant ID:', tenantId);
 
     let { accountId } = await getTenantStripeAccountId(tenantId);
     
     // Always create a new account to avoid issues with old accounts
     if (!accountId) {
-      console.log('Creating new Stripe account for tenant:', tenantId);
+      console.log('🔍 [PAYMENTS] Creating new Stripe account for tenant:', tenantId);
+      console.log('🔍 [PAYMENTS] About to call stripe.accounts.create...');
       // Create controller-based connected account – per your spec
       const acct = await stripe.accounts.create({
         controller: {
@@ -20,6 +32,7 @@ export async function POST() {
           stripe_dashboard: { type: 'full' },
         },
       });
+      console.log('🔍 [PAYMENTS] Stripe account created successfully:', acct.id);
       accountId = acct.id;
       await setTenantStripeAccountId(tenantId, accountId, false);
     } else {
