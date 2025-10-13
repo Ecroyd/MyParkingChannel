@@ -26,6 +26,7 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
   const [customerEmail, setCustomerEmail] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [vehicleReg, setVehicleReg] = useState("");
+  const [flightNumber, setFlightNumber] = useState("");
   const [loading, setLoading] = useState(false);
   const [pricing, setPricing] = useState<PricingInfo | null>(null);
   const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
@@ -99,6 +100,17 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
       return;
     }
 
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(customerEmail)) {
+      toast({
+        title: "Invalid Email",
+        description: "Please enter a valid email address.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (!calculatedPrice) {
       toast({
         title: "Invalid Dates",
@@ -111,45 +123,7 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
     setLoading(true);
 
     try {
-      // First create the booking
-      const bookingResponse = await fetch("/api/public/bookings", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          tenant_id: tenantId,
-          customer_name: customerName,
-          customer_email: customerEmail,
-          customer_phone: customerPhone,
-          plate: vehicleReg.toUpperCase(),
-          start_at: new Date(startDate).toISOString(),
-          end_at: new Date(endDate).toISOString(),
-          source: "other",
-        }),
-      });
-
-      const bookingResult = await bookingResponse.json();
-
-      if (!bookingResponse.ok) {
-        // Check if it's a blocked booking
-        if (bookingResult.blocked) {
-          toast({
-            title: "Booking Not Available",
-            description: bookingResult.error || "Bookings are not available for those dates and times. Any questions please get in touch.",
-            variant: "destructive",
-          });
-        } else {
-          toast({
-            title: "Booking Failed",
-            description: bookingResult.error || "Unable to create booking. Please try again.",
-            variant: "destructive",
-          });
-        }
-        return;
-      }
-
-      // Now process payment
+      // Process payment first - booking will be created after successful payment
       const paymentResponse = await fetch("/api/payments/public-checkout", {
         method: "POST",
         headers: {
@@ -160,7 +134,10 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
           start_at: new Date(startDate).toISOString(),
           end_at: new Date(endDate).toISOString(),
           customer_name: customerName,
-          reference: bookingResult.booking?.reference || "new",
+          customer_email: customerEmail,
+          customer_phone: customerPhone,
+          plate: vehicleReg.toUpperCase(),
+          flight_number: flightNumber || null,
           application_fee_cents: Math.round(calculatedPrice * 0.1 * 100), // 10% platform fee
         }),
       });
@@ -295,6 +272,18 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
                 onChange={(e) => setVehicleReg(e.target.value.toUpperCase())}
                 placeholder="AB12 CDE"
                 required
+                className="text-sm uppercase"
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="flightNumber" className="text-sm">Flight Number (optional)</Label>
+              <Input
+                id="flightNumber"
+                type="text"
+                value={flightNumber}
+                onChange={(e) => setFlightNumber(e.target.value.toUpperCase())}
+                placeholder="BA123"
                 className="text-sm uppercase"
               />
             </div>

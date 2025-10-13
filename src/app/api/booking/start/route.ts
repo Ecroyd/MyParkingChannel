@@ -12,7 +12,7 @@ function appBase() {
 function buildTargetURL(q: URLSearchParams) {
   const base = appBase().replace(/\/$/, "");
   const target = new URL(base + "/admin/bookings/new"); // adjust if your path differs
-  ["tenant","slug","start","end","email","plate"].forEach((k) => {
+  ["tenant","slug","start","end","email","phone","plate"].forEach((k) => {
     const v = q.get(k);
     if (v) target.searchParams.set(k === "slug" ? "tenant" : k, v);
   });

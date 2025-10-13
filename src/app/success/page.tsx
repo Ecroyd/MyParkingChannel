@@ -4,8 +4,9 @@ import { redirect } from 'next/navigation';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import BackButton from '@/components/success/BackButton';
+import BookingProcessor from '@/components/success/BookingProcessor';
 
-async function getBookingDetails(tenantId: string) {
+async function getBookingDetails(tenantId: string, reference?: string) {
   const cookieStore = await cookies();
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -19,13 +20,20 @@ async function getBookingDetails(tenantId: string) {
     }
   );
 
-  // Get the most recent booking for this tenant
-  const { data: bookings, error } = await supabase
+  let query = supabase
     .from('bookings')
     .select('*')
-    .eq('tenant_id', tenantId)
-    .order('created_at', { ascending: false })
-    .limit(1);
+    .eq('tenant_id', tenantId);
+
+  // If we have a reference, use it to find the specific booking
+  if (reference) {
+    query = query.eq('reference', reference);
+  } else {
+    // Fallback to most recent booking
+    query = query.order('created_at', { ascending: false }).limit(1);
+  }
+
+  const { data: bookings, error } = await query;
 
   if (error || !bookings || bookings.length === 0) {
     return null;
@@ -61,26 +69,24 @@ async function getTenantDetails(tenantId: string) {
   return tenant;
 }
 
-async function SuccessContent({ searchParams }: { searchParams: Promise<{ tenant?: string }> }) {
+async function SuccessContent({ searchParams }: { searchParams: Promise<{ tenant?: string; reference?: string }> }) {
   const resolvedSearchParams = await searchParams;
   const tenantId = resolvedSearchParams.tenant;
+  const reference = resolvedSearchParams.reference;
   
   if (!tenantId) {
     redirect('/');
   }
 
   const [booking, tenant] = await Promise.all([
-    getBookingDetails(tenantId),
+    getBookingDetails(tenantId, reference),
     getTenantDetails(tenantId)
   ]);
 
   if (!booking) {
-    return (
-      <main className="mx-auto max-w-xl p-6">
-        <h1 className="text-2xl font-semibold mb-2">Booking not found</h1>
-        <p className="text-sm">We couldn't find your booking details.</p>
-      </main>
-    );
+    // If no booking found, it might be because the webhook hasn't run yet
+    // Show the booking processor component that will poll for the booking
+    return <BookingProcessor tenantId={tenantId} reference={reference || ''} />;
   }
 
   const formatDate = (dateString: string) => {
@@ -167,7 +173,7 @@ async function SuccessContent({ searchParams }: { searchParams: Promise<{ tenant
   );
 }
 
-export default function Success({ searchParams }: { searchParams: Promise<{ tenant?: string }> }) {
+export default function Success({ searchParams }: { searchParams: Promise<{ tenant?: string; reference?: string }> }) {
   return (
     <Suspense fallback={
       <main className="mx-auto max-w-xl p-6">

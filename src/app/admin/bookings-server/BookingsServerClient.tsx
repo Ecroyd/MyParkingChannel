@@ -80,6 +80,7 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
       booking.reference?.toLowerCase().includes(term) ||
       booking.customer_name?.toLowerCase().includes(term) ||
       booking.customer_email?.toLowerCase().includes(term) ||
+      booking.customer_phone?.toLowerCase().includes(term) ||
       booking.plate?.toLowerCase().includes(term)
     );
   };
@@ -335,6 +336,13 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
                             <span className="font-medium">Amount:</span> £{booking.money_charged || 0}
                           </div>
                         </div>
+                        {(booking.customer_email || booking.customer_phone) && (
+                          <div className="mt-2 text-sm text-gray-600">
+                            <span className="font-medium">Contact:</span> 
+                            {booking.customer_email && <span className="ml-1">{booking.customer_email}</span>}
+                            {booking.customer_phone && <span className="ml-2">{booking.customer_phone}</span>}
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="flex gap-2">

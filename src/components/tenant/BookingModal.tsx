@@ -10,14 +10,23 @@ export default function BookingModal({ slug }: { slug: string }) {
   const [start, setStart] = useState(today);
   const [end, setEnd] = useState(tomorrow);
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [plate, setPlate] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function continueToBackend() {
     setError(null); setLoading(true);
+    
+    // Validate required fields
+    if (!phone.trim()) {
+      setError("Contact number is required");
+      setLoading(false);
+      return;
+    }
+    
     try {
-      const qs = new URLSearchParams({ slug, start, end, email, plate }).toString();
+      const qs = new URLSearchParams({ slug, start, end, email, phone, plate }).toString();
       const res = await fetch(`/api/booking/start?${qs}`, { redirect: "follow" });
       // If the API responds with a redirect, the browser will follow automatically (Next route returns 307).
       if (!res.ok) {
@@ -45,6 +54,18 @@ export default function BookingModal({ slug }: { slug: string }) {
         <div>
           <label className="block text-sm font-medium mb-1">Email</label>
           <input type="email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Contact number *</label>
+          <input 
+            type="tel" 
+            value={phone} 
+            onChange={e=>setPhone(e.target.value)} 
+            className={`w-full rounded-xl border px-3 py-2 ${!phone.trim() ? 'border-red-300 focus:border-red-500' : 'border-slate-300 focus:border-slate-500'}`}
+            placeholder="+44 1234 567890" 
+            required 
+          />
+          {!phone.trim() && <p className="text-red-600 text-xs mt-1">Contact number is required</p>}
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Vehicle plate</label>

@@ -9,14 +9,17 @@ export async function middleware(req: NextRequest) {
     host,
     pathname: req.nextUrl.pathname,
     userAgent: req.headers.get('user-agent')?.substring(0, 50),
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    shouldSkip: (host === 'localhost:3002' || host === 'localhost:3000'),
+    isLocalhostSubdomain: host.includes('.localhost'),
+    fullUrl: req.url
   })
 
   // Ignore admin routes, assets, API routes, main app domain, and sites routes
   if (
     host.includes('myparkingchannel.app') || 
     host.startsWith('admin') ||
-    host.startsWith('localhost') ||
+    (host === 'localhost' || host === 'localhost:3002' || host === 'localhost:3000') || // Skip localhost (with or without port)
     url.pathname.startsWith('/api/') ||
     url.pathname.startsWith('/_next/') ||
     url.pathname.startsWith('/favicon.ico') ||
@@ -33,9 +36,10 @@ export async function middleware(req: NextRequest) {
     url.pathname.startsWith('/next.svg') ||
     url.pathname.startsWith('/marker-') ||
     url.pathname.startsWith('/images/') ||
-    url.pathname.startsWith('/sites/')
+    url.pathname.startsWith('/sites/') ||
+    url.pathname.startsWith('/site/')
   ) {
-    console.log('[MW] Skipping middleware for:', host, url.pathname, 'reason: sites path')
+    console.log('[MW] Skipping middleware for:', host, url.pathname, 'reason: localhost or sites path')
     return NextResponse.next()
   }
 
@@ -54,6 +58,45 @@ export async function middleware(req: NextRequest) {
     })
     
     return NextResponse.rewrite(newUrl)
+  }
+
+  // Handle localhost subdomains (e.g., testbusiness.localhost:3002)
+  if (host.includes('.localhost') && (host.includes(':3002') || host.includes(':3000'))) {
+    const slug = host.split('.')[0] // Extract the first part before .localhost
+    const newUrl = new URL(req.url)
+    newUrl.pathname = `/sites/${slug}${url.pathname}`
+    
+    console.log('[MW] Localhost subdomain rewrite:', {
+      from: req.url,
+      to: newUrl.toString(),
+      slug,
+      host
+    })
+    
+    return NextResponse.rewrite(newUrl)
+  }
+
+  // Handle direct tenant access via query parameter (fallback for localhost)
+  if (host === 'localhost' && url.searchParams.has('tenant')) {
+    const slug = url.searchParams.get('tenant')
+    const newUrl = new URL(req.url)
+    newUrl.pathname = `/sites/${slug}${url.pathname}`
+    newUrl.searchParams.delete('tenant') // Remove the query param
+    
+    console.log('[MW] Tenant query param rewrite:', {
+      from: req.url,
+      to: newUrl.toString(),
+      slug,
+      host
+    })
+    
+    return NextResponse.rewrite(newUrl)
+  }
+
+  // Prevent infinite loops - don't rewrite if already going to site route
+  if (url.pathname.startsWith('/site/')) {
+    console.log('[MW] Already in site route, skipping rewrite to prevent loop')
+    return NextResponse.next()
   }
 
   // For custom domains, rewrite to the site/[domain] route
