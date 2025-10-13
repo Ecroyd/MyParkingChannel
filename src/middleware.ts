@@ -1,4 +1,6 @@
-import { NextResponse, type NextRequest } from 'next/server'
+import { createServerClient } from "@supabase/ssr";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
 export async function middleware(req: NextRequest) {
   const url = new URL(req.url)
@@ -14,6 +16,26 @@ export async function middleware(req: NextRequest) {
     isLocalhostSubdomain: host.includes('.localhost'),
     fullUrl: req.url
   })
+
+  // Allow Supabase to read & refresh sessions
+  const response = NextResponse.next({ request: req });
+  
+  createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return req.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options);
+          });
+        },
+      },
+    }
+  );
 
   // Ignore admin routes, assets, API routes, main app domain, and sites routes
   if (
@@ -40,7 +62,7 @@ export async function middleware(req: NextRequest) {
     url.pathname.startsWith('/site/')
   ) {
     console.log('[MW] Skipping middleware for:', host, url.pathname, 'reason: localhost or sites path')
-    return NextResponse.next()
+    return response
   }
 
   // Check if this is a subdomain of the base domain
@@ -57,7 +79,7 @@ export async function middleware(req: NextRequest) {
       baseDomain
     })
     
-    return NextResponse.rewrite(newUrl)
+    return NextResponse.rewrite(newUrl, { request: req })
   }
 
   // Handle localhost subdomains (e.g., testbusiness.localhost:3002)
@@ -73,7 +95,7 @@ export async function middleware(req: NextRequest) {
       host
     })
     
-    return NextResponse.rewrite(newUrl)
+    return NextResponse.rewrite(newUrl, { request: req })
   }
 
   // Handle direct tenant access via query parameter (fallback for localhost)
@@ -90,13 +112,13 @@ export async function middleware(req: NextRequest) {
       host
     })
     
-    return NextResponse.rewrite(newUrl)
+    return NextResponse.rewrite(newUrl, { request: req })
   }
 
   // Prevent infinite loops - don't rewrite if already going to site route
   if (url.pathname.startsWith('/site/')) {
     console.log('[MW] Already in site route, skipping rewrite to prevent loop')
-    return NextResponse.next()
+    return response
   }
 
   // For custom domains, rewrite to the site/[domain] route
@@ -116,16 +138,6 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - api (API routes)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - sw.js (service worker)
-     * - workbox- (workbox files)
-     * - manifest (PWA manifest)
-     */
-    '/((?!api|_next/static|_next/image|favicon.ico|sw.js|workbox-|manifest).*)',
+    "/((?!_next/static|_next/image|favicon.ico).*)",
   ],
 }

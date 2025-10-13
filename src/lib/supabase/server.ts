@@ -1,19 +1,32 @@
-import { cookies } from 'next/headers';
-import { createServerClient as createSSRServerClient } from '@supabase/ssr';
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
-export async function getServerSupabase(options?: { admin?: boolean }) {
+export function getServerSupabase(options?: { admin?: boolean }) {
   if (options?.admin) {
     return supabaseAdmin();
   }
   
-  const cookieStore = await cookies();
-  return createSSRServerClient(
+  const cookieStore = cookies();
+
+  return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get: (key) => cookieStore.get(key)?.value,
+        // ✅ New compliant cookie helpers
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
+            });
+          } catch (err) {
+            console.warn("setAll cookie error:", err);
+          }
+        },
       },
     }
   );
