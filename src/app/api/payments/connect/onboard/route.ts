@@ -4,8 +4,6 @@ import { ROOT_URL, isStripeConfigured } from '@/lib/stripe';
 import { getAuthedUserTenantId, getTenantStripeAccountId, setTenantStripeAccountId, getServerSupabase } from '@/lib/supabase-server';
 import Stripe from 'stripe';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-
 export async function POST() {
   try {
     console.log('🔍 [PAYMENTS] Starting onboarding process...');
@@ -17,6 +15,14 @@ export async function POST() {
         error: 'Stripe is not properly configured. Please check environment variables.' 
       }, { status: 500 });
     }
+
+    // Initialize Stripe client inside the function to avoid build-time issues
+    const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+    if (!stripeSecretKey) {
+      throw new Error('STRIPE_SECRET_KEY environment variable is required');
+    }
+    
+    const stripe = new Stripe(stripeSecretKey);
     
     const tenantId = await getAuthedUserTenantId();
     console.log('🔍 [PAYMENTS] Tenant ID:', tenantId);
