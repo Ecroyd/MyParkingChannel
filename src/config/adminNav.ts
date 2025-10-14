@@ -49,7 +49,6 @@ export const ADMIN_NAV: NavNode[] = [
       { key: "setup", label: "Initial Setup", href: "/admin/setup" },
     ],
   },
-  { key: "domains", label: "Domains", href: "/admin/domains", section: "Settings" },
   { key: "payments", label: "Payments", href: "/admin/payments", section: "Settings" },
 ];
 

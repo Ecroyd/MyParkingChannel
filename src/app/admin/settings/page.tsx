@@ -146,22 +146,20 @@ export default function SettingsPage() {
     )
   }
 
-  // TODO: load tenant + domains + members for current tenant
-  const domains: any[] = [{ domain: `${tenant.slug}.localhost:3002`, is_primary: true }]
+  // TODO: load tenant + members for current tenant
   const members: any[] = [{ email: user?.email, role: 'owner' }]
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-lg font-semibold">Settings</h1>
-        <p className="text-sm text-gray-500">Manage your business profile, domains and team.</p>
+        <p className="text-sm text-gray-500">Manage your business profile and team.</p>
       </div>
 
       <Tabs defaultValue="profile">
         <TabsList>
           <TabsTrigger value="profile">Profile</TabsTrigger>
           <TabsTrigger value="security">Security</TabsTrigger>
-          <TabsTrigger value="domains">Domains</TabsTrigger>
           <TabsTrigger value="members">Members</TabsTrigger>
           <TabsTrigger value="billing" disabled>Billing</TabsTrigger>
         </TabsList>
@@ -275,28 +273,6 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="domains" className="pt-4">
-          <Card className="shadow-soft">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Domains</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {domains.map((d, i) => (
-                <div key={i} className="flex items-center justify-between border rounded-xl p-3">
-                  <div className="text-sm">{d.domain}</div>
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="outline" disabled={d.is_primary}>Set primary</Button>
-                    <Button size="sm" variant="outline">Remove</Button>
-                  </div>
-                </div>
-              ))}
-              <div className="flex gap-2">
-                <Input placeholder="Add domain e.g. mybrand.com" />
-                <Button>Add</Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
 
         <TabsContent value="members" className="pt-4">
           <Card className="shadow-soft">

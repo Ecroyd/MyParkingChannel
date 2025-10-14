@@ -1,14 +1,18 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { useToast } from '@/hooks/use-toast';
 import EmptyState from '@/components/admin/EmptyState';
 import WidgetEmbedCard from '@/components/admin/WidgetEmbedCard';
 import ContactSettingsForm from '@/components/admin/ContactSettingsForm';
-import { ExternalLink, Eye, Globe, Building2, Settings } from 'lucide-react';
+import { ExternalLink, Eye, Globe, Building2, Settings, Plus, Trash2, Star } from 'lucide-react';
 import { siteUrlForTenantSlug } from '@/lib/sites/domain';
+import { createClient } from '@/lib/supabase/client';
 
 type Tenant = {
   id: string;
@@ -29,12 +33,20 @@ type Site = {
   primary_domain: string | null;
 };
 
+type Domain = {
+  id: string;
+  domain: string;
+  is_primary: boolean;
+  verified: boolean;
+};
+
 type TenantWithSite = Tenant & {
   site?: Site;
   branding?: {
     app_name: string | null;
     theme_color: string | null;
   };
+  domains?: Domain[];
 };
 
 interface TenantSitesServerClientProps {
@@ -43,6 +55,155 @@ interface TenantSitesServerClientProps {
 }
 
 export default function TenantSitesServerClient({ user, tenants }: TenantSitesServerClientProps) {
+  const [tenantDomains, setTenantDomains] = useState<Record<string, Domain[]>>({});
+  const [newDomain, setNewDomain] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState<Record<string, boolean>>({});
+  const { toast } = useToast();
+  const supabase = createClient();
+
+  // Load domains for each tenant
+  useEffect(() => {
+    const loadDomains = async () => {
+      const domainsData: Record<string, Domain[]> = {};
+      
+      for (const tenant of tenants) {
+        const { data, error } = await supabase
+          .from('tenant_domains')
+          .select('id, domain, is_primary, verified')
+          .eq('tenant_id', tenant.id);
+        
+        if (!error && data) {
+          domainsData[tenant.id] = data;
+        }
+      }
+      
+      setTenantDomains(domainsData);
+    };
+
+    loadDomains();
+  }, [tenants, supabase]);
+
+  const handleAddDomain = async (tenantId: string) => {
+    const domain = newDomain[tenantId]?.trim();
+    if (!domain) return;
+
+    setLoading(prev => ({ ...prev, [tenantId]: true }));
+
+    try {
+      const { data, error } = await supabase
+        .from('tenant_domains')
+        .insert({
+          tenant_id: tenantId,
+          domain,
+          is_primary: false,
+          verified: true
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setTenantDomains(prev => ({
+        ...prev,
+        [tenantId]: [...(prev[tenantId] || []), data]
+      }));
+
+      setNewDomain(prev => ({ ...prev, [tenantId]: '' }));
+      
+      toast({
+        title: 'Success',
+        description: `Domain ${domain} added successfully.`
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to add domain.',
+        variant: 'destructive'
+      });
+    } finally {
+      setLoading(prev => ({ ...prev, [tenantId]: false }));
+    }
+  };
+
+  const handleSetPrimary = async (tenantId: string, domainId: string) => {
+    try {
+      // First, unset all primary domains for this tenant
+      await supabase
+        .from('tenant_domains')
+        .update({ is_primary: false })
+        .eq('tenant_id', tenantId);
+
+      // Then set the selected domain as primary
+      const { error } = await supabase
+        .from('tenant_domains')
+        .update({ is_primary: true })
+        .eq('id', domainId);
+
+      if (error) throw error;
+
+      // Update local state
+      setTenantDomains(prev => ({
+        ...prev,
+        [tenantId]: (prev[tenantId] || []).map(domain => ({
+          ...domain,
+          is_primary: domain.id === domainId
+        }))
+      }));
+
+      toast({
+        title: 'Success',
+        description: 'Primary domain updated successfully.'
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update primary domain.',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleDeleteDomain = async (tenantId: string, domainId: string) => {
+    try {
+      const { error } = await supabase
+        .from('tenant_domains')
+        .delete()
+        .eq('id', domainId);
+
+      if (error) throw error;
+
+      setTenantDomains(prev => ({
+        ...prev,
+        [tenantId]: (prev[tenantId] || []).filter(domain => domain.id !== domainId)
+      }));
+
+      toast({
+        title: 'Success',
+        description: 'Domain deleted successfully.'
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete domain.',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const getPrimaryDomain = (tenantId: string) => {
+    const domains = tenantDomains[tenantId] || [];
+    const primary = domains.find(d => d.is_primary);
+    return primary?.domain || null;
+  };
+
+  const getLiveSiteUrl = (tenant: TenantWithSite) => {
+    const primaryDomain = getPrimaryDomain(tenant.id);
+    if (primaryDomain) {
+      return `https://${primaryDomain}`;
+    }
+    return siteUrlForTenantSlug(tenant.slug);
+  };
+
   if (tenants.length === 0) {
     return (
       <EmptyState
@@ -62,10 +223,14 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
       </div>
 
       <Tabs defaultValue="sites" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="sites" className="flex items-center gap-2">
             <Globe className="h-4 w-4" />
             Sites
+          </TabsTrigger>
+          <TabsTrigger value="domains" className="flex items-center gap-2">
+            <Building2 className="h-4 w-4" />
+            Domains
           </TabsTrigger>
           <TabsTrigger value="settings" className="flex items-center gap-2">
             <Settings className="h-4 w-4" />
@@ -106,7 +271,7 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => window.open(siteUrlForTenantSlug(tenant.slug), '_blank')}
+                          onClick={() => window.open(getLiveSiteUrl(tenant), '_blank')}
                           className="flex items-center gap-2 flex-1 sm:flex-none"
                         >
                           <Globe className="h-4 w-4" />
@@ -137,6 +302,97 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
 
                   {/* Widget Embed Card */}
                   <WidgetEmbedCard slug={tenant.slug} />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="domains" className="mt-6">
+          <div className="space-y-6">
+            {tenants.map((tenant) => (
+              <Card key={tenant.id} className="shadow-soft">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Building2 className="h-5 w-5" />
+                    Domains - {tenant.name}
+                  </CardTitle>
+                  <p className="text-sm text-gray-600">
+                    Manage custom domains for {tenant.name}. The primary domain will be used for the "Live Site" button.
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Current domains */}
+                  <div className="space-y-2">
+                    <h4 className="font-medium text-sm">Current Domains</h4>
+                    {tenantDomains[tenant.id]?.length > 0 ? (
+                      <div className="space-y-2">
+                        {tenantDomains[tenant.id].map((domain) => (
+                          <div key={domain.id} className="flex items-center justify-between border rounded-lg p-3">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{domain.domain}</span>
+                              {domain.is_primary && (
+                                <Badge variant="default" className="text-xs">
+                                  <Star className="h-3 w-3 mr-1" />
+                                  Primary
+                                </Badge>
+                              )}
+                              {domain.verified && (
+                                <Badge variant="outline" className="text-xs">
+                                  Verified
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="flex gap-2">
+                              {!domain.is_primary && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleSetPrimary(tenant.id, domain.id)}
+                                >
+                                  Set Primary
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleDeleteDomain(tenant.id, domain.id)}
+                                className="text-red-600 hover:text-red-700"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500">No custom domains configured</p>
+                    )}
+                  </div>
+
+                  {/* Add new domain */}
+                  <div className="space-y-2">
+                    <h4 className="font-medium text-sm">Add New Domain</h4>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="e.g. mybrand.com"
+                        value={newDomain[tenant.id] || ''}
+                        onChange={(e) => setNewDomain(prev => ({ ...prev, [tenant.id]: e.target.value }))}
+                        className="flex-1"
+                      />
+                      <Button
+                        onClick={() => handleAddDomain(tenant.id)}
+                        disabled={loading[tenant.id] || !newDomain[tenant.id]?.trim()}
+                        className="flex items-center gap-2"
+                      >
+                        <Plus className="h-4 w-4" />
+                        {loading[tenant.id] ? 'Adding...' : 'Add'}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      Ensure the domain is configured in your DNS and Vercel before adding it here.
+                    </p>
+                  </div>
                 </CardContent>
               </Card>
             ))}
