@@ -1,32 +1,15 @@
-import { createServerClient as createSSRServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
-export async function getServerSupabase(options?: { admin?: boolean }) {
-  if (options?.admin) {
-    return supabaseAdmin();
-  }
-  
-  const cookieStore = await cookies();
-
-  return createSSRServerClient(
+export function getServerSupabase() {
+  const cookieStore = cookies();
+  return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    process.env.SUPABASE_ANON_KEY!,
     {
       cookies: {
-        // ✅ New compliant cookie helpers
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
-            });
-          } catch (err) {
-            console.warn("setAll cookie error:", err);
-          }
-        },
+        getAll: () => cookieStore.getAll(),
       },
     }
   );
@@ -42,7 +25,10 @@ export function supabaseAdmin() {
 
 // Legacy exports for existing codebase compatibility
 export async function createServerClient(options?: { admin?: boolean }) {
-  return getServerSupabase(options);
+  if (options?.admin) {
+    return supabaseAdmin();
+  }
+  return getServerSupabase();
 }
 
 export function createAdminClient() {

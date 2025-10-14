@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation';
 import { createServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
 
+export const runtime = 'nodejs';
+
 export default async function AdminPage() {
   const supabase = await createServerClient();
   const adminClient = await createAdminClient();

@@ -2,11 +2,88 @@
 import { NextResponse } from 'next/server';
 import { stripe } from '@/lib/stripe';
 import { getAuthedUserTenantId, getTenantStripeAccountId, setTenantStripeAccountId, getServerSupabase } from '@/lib/supabase-server';
+import { createAdminClient } from '@/lib/supabase/admin';
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const url = new URL(req.url);
+    const code = url.searchParams.get('code');
+    const state = url.searchParams.get('state');
+    const error = url.searchParams.get('error');
+
+    // Handle OAuth callback from Stripe
+    if (code && state) {
+      console.log('🔍 [PAYMENTS] Handling OAuth callback from Stripe');
+      
+      // Extract tenant_id from state parameter
+      const [tenantId, mode] = state.split(':');
+      if (!tenantId) {
+        throw new Error('Invalid state parameter - missing tenant_id');
+      }
+
+      // Determine if this is test or live mode
+      const isTest = mode === 'test' || process.env.NODE_ENV !== 'production';
+      
+      // Select the correct Stripe secret key
+      const stripeSecret = isTest
+        ? process.env.STRIPE_SECRET_KEY_TEST
+        : process.env.STRIPE_SECRET_KEY_LIVE;
+
+      if (!stripeSecret) {
+        throw new Error(`Missing Stripe secret key for mode: ${isTest ? 'test' : 'live'}`);
+      }
+
+      // Exchange authorization code for access token
+      const tokenResponse = await fetch('https://connect.stripe.com/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_secret: stripeSecret,
+          code,
+          grant_type: 'authorization_code',
+        }),
+      });
+
+      const tokenData = await tokenResponse.json();
+      if (!tokenResponse.ok) {
+        console.error('Stripe OAuth error:', tokenData);
+        throw new Error(tokenData.error_description || 'OAuth failed');
+      }
+
+      const stripeAccountId = tokenData.stripe_user_id;
+      console.log('🔍 [PAYMENTS] Connected account ID:', stripeAccountId);
+
+      // Use admin client to update database
+      const adminClient = createAdminClient();
+      
+      // Update tenant_stripe table
+      const { error: dbError } = await adminClient
+        .from('tenant_stripe')
+        .upsert({
+          tenant_id: tenantId,
+          stripe_account_id: stripeAccountId,
+          connected: true,
+          updated_at: new Date().toISOString()
+        });
+
+      if (dbError) {
+        console.error('Database error:', dbError);
+        throw new Error('Failed to save Stripe account to database');
+      }
+
+      // Redirect to success page
+      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_ROOT_URL}/admin/payments?connected=true`);
+    }
+
+    // Handle OAuth error
+    if (error) {
+      console.error('OAuth error:', error);
+      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_ROOT_URL}/admin/payments?error=${error}`);
+    }
+
+    // Regular status check (no OAuth callback)
     const tenantId = await getAuthedUserTenantId();
-    const { accountId } = await getTenantStripeAccountId(tenantId);
+    const { accountId, connected } = await getTenantStripeAccountId(tenantId);
     
     if (!accountId) {
       return NextResponse.json({ 

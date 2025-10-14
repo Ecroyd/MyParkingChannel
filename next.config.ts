@@ -46,11 +46,27 @@ const baseConfig = {
       }
     ];
 
+    const cacheHeaders = [
+      {
+        source: '/(sw|workbox-.*|fallback-.*)\\.js',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+        ],
+      },
+      {
+        source: '/manifest.webmanifest',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=3600, stale-while-revalidate=86400' },
+        ],
+      },
+    ];
+
     return [
       {
         source: "/(.*)",
         headers: securityHeaders,
       },
+      ...cacheHeaders,
     ];
   }
 };

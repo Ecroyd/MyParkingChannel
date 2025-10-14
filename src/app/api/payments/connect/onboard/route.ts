@@ -1,6 +1,6 @@
 // app/api/payments/connect/onboard/route.ts
 import { NextResponse } from 'next/server';
-import { stripe, ROOT_URL, isStripeConfigured } from '@/lib/stripe';
+import { ROOT_URL, isStripeConfigured } from '@/lib/stripe';
 import { getAuthedUserTenantId, getTenantStripeAccountId, setTenantStripeAccountId, getServerSupabase } from '@/lib/supabase-server';
 
 export async function POST() {
@@ -18,62 +18,42 @@ export async function POST() {
     const tenantId = await getAuthedUserTenantId();
     console.log('🔍 [PAYMENTS] Tenant ID:', tenantId);
 
-    let { accountId } = await getTenantStripeAccountId(tenantId);
+    // Check if tenant already has a connected account
+    const { accountId, connected } = await getTenantStripeAccountId(tenantId);
     
-    // Always create a new account to avoid issues with old accounts
-    if (!accountId) {
-      console.log('🔍 [PAYMENTS] Creating new Stripe account for tenant:', tenantId);
-      console.log('🔍 [PAYMENTS] About to call stripe.accounts.create...');
-      // Create controller-based connected account – per your spec
-      const acct = await stripe.accounts.create({
-        controller: {
-          fees: { payer: 'account' },
-          losses: { payments: 'stripe' },
-          stripe_dashboard: { type: 'full' },
-        },
+    if (connected && accountId) {
+      console.log('🔍 [PAYMENTS] Tenant already has connected account:', accountId);
+      return NextResponse.json({ 
+        accountId, 
+        connected: true,
+        message: 'Account already connected' 
       });
-      console.log('🔍 [PAYMENTS] Stripe account created successfully:', acct.id);
-      accountId = acct.id;
-      await setTenantStripeAccountId(tenantId, accountId, false);
-    } else {
-      // If we have an account ID, verify it exists and is accessible
-      try {
-        await stripe.accounts.retrieve(accountId);
-        console.log('Using existing account:', accountId);
-      } catch (error: any) {
-        console.log('Old account invalid, creating new one:', error.message);
-        // Clear the old account and create a new one
-        const supabase = await getServerSupabase();
-        await supabase
-          .from('tenant_stripe')
-          .delete()
-          .eq('tenant_id', tenantId);
-        
-        const acct = await stripe.accounts.create({
-          controller: {
-            fees: { payer: 'account' },
-            losses: { payments: 'stripe' },
-            stripe_dashboard: { type: 'full' },
-          },
-        });
-        accountId = acct.id;
-        await setTenantStripeAccountId(tenantId, accountId, false);
-      }
     }
 
-    console.log('Creating account link for account:', accountId);
-    const link = await stripe.accountLinks.create({
-      account: accountId,
-      type: 'account_onboarding',
-      return_url: `${ROOT_URL}/admin/payments?step=return`,
-      refresh_url: `${ROOT_URL}/admin/payments?step=refresh`,
-    });
+    // Create Stripe Connect OAuth URL
+    const clientId = process.env.STRIPE_CLIENT_ID;
+    if (!clientId) {
+      throw new Error('STRIPE_CLIENT_ID environment variable is required for Stripe Connect');
+    }
 
-    return NextResponse.json({ accountId, url: link.url });
+    // Create OAuth URL with tenant_id in state parameter
+    const state = `${tenantId}:${process.env.NODE_ENV === 'production' ? 'live' : 'test'}`;
+    const oauthUrl = new URL('https://connect.stripe.com/oauth/authorize');
+    oauthUrl.searchParams.set('response_type', 'code');
+    oauthUrl.searchParams.set('client_id', clientId);
+    oauthUrl.searchParams.set('scope', 'read_write');
+    oauthUrl.searchParams.set('state', state);
+    oauthUrl.searchParams.set('redirect_uri', `${ROOT_URL}/api/payments/connect/status`);
+
+    console.log('🔍 [PAYMENTS] Created OAuth URL for tenant:', tenantId);
+    return NextResponse.json({ 
+      url: oauthUrl.toString(),
+      tenantId 
+    });
   } catch (error: any) {
     console.error('Onboard error:', error);
     return NextResponse.json({ 
-      error: error.message || 'Failed to create Stripe account' 
+      error: error.message || 'Failed to create Stripe Connect URL' 
     }, { status: 500 });
   }
 }
