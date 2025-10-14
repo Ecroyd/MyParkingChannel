@@ -36,13 +36,24 @@ export async function POST() {
     }
 
     // 🚀 if not connected → generate onboarding link
-    const clientId = process.env.STRIPE_CLIENT_ID;
+    // Determine if we're in test or live mode
+    const isLive = process.env.NODE_ENV === 'production' && process.env.STRIPE_MODE !== 'test';
+    const isTest = !isLive;
+    
+    // Select the correct client ID based on mode
+    const clientId = isTest 
+      ? process.env.STRIPE_CLIENT_ID_TEST 
+      : process.env.STRIPE_CLIENT_ID_LIVE;
+      
     if (!clientId) {
-      throw new Error('STRIPE_CLIENT_ID environment variable is required for Stripe Connect');
+      const mode = isTest ? 'test' : 'live';
+      throw new Error(`STRIPE_CLIENT_ID_${mode.toUpperCase()} environment variable is required for Stripe Connect`);
     }
 
+    console.log('🔍 [PAYMENTS] Using Stripe Connect in', isTest ? 'TEST' : 'LIVE', 'mode with client ID:', clientId.substring(0, 12) + '...');
+
     // Create OAuth URL with tenant_id in state parameter
-    const state = `${tenantId}:${process.env.NODE_ENV === 'production' ? 'live' : 'test'}`;
+    const state = `${tenantId}:${isTest ? 'test' : 'live'}`;
     const oauthUrl = new URL('https://connect.stripe.com/oauth/authorize');
     oauthUrl.searchParams.set('response_type', 'code');
     oauthUrl.searchParams.set('client_id', clientId);

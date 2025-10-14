@@ -9,7 +9,8 @@ export async function GET() {
 
   const optional = [
     'NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY',
-    'STRIPE_CLIENT_ID',
+    'STRIPE_CLIENT_ID_TEST',
+    'STRIPE_CLIENT_ID_LIVE',
     'STRIPE_WEBHOOK_SECRET'
   ];
 
