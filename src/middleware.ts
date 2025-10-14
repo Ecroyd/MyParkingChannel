@@ -15,7 +15,8 @@ export function middleware(req: NextRequest) {
     pathname.startsWith('/manifest') ||
     pathname.startsWith('/sw') ||
     pathname.startsWith('/workbox') ||
-    pathname.startsWith('/fallback')
+    pathname.startsWith('/fallback') ||
+    pathname.startsWith('/~offline')
   ) {
     return NextResponse.next();
   }
