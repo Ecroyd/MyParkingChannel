@@ -1,11 +1,11 @@
 import { Suspense } from 'react'
-import { getServerSupabase } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
 import { requireUser } from '@/lib/auth/requireUser'
 import BookingRulesPageClient from '@/components/admin/BookingRulesPageClient'
 
 export default async function BookingRulesPage() {
   const user = await requireUser()
-  const supabase = await getServerSupabase({ admin: true })
+  const supabase = createAdminClient()
 
   // Get user's tenants (following the same pattern as other admin pages)
   const { data: userTenants, error: tenantError } = await supabase

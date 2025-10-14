@@ -1,7 +1,7 @@
 // src/app/api/bookings/[id]/extend/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { createServerClient } from "@/lib/supabase/server";
+import { createServerClient, createAdminClient } from "@/lib/supabase/server";
 import { quoteExtensionCents } from "@/lib/pricing/quoteExtension";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       : quoteCents;
 
     // 3) Fetch per-tenant Stripe keys (optional in development)
-    const admin = await createServerClient({ admin: true });
+    const admin = createAdminClient();
     const { data: secrets } = await admin
       .from("tenant_secrets")
       .select("stripe_secret_key")

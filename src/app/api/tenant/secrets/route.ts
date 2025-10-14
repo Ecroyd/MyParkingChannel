@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSupabase } from '@/lib/supabase/server';
 import { getServiceSupabase } from '@/lib/supabase/service';
-import { createAdminClient } from '@/lib/supabase/server-admin';
+import { createAdminClient } from '@/lib/supabase/server';
 
 export async function GET(req: NextRequest) {
   try {
@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Save tenant secrets (admin client to bypass RLS)
-    const admin = await getServerSupabase({ admin: true });
+    const admin = createAdminClient();
     const { error } = await admin
       .from("tenant_secrets")
       .upsert({

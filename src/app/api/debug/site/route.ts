@@ -1,7 +1,7 @@
 export const runtime = 'nodejs'; // <— forces Node, so supabase-js is allowed
 
 import { NextResponse } from 'next/server'
-import { createServerClient } from '@/lib/supabase/server'
+import { createServerClient, createAdminClient } from '@/lib/supabase/server'
 
 export async function GET(req: Request) {
   if (process.env.NEXT_PUBLIC_DEBUG_SITE !== '1') {
@@ -12,7 +12,7 @@ export async function GET(req: Request) {
     const url = new URL(req.url)
     const host = req.headers.get('host') || ''
     const slug = url.searchParams.get('slug') || undefined
-    const sb = await createServerClient({ admin: true })
+    const sb = createAdminClient()
 
     // Keep selects broad so we can *see* what exists, but ONLY for known tables
     const { data: domainRow } = await sb

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createServerClient } from '@/lib/supabase/server'
+import { createServerClient, createAdminClient } from '@/lib/supabase/server'
 import { requireUser } from '@/lib/auth/requireUser'
 
 export async function POST(req: Request) {
@@ -13,7 +13,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'tenant_id and site_published required' }, { status: 400 })
     }
 
-    const sb = await createServerClient({ admin: true })
+    const sb = createAdminClient()
     const { data, error } = await sb
       .from('tenants')
       .update({ site_published })

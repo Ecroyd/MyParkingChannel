@@ -1,5 +1,5 @@
 // src/lib/pricing/quoteExtension.ts
-import { getServerSupabase } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server';
 
 export async function quoteExtensionCents(opts: {
   tenantId: string;
@@ -7,7 +7,7 @@ export async function quoteExtensionCents(opts: {
   newEndAtISO: string;     // proposed end
 }): Promise<number> {
   const { tenantId, bookingEndAtISO, newEndAtISO } = opts;
-  const supabase = await getServerSupabase({ admin: true });
+  const supabase = createAdminClient();
 
   const start = new Date(bookingEndAtISO);
   const end = new Date(newEndAtISO);

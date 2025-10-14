@@ -1,8 +1,8 @@
-import { createServerClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/server";
 import { Resend } from "resend";
 
 export async function getSecret(key: string) {
-  const sb = await createServerClient({ admin: true });
+  const sb = createAdminClient();
   const { data } = await sb.from("platform_secrets").select("value").eq("key", key).maybeSingle();
   return data?.value ?? null;
 }
