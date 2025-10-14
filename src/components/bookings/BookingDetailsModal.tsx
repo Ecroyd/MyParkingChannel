@@ -22,6 +22,9 @@ type Booking = {
   flight_number: string | null;
   is_incomplete?: boolean;
   missing_fields?: string[];
+  stripe_payment_intent_id?: string | null;
+  payment_status?: string | null;
+  money_received?: boolean;
 };
 
 export default function BookingDetailsModal({
@@ -35,7 +38,7 @@ export default function BookingDetailsModal({
   onClose: () => void;
   onBookingUpdated?: () => void;
 }) {
-  const [tab, setTab] = React.useState<'overview'|'edit'|'extend'>('overview');
+  const [tab, setTab] = React.useState<'overview'|'edit'|'extend'|'refund'>('overview');
   const [loading, setLoading] = React.useState(false);
 
   const refresh = async () => {
@@ -63,7 +66,7 @@ export default function BookingDetailsModal({
 
         <div className="px-4 pt-2">
           <div className="flex gap-3 border-b">
-            {['overview','edit','extend'].map(t => (
+            {['overview','edit','extend','refund'].map(t => (
               <button
                 key={t}
                 onClick={() => setTab(t as any)}
@@ -103,6 +106,10 @@ export default function BookingDetailsModal({
 
           {!loading && booking && tab === 'extend' && (
             <ExtendForm booking={booking} onExtended={async () => { await refresh(); setTab('overview'); }} />
+          )}
+
+          {!loading && booking && tab === 'refund' && (
+            <RefundForm booking={booking} onRefunded={async () => { await refresh(); setTab('overview'); }} />
           )}
         </div>
       </div>
@@ -307,6 +314,113 @@ function ExtendForm({ booking, onExtended }: { booking: any; onExtended: () => v
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function RefundForm({ booking, onRefunded }: { booking: any; onRefunded: () => void }) {
+  const [refundAmount, setRefundAmount] = React.useState<number>(0);
+  const [reason, setReason] = React.useState<string>('');
+  const [processing, setProcessing] = React.useState(false);
+  const [error, setError] = React.useState<string>('');
+
+  // Set default refund amount to the charged amount
+  React.useEffect(() => {
+    if (booking.money_charged && refundAmount === 0) {
+      setRefundAmount(Math.round(booking.money_charged * 100)); // Convert to cents
+    }
+  }, [booking.money_charged, refundAmount]);
+
+  const processRefund = async () => {
+    if (!booking.stripe_payment_intent_id) {
+      setError('No payment intent found for this booking');
+      return;
+    }
+
+    if (refundAmount <= 0) {
+      setError('Refund amount must be greater than 0');
+      return;
+    }
+
+    setProcessing(true);
+    setError('');
+
+    try {
+      const res = await fetch('/api/bookings/refund', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookingId: booking.id,
+          tenantId: booking.tenant_id,
+          paymentIntentId: booking.stripe_payment_intent_id,
+          amount: refundAmount,
+          reason: reason || 'requested_by_customer'
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        throw new Error(json.error || 'Refund failed');
+      }
+
+      onRefunded();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <div className="grid gap-4">
+      <div>
+        <label className="block text-xs text-gray-500 mb-1">Refund Amount (pence)</label>
+        <input 
+          type="number" 
+          className="border rounded p-2 w-full"
+          value={refundAmount}
+          onChange={e => setRefundAmount(parseInt(e.target.value || '0', 10))}
+          min="1"
+          max={Math.round((booking.money_charged || 0) * 100)}
+        />
+        <div className="text-xs text-gray-500 mt-1">
+          Original charge: {toMoney(Math.round((booking.money_charged || 0) * 100))}
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-xs text-gray-500 mb-1">Reason (optional)</label>
+        <select 
+          className="border rounded p-2 w-full"
+          value={reason}
+          onChange={e => setReason(e.target.value)}
+        >
+          <option value="">Select a reason</option>
+          <option value="requested_by_customer">Requested by customer</option>
+          <option value="duplicate">Duplicate payment</option>
+          <option value="fraudulent">Fraudulent</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+
+      {error && (
+        <div className="text-red-600 text-sm">{error}</div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button
+          className="px-4 py-2 rounded bg-red-600 text-white"
+          onClick={processRefund}
+          disabled={processing || !booking.stripe_payment_intent_id}
+        >
+          {processing ? 'Processing Refund...' : 'Process Refund'}
+        </button>
+        
+        {!booking.stripe_payment_intent_id && (
+          <span className="text-sm text-gray-500">No payment found for this booking</span>
+        )}
+      </div>
     </div>
   );
 }

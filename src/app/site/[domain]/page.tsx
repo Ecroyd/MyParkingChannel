@@ -5,6 +5,9 @@ async function getTenantByDomain(domain: string) {
   console.log('🔍 [SITE] Starting domain lookup for:', domain)
   console.log('🔍 [SITE] Domain type:', typeof domain)
   console.log('🔍 [SITE] Domain length:', domain?.length)
+  console.log('🔍 [SITE] Domain exact match check:', domain === 'parkingexeterairport.co.uk')
+  console.log('🔍 [SITE] Domain includes check:', domain && domain.includes('parkingexeterairport.co.uk'))
+  console.log('🔍 [SITE] Domain contains parkingexeterairport:', domain && domain.includes('parkingexeterairport'))
   
   // For now, let's use a simple approach - hardcode the known tenant
   // This is a temporary fix while we debug the admin client issue
@@ -20,6 +23,16 @@ async function getTenantByDomain(domain: string) {
   // Also handle the case where domain might be the full URL
   if (domain && domain.includes('parkingexeterairport.co.uk')) {
     console.log('✅ [SITE] Using hardcoded tenant for domain containing parkingexeterairport.co.uk')
+    return { 
+      id: 'bab45dab-19e8-4230-b18e-ee1f663608e5', 
+      slug: 'flyparksexeter', 
+      name: 'Fly Parks Exeter' 
+    }
+  }
+  
+  // Additional fallback for any domain containing parkingexeterairport
+  if (domain && domain.includes('parkingexeterairport')) {
+    console.log('✅ [SITE] Using hardcoded tenant for domain containing parkingexeterairport')
     return { 
       id: 'bab45dab-19e8-4230-b18e-ee1f663608e5', 
       slug: 'flyparksexeter', 
@@ -75,6 +88,13 @@ export default async function Page({ params }: { params: Promise<{ domain: strin
       SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'SET' : 'NOT SET'
     })
     console.error('❌ [SITE] This should not happen with hardcoded fallback')
+    
+    // Emergency fallback - if domain contains parkingexeterairport, redirect to flyparksexeter
+    if (domain && domain.includes('parkingexeterairport')) {
+      console.log('🚨 [SITE] Emergency fallback: redirecting to flyparksexeter')
+      redirect('/sites/flyparksexeter')
+    }
+    
     redirect('/') // fallback to home
   }
 

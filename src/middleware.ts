@@ -28,8 +28,8 @@ export function middleware(req: NextRequest) {
   
   // Check if this is a known custom domain
   if (knownCustomDomains.includes(hostname)) {
-    console.log(`[MW] Known custom domain detected: ${hostname} -> /site/${hostname}`);
-    return NextResponse.rewrite(new URL(`/site/${hostname}${pathname}`, req.url));
+    console.log(`[MW] Known custom domain detected: ${hostname} -> /sites/flyparksexeter`);
+    return NextResponse.rewrite(new URL(`/sites/flyparksexeter${pathname}`, req.url));
   }
   
   // Check if this is a custom domain (not the base domain and not a subdomain)
