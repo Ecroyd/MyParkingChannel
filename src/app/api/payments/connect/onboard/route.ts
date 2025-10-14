@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { ROOT_URL, isStripeConfigured, stripe } from '@/lib/stripe';
 import { getAuthedUserTenantId, getTenantStripeAccountId, setTenantStripeAccountId, getServerSupabase } from '@/lib/supabase-server';
 
-export async function POST() {
+export async function POST(req: Request) {
   try {
     console.log('🔍 [PAYMENTS] Starting onboarding process...');
     console.log('🔍 [PAYMENTS] Stripe configured:', isStripeConfigured());
@@ -15,10 +15,13 @@ export async function POST() {
       }, { status: 500 });
     }
 
-    // Use the pre-configured Stripe instance from lib/stripe.ts
+    // Parse request body to get mode
+    const body = await req.json().catch(() => ({}));
+    const requestedMode = body.mode || 'test';
     
     const tenantId = await getAuthedUserTenantId();
     console.log('🔍 [PAYMENTS] Tenant ID:', tenantId);
+    console.log('🔍 [PAYMENTS] Requested mode:', requestedMode);
 
     // Check if tenant already has a connected account
     const { accountId, connected } = await getTenantStripeAccountId(tenantId);
@@ -36,11 +39,11 @@ export async function POST() {
     }
 
     // 🚀 if not connected → generate onboarding link
-    // Determine if we're in test or live mode
-    const isLive = process.env.NODE_ENV === 'production' && process.env.STRIPE_MODE !== 'test';
-    const isTest = !isLive;
+    // Use the requested mode from the frontend
+    const isTest = requestedMode === 'test';
+    const isLive = requestedMode === 'live';
     
-    // Select the correct client ID based on mode
+    // Select the correct client ID based on requested mode
     const clientId = isTest 
       ? process.env.STRIPE_CLIENT_ID_TEST 
       : process.env.STRIPE_CLIENT_ID_LIVE;
@@ -53,7 +56,7 @@ export async function POST() {
     console.log('🔍 [PAYMENTS] Using Stripe Connect in', isTest ? 'TEST' : 'LIVE', 'mode with client ID:', clientId.substring(0, 12) + '...');
 
     // Create OAuth URL with tenant_id in state parameter
-    const state = `${tenantId}:${isTest ? 'test' : 'live'}`;
+    const state = `${tenantId}:${requestedMode}`;
     const oauthUrl = new URL('https://connect.stripe.com/oauth/authorize');
     oauthUrl.searchParams.set('response_type', 'code');
     oauthUrl.searchParams.set('client_id', clientId);
