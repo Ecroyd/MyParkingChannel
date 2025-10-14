@@ -71,6 +71,14 @@ export async function POST(req: Request) {
     });
   } catch (error: any) {
     console.error('Onboard error:', error);
+    
+    // Handle invalid API key errors
+    if (error.type === 'StripeAuthenticationError' || error.statusCode === 401) {
+      return NextResponse.json({ 
+        error: 'Invalid Stripe API key. Please check your environment variables. If you want to use test mode, set STRIPE_MODE=test in your environment.' 
+      }, { status: 500 });
+    }
+    
     return NextResponse.json({ 
       error: error.message || 'Failed to create Stripe Connect URL' 
     }, { status: 500 });

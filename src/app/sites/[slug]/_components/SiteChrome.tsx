@@ -12,16 +12,16 @@ export function Header({ title, logoUrl, tenantSlug }: { title: string; logoUrl?
   };
 
   const navLinks = [
-    { href: tenantSlug ? `/sites/${tenantSlug}/book` : "/book", label: "Book" },
-    { href: tenantSlug ? `/sites/${tenantSlug}/directions` : "/directions", label: "Directions" },
-    { href: tenantSlug ? `/sites/${tenantSlug}/manage-booking` : "/manage-booking", label: "Manage Booking" },
-    { href: tenantSlug ? `/sites/${tenantSlug}/contact` : "/contact", label: "Contact" },
+    { href: "/book", label: "Book" },
+    { href: "/directions", label: "Directions" },
+    { href: "/manage-booking", label: "Manage Booking" },
+    { href: "/contact", label: "Contact" },
   ];
 
   return (
     <header className="sticky top-0 z-40 bg-white/80 backdrop-blur border-b border-slate-200">
       <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-        <Link href={tenantSlug ? `/sites/${tenantSlug}` : "/"} className="flex items-center gap-3">
+        <Link href="/" className="flex items-center gap-3">
           {logoUrl ? (
             <img 
               src={logoUrl} 

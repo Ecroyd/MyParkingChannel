@@ -134,7 +134,7 @@ export default async function PricesPage({ params }: PageProps) {
             </div>
 
             <a
-              href={`/sites/${resolvedParams.slug}/book`}
+              href="/book"
               className="block w-full text-center bg-sky-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-sky-700 transition-colors"
             >
               Book Now
@@ -225,7 +225,7 @@ export default async function PricesPage({ params }: PageProps) {
                 Get started with your booking in just a few clicks. Secure, fast, and reliable.
               </p>
               <a
-                href={`/sites/${resolvedParams.slug}/book`}
+                href="/book"
                 className="text-sky-600 hover:text-sky-700 font-medium text-sm"
               >
                 Start Booking →

@@ -188,7 +188,7 @@ export default async function TenantHome({
               <Link href="#book" className="rounded-2xl bg-black text-white px-5 py-3 font-medium hover:bg-gray-800 transition-colors">
                 Book parking
               </Link>
-              <Link href={`/sites/${resolvedParams.slug}/directions`} className="rounded-2xl border border-slate-300 px-5 py-3 font-medium hover:bg-slate-50 transition-colors">
+              <Link href="/directions" className="rounded-2xl border border-slate-300 px-5 py-3 font-medium hover:bg-slate-50 transition-colors">
                 Directions
               </Link>
             </div>
@@ -211,7 +211,7 @@ export default async function TenantHome({
           <div className="rounded-2xl border bg-white/70 backdrop-blur shadow-lg p-5">
             <h2 className="font-medium mb-2 text-slate-900">Pricing</h2>
             <p className="text-slate-600 mb-3">Transparent daily rates. No hidden fees.</p>
-            <Link className="inline-block mt-3 text-sm underline text-sky-600 hover:text-sky-700" href={`/sites/${resolvedParams.slug}/prices`}>
+            <Link className="inline-block mt-3 text-sm underline text-sky-600 hover:text-sky-700" href="/prices">
               See prices
             </Link>
           </div>
@@ -220,14 +220,14 @@ export default async function TenantHome({
             <p className="text-slate-600 mb-3">
               Typically {p?.airports?.[0] ? `${p.airports[0]} airport` : "the airport"} in 5–10 minutes.
             </p>
-            <Link className="inline-block mt-3 text-sm underline text-sky-600 hover:text-sky-700" href={`/sites/${resolvedParams.slug}/directions`}>
+            <Link className="inline-block mt-3 text-sm underline text-sky-600 hover:text-sky-700" href="/directions">
               Get directions
             </Link>
           </div>
           <div className="rounded-2xl border bg-white/70 backdrop-blur shadow-lg p-5">
             <h2 className="font-medium mb-2 text-slate-900">Support</h2>
             <p className="text-slate-600 mb-3">Have a late return or flight change? We'll extend your booking at the gate.</p>
-            <Link className="inline-block mt-3 text-sm underline text-sky-600 hover:text-sky-700" href={`/sites/${resolvedParams.slug}/faq`}>
+            <Link className="inline-block mt-3 text-sm underline text-sky-600 hover:text-sky-700" href="/faq">
               Read FAQs
             </Link>
           </div>

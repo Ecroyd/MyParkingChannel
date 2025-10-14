@@ -12,8 +12,9 @@ export const ROOT_URL = process.env.NEXT_PUBLIC_ROOT_URL || 'http://localhost:30
 
 // Handle both test and live keys
 const getStripeSecretKey = () => {
-  const isLive = process.env.NODE_ENV === 'production' || process.env.STRIPE_MODE === 'live';
-  const isTestMode = process.env.STRIPE_MODE === 'test';
+  // Force test mode if STRIPE_MODE=test is set, even in production
+  const isLive = process.env.NODE_ENV === 'production' && process.env.STRIPE_MODE !== 'test';
+  const isTestMode = process.env.STRIPE_MODE === 'test' || process.env.NODE_ENV !== 'production';
   
   console.log('🔍 [STRIPE] Environment check:', {
     NODE_ENV: process.env.NODE_ENV,

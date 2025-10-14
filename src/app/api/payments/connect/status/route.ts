@@ -101,6 +101,14 @@ export async function GET(req: Request) {
     } catch (stripeError: any) {
       console.error('Stripe account retrieval error:', stripeError);
       
+      // Handle invalid API key errors
+      if (stripeError.type === 'StripeAuthenticationError' || stripeError.statusCode === 401) {
+        return NextResponse.json({ 
+          connected: false, 
+          error: 'Invalid Stripe API key. Please check your environment variables. If you want to use test mode, set STRIPE_MODE=test in your environment.' 
+        }, { status: 500 });
+      }
+      
       // If account doesn't exist or key doesn't have access, clear it from database
       if (stripeError.code === 'account_invalid' || stripeError.statusCode === 403) {
         // Clear the old account ID from database

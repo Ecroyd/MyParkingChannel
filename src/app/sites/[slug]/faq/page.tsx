@@ -154,25 +154,25 @@ export default async function FAQPage({ params }: PageProps) {
               <h2 className="text-xl font-semibold text-slate-900 mb-4">Quick Links</h2>
               <div className="space-y-3">
                 <a
-                  href={`/sites/${resolvedParams.slug}/book`}
+                  href="/book"
                   className="block text-sky-600 hover:text-sky-700 font-medium"
                 >
                   Book Parking →
                 </a>
                 <a
-                  href={`/sites/${resolvedParams.slug}/directions`}
+                  href="/directions"
                   className="block text-sky-600 hover:text-sky-700 font-medium"
                 >
                   Get Directions →
                 </a>
                 <a
-                  href={`/sites/${resolvedParams.slug}/prices`}
+                  href="/prices"
                   className="block text-sky-600 hover:text-sky-700 font-medium"
                 >
                   View Prices →
                 </a>
                 <a
-                  href={`/sites/${resolvedParams.slug}/contact`}
+                  href="/contact"
                   className="block text-sky-600 hover:text-sky-700 font-medium"
                 >
                   Contact Us →
