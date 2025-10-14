@@ -58,32 +58,45 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
   const [tenantDomains, setTenantDomains] = useState<Record<string, Domain[]>>({});
   const [newDomain, setNewDomain] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
+  const [domainsLoaded, setDomainsLoaded] = useState(false);
   const { toast } = useToast();
   const supabase = createClient();
 
   // Load domains for each tenant
   useEffect(() => {
+    if (!tenants || tenants.length === 0) return;
+    
     const loadDomains = async () => {
-      const domainsData: Record<string, Domain[]> = {};
-      
-      for (const tenant of tenants) {
-        const { data, error } = await supabase
-          .from('tenant_domains')
-          .select('id, domain, is_primary, verified')
-          .eq('tenant_id', tenant.id);
+      try {
+        const domainsData: Record<string, Domain[]> = {};
         
-        if (!error && data) {
-          domainsData[tenant.id] = data;
+        for (const tenant of tenants) {
+          if (!tenant?.id) continue;
+          
+          const { data, error } = await supabase
+            .from('tenant_domains')
+            .select('id, domain, is_primary, verified')
+            .eq('tenant_id', tenant.id);
+          
+          if (!error && data) {
+            domainsData[tenant.id] = data;
+          }
         }
+        
+        setTenantDomains(domainsData);
+        setDomainsLoaded(true);
+      } catch (error) {
+        console.error('Error loading domains:', error);
+        setDomainsLoaded(true);
       }
-      
-      setTenantDomains(domainsData);
     };
 
     loadDomains();
   }, [tenants, supabase]);
 
   const handleAddDomain = async (tenantId: string) => {
+    if (!tenantId) return;
+    
     const domain = newDomain[tenantId]?.trim();
     if (!domain) return;
 
@@ -126,6 +139,8 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
   };
 
   const handleSetPrimary = async (tenantId: string, domainId: string) => {
+    if (!tenantId || !domainId) return;
+    
     try {
       // First, unset all primary domains for this tenant
       await supabase
@@ -164,6 +179,8 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
   };
 
   const handleDeleteDomain = async (tenantId: string, domainId: string) => {
+    if (!tenantId || !domainId) return;
+    
     try {
       const { error } = await supabase
         .from('tenant_domains')
@@ -191,12 +208,16 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
   };
 
   const getPrimaryDomain = (tenantId: string) => {
+    if (!tenantId) return null;
+    
     const domains = tenantDomains[tenantId] || [];
     const primary = domains.find(d => d.is_primary);
     return primary?.domain || null;
   };
 
   const getLiveSiteUrl = (tenant: TenantWithSite) => {
+    if (!tenant?.id || !tenant?.slug) return '#';
+    
     const primaryDomain = getPrimaryDomain(tenant.id);
     if (primaryDomain) {
       return `https://${primaryDomain}`;
@@ -210,6 +231,23 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
         title="No tenant sites"
         detail="You don't have access to any tenant sites yet."
       />
+    );
+  }
+
+  // Show loading state while domains are being loaded or if tenants data is not ready
+  if (!domainsLoaded || !tenants || tenants.some(tenant => !tenant?.id)) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold text-gray-900">Tenant Sites</h1>
+            <p className="text-gray-600">Loading domain information...</p>
+          </div>
+        </div>
+        <div className="flex items-center justify-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        </div>
+      </div>
     );
   }
 
@@ -240,7 +278,7 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
 
         <TabsContent value="sites" className="mt-6">
           <div className="grid gap-6 grid-cols-1 lg:grid-cols-2 xl:grid-cols-3">
-            {tenants.map((tenant) => (
+            {tenants.filter(tenant => tenant?.id).map((tenant) => (
               <Card key={tenant.id} className="shadow-soft w-full">
                 <CardHeader className="pb-4">
                   <div className="flex items-start justify-between gap-3">
@@ -310,7 +348,7 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
 
         <TabsContent value="domains" className="mt-6">
           <div className="space-y-6">
-            {tenants.map((tenant) => (
+            {tenants.filter(tenant => tenant?.id).map((tenant) => (
               <Card key={tenant.id} className="shadow-soft">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">

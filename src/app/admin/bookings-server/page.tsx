@@ -81,7 +81,7 @@ export default async function BookingsServerPage() {
   console.log('🔍 Bookings: Fetching bookings for tenant:', tenant.id)
   const { data: bookings, error: bookingsError } = await adminClient
     .from('bookings')
-    .select('id, reference, customer_name, customer_email, customer_phone, plate, car_make, car_model, car_color, start_at, end_at, status, money_charged, money_received, flight_number, source, created_at')
+    .select('id, reference, customer_name, customer_email, customer_phone, plate, car_make, car_model, car_color, start_at, end_at, status, money_charged, money_received, flight_number, source, created_at, stripe_payment_intent_id, payment_status')
     .eq('tenant_id', tenant.id)
     .order('start_at', { ascending: false })
     .limit(500);

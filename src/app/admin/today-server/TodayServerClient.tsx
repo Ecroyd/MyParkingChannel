@@ -25,6 +25,8 @@ interface Booking {
   source: string;
   flight_number: string;
   notes: string | null;
+  stripe_payment_intent_id?: string | null;
+  payment_status?: string | null;
 }
 
 interface Tenant {

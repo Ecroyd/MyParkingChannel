@@ -18,13 +18,13 @@ type Booking = {
   start_at: string;
   end_at: string;
   money_charged: number | null;
+  money_received: number;
   notes: string | null;
   flight_number: string | null;
   is_incomplete?: boolean;
   missing_fields?: string[];
   stripe_payment_intent_id?: string | null;
   payment_status?: string | null;
-  money_received?: boolean;
 };
 
 export default function BookingDetailsModal({
