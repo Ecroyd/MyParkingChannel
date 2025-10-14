@@ -20,8 +20,25 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // --- Multi-tenant subdomain logic ---
+  // --- Custom domain logic ---
   const baseDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'myparkingchannel.app';
+  
+  // Known custom domains that should be handled by domain route
+  const knownCustomDomains = ['parkingexeterairport.co.uk'];
+  
+  // Check if this is a known custom domain
+  if (knownCustomDomains.includes(hostname)) {
+    console.log(`[MW] Known custom domain detected: ${hostname} -> /site/${hostname}`);
+    return NextResponse.rewrite(new URL(`/site/${hostname}${pathname}`, req.url));
+  }
+  
+  // Check if this is a custom domain (not the base domain and not a subdomain)
+  if (hostname !== baseDomain && !hostname.endsWith(`.${baseDomain}`)) {
+    console.log(`[MW] Custom domain detected: ${hostname} -> /site/${hostname}`);
+    return NextResponse.rewrite(new URL(`/site/${hostname}${pathname}`, req.url));
+  }
+
+  // --- Multi-tenant subdomain logic ---
   const currentHost = hostname.replace(`.${baseDomain}`, '');
 
   // If subdomain exists (not root), rewrite to /sites/[slug]
