@@ -2,6 +2,9 @@
 import { NextResponse } from 'next/server';
 import { ROOT_URL, isStripeConfigured } from '@/lib/stripe';
 import { getAuthedUserTenantId, getTenantStripeAccountId, setTenantStripeAccountId, getServerSupabase } from '@/lib/supabase-server';
+import Stripe from 'stripe';
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
 export async function POST() {
   try {
@@ -21,16 +24,19 @@ export async function POST() {
     // Check if tenant already has a connected account
     const { accountId, connected } = await getTenantStripeAccountId(tenantId);
     
+    // ✅ if already connected → generate login link
     if (connected && accountId) {
       console.log('🔍 [PAYMENTS] Tenant already has connected account:', accountId);
+      const link = await stripe.accounts.createLoginLink(accountId);
       return NextResponse.json({ 
+        url: link.url,
         accountId, 
         connected: true,
-        message: 'Account already connected' 
+        message: 'Account already connected - redirecting to Stripe dashboard' 
       });
     }
 
-    // Create Stripe Connect OAuth URL
+    // 🚀 if not connected → generate onboarding link
     const clientId = process.env.STRIPE_CLIENT_ID;
     if (!clientId) {
       throw new Error('STRIPE_CLIENT_ID environment variable is required for Stripe Connect');
