@@ -21,8 +21,17 @@ export async function GET(req: Request) {
         throw new Error('Invalid state parameter - missing tenant_id');
       }
 
-      // Determine if this is test or live mode
-      const isTest = mode === 'test' || process.env.NODE_ENV !== 'production';
+      // Determine if this is test or live mode - respect STRIPE_MODE=test setting
+      const forceTestMode = process.env.STRIPE_MODE === 'test';
+      const isTest = forceTestMode || mode === 'test' || process.env.NODE_ENV !== 'production';
+      
+      console.log('🔍 [PAYMENTS CONNECT] Mode determination:', {
+        forceTestMode,
+        requestedMode: mode,
+        NODE_ENV: process.env.NODE_ENV,
+        STRIPE_MODE: process.env.STRIPE_MODE,
+        finalIsTest: isTest
+      });
       
       // Select the correct Stripe secret key
       const stripeSecret = isTest
