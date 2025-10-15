@@ -120,8 +120,8 @@ export async function getTenantStripeKeys(tenantId: string): Promise<TenantStrip
   });
 
   return {
-    secretKey,
-    publishableKey
+    secretKey: secretKey || undefined,
+    publishableKey: publishableKey || undefined
   };
 }
 
