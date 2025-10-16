@@ -9,6 +9,7 @@ interface PaymentsClientProps {
 export default function PaymentsClient({}: PaymentsClientProps) {
   const [status, setStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [disconnecting, setDisconnecting] = useState(false);
   const [stripeMode, setStripeMode] = useState<'test' | 'live'>('test');
 
   async function refresh() {
@@ -58,6 +59,43 @@ export default function PaymentsClient({}: PaymentsClientProps) {
     }
   }
 
+  async function disconnectStripe() {
+    if (!confirm('Are you sure you want to disconnect Stripe? This will remove all Stripe connection data and you\'ll need to reconnect to process payments.')) {
+      return;
+    }
+
+    setDisconnecting(true);
+    try {
+      // Get tenant ID first
+      const response = await fetch('/api/admin/tenant/current');
+      if (!response.ok) {
+        throw new Error('Failed to get tenant ID');
+      }
+      const { tenant_id } = await response.json();
+
+      const res = await fetch('/api/stripe/disconnect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ tenant_id }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to disconnect');
+      }
+
+      alert('Stripe connection disconnected successfully');
+      await refresh(); // Refresh the status
+    } catch (error) {
+      console.error('Disconnect error:', error);
+      alert(`Error: ${error instanceof Error ? error.message : 'Failed to disconnect'}`);
+    } finally {
+      setDisconnecting(false);
+    }
+  }
+
   return (
     <section className="rounded-xl border p-4">
       <div className="flex justify-between items-center mb-4">
@@ -101,17 +139,37 @@ export default function PaymentsClient({}: PaymentsClientProps) {
         </div>
       )}
       {!loading && status?.connected && (
-        <div className="space-y-2 text-sm">
-          <div>Connected: <b>true</b></div>
-          <div>charges_enabled: <b>{String(status.charges_enabled)}</b></div>
-          <div>payouts_enabled: <b>{String(status.payouts_enabled)}</b></div>
-          <div>details_submitted: <b>{String(status.details_submitted)}</b></div>
-          <div className="mt-2">
+        <div className="space-y-3">
+          <div className="flex items-center space-x-2">
+            <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+            <span className="font-medium text-green-700">Connected to Stripe</span>
+            <span className={`text-xs px-2 py-1 rounded ${
+              stripeMode === 'test' 
+                ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' 
+                : 'bg-red-100 text-red-800 border border-red-200'
+            }`}>
+              {stripeMode === 'test' ? 'TEST MODE' : 'LIVE MODE'}
+            </span>
+          </div>
+          <div className="space-y-1 text-sm text-gray-600">
+            <div>Account ID: <b>{status.accountId}</b></div>
+            <div>Charges enabled: <b>{String(status.charges_enabled)}</b></div>
+            <div>Payouts enabled: <b>{String(status.payouts_enabled)}</b></div>
+            <div>Details submitted: <b>{String(status.details_submitted)}</b></div>
+          </div>
+          <div className="flex space-x-2">
             <button className="rounded border px-3 py-2" onClick={connectStripe}>
               Update Stripe Details
             </button>
-            <button className="ml-2 rounded border px-3 py-2" onClick={refresh}>
+            <button className="rounded border px-3 py-2" onClick={refresh}>
               Refresh
+            </button>
+            <button 
+              className="rounded bg-red-600 text-white px-3 py-2 hover:bg-red-700"
+              onClick={disconnectStripe}
+              disabled={disconnecting}
+            >
+              {disconnecting ? 'Disconnecting...' : 'Disconnect'}
             </button>
           </div>
         </div>

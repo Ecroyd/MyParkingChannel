@@ -32,12 +32,53 @@ export async function POST(req: NextRequest) {
       start_at, end_at, source = 'direct'
     } = body
 
-    if (!tenant_id || !customer_name || !customer_email || !plate || !start_at || !end_at) {
-      return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
+    // Comprehensive field validation
+    const validationErrors: string[] = []
+    
+    if (!tenant_id) validationErrors.push('Tenant ID is required')
+    if (!customer_name || customer_name.trim().length < 2) validationErrors.push('Full name must be at least 2 characters')
+    if (!customer_email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer_email)) validationErrors.push('Valid email address is required')
+    if (!plate || plate.trim().length < 2) validationErrors.push('Vehicle registration must be at least 2 characters')
+    if (!start_at) validationErrors.push('Arrival date is required')
+    if (!end_at) validationErrors.push('Departure date is required')
+    
+    if (validationErrors.length > 0) {
+      return NextResponse.json({ 
+        error: 'Validation failed', 
+        details: validationErrors,
+        field_errors: {
+          customer_name: !customer_name || customer_name.trim().length < 2 ? 'Full name must be at least 2 characters' : undefined,
+          customer_email: !customer_email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer_email) ? 'Valid email address is required' : undefined,
+          plate: !plate || plate.trim().length < 2 ? 'Vehicle registration must be at least 2 characters' : undefined,
+          start_at: !start_at ? 'Arrival date is required' : undefined,
+          end_at: !end_at ? 'Departure date is required' : undefined
+        }
+      }, { status: 400 })
     }
+    
     // Parse dates as UK timezone
     const s = parseAsUKTimezone(start_at), e = parseAsUKTimezone(end_at)
-    if (!(e > s)) return NextResponse.json({ error: 'end_at must be after start_at' }, { status: 400 })
+    if (!(e > s)) {
+      return NextResponse.json({ 
+        error: 'Invalid dates', 
+        details: ['Departure date must be after arrival date'],
+        field_errors: {
+          end_at: 'Departure date must be after arrival date'
+        }
+      }, { status: 400 })
+    }
+    
+    // Check if dates are in the past
+    const now = new Date()
+    if (s < now) {
+      return NextResponse.json({ 
+        error: 'Invalid dates', 
+        details: ['Arrival date cannot be in the past'],
+        field_errors: {
+          start_at: 'Arrival date cannot be in the past'
+        }
+      }, { status: 400 })
+    }
 
     // Use service role for public bookings (bypasses RLS)
     const admin = createAdminClient(
@@ -68,8 +109,35 @@ export async function POST(req: NextRequest) {
 
     // If booking is blocked by rules, return error
     if (ruleEvaluation.isBlocked) {
+      const blockingRules = ruleEvaluation.matchedRules.filter(r => r.rule_kind === 'blackout')
+      let userFriendlyMessage = 'Bookings are not available for the selected dates and times.'
+      
+      if (blockingRules.length > 0) {
+        const rule = blockingRules[0] // Get the first blocking rule for user-friendly message
+        if (rule.specific_date) {
+          const date = new Date(rule.specific_date).toLocaleDateString('en-GB', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+          })
+          userFriendlyMessage = `Bookings are not available on ${date}. Please select different dates.`
+        } else if (rule.applies_to_days && (rule as any).month_range) {
+          const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+          const days = rule.applies_to_days.map(d => dayNames[d]).join(', ')
+          const monthNames = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+                             'July', 'August', 'September', 'October', 'November', 'December']
+          const [startMonth, endMonth] = (rule as any).month_range
+          const monthRange = startMonth === endMonth ? 
+            monthNames[startMonth] : 
+            `${monthNames[startMonth]} to ${monthNames[endMonth]}`
+          userFriendlyMessage = `Bookings are not available on ${days} in ${monthRange}. Please select different dates.`
+        }
+      }
+      
       return NextResponse.json({ 
-        error: 'Bookings are not available for those dates and times. Any questions please get in touch.',
+        error: userFriendlyMessage,
+        details: ['Please select different dates and times for your booking.'],
         blocked: true
       }, { status: 400 })
     }

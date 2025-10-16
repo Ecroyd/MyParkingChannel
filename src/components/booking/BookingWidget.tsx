@@ -30,6 +30,16 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
   const [loading, setLoading] = useState(false);
   const [pricing, setPricing] = useState<PricingInfo | null>(null);
   const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
+  
+  // Error state management
+  const [errors, setErrors] = useState<{
+    startDate?: string;
+    endDate?: string;
+    customerName?: string;
+    customerEmail?: string;
+    vehicleReg?: string;
+    general?: string;
+  }>({});
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -43,6 +53,50 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
   useEffect(() => {
     calculatePrice();
   }, [startDate, endDate, pricing]);
+
+  // Clear errors when user starts typing
+  const clearError = (field: keyof typeof errors) => {
+    if (errors[field]) {
+      setErrors(prev => ({ ...prev, [field]: undefined }));
+    }
+  };
+
+  // Validation functions
+  const validateField = (field: string, value: string): string | undefined => {
+    switch (field) {
+      case 'customerName':
+        if (!value.trim()) return 'Full name is required';
+        if (value.trim().length < 2) return 'Name must be at least 2 characters';
+        return undefined;
+      
+      case 'customerEmail':
+        if (!value.trim()) return 'Email address is required';
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(value)) return 'Please enter a valid email address';
+        return undefined;
+      
+      case 'vehicleReg':
+        if (!value.trim()) return 'Vehicle registration is required';
+        if (value.trim().length < 2) return 'Registration must be at least 2 characters';
+        return undefined;
+      
+      case 'startDate':
+        if (!value) return 'Arrival date is required';
+        const start = new Date(value);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (start < today) return 'Arrival date cannot be in the past';
+        return undefined;
+      
+      case 'endDate':
+        if (!value) return 'Departure date is required';
+        if (startDate && value <= startDate) return 'Departure must be after arrival date';
+        return undefined;
+      
+      default:
+        return undefined;
+    }
+  };
 
   const loadPricing = async () => {
     try {
@@ -91,27 +145,55 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!startDate || !endDate || !customerName || !customerEmail || !vehicleReg) {
-      toast({
-        title: "Missing Information",
-        description: "Please fill in all required fields.",
-        variant: "destructive",
-      });
-      return;
+    // Clear previous errors
+    setErrors({});
+    
+    // Validate all fields
+    const newErrors: typeof errors = {};
+    let hasErrors = false;
+    
+    const startDateError = validateField('startDate', startDate);
+    if (startDateError) {
+      newErrors.startDate = startDateError;
+      hasErrors = true;
     }
-
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(customerEmail)) {
+    
+    const endDateError = validateField('endDate', endDate);
+    if (endDateError) {
+      newErrors.endDate = endDateError;
+      hasErrors = true;
+    }
+    
+    const customerNameError = validateField('customerName', customerName);
+    if (customerNameError) {
+      newErrors.customerName = customerNameError;
+      hasErrors = true;
+    }
+    
+    const customerEmailError = validateField('customerEmail', customerEmail);
+    if (customerEmailError) {
+      newErrors.customerEmail = customerEmailError;
+      hasErrors = true;
+    }
+    
+    const vehicleRegError = validateField('vehicleReg', vehicleReg);
+    if (vehicleRegError) {
+      newErrors.vehicleReg = vehicleRegError;
+      hasErrors = true;
+    }
+    
+    if (hasErrors) {
+      setErrors(newErrors);
       toast({
-        title: "Invalid Email",
-        description: "Please enter a valid email address.",
+        title: "Please fix the errors below",
+        description: "Some fields need to be corrected before you can continue.",
         variant: "destructive",
       });
       return;
     }
 
     if (!calculatedPrice) {
+      setErrors({ general: "Please select valid start and end dates." });
       toast({
         title: "Invalid Dates",
         description: "Please select valid start and end dates.",
@@ -145,9 +227,65 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
       const paymentResult = await paymentResponse.json();
 
       if (!paymentResponse.ok) {
+        let errorMessage = "Unable to process payment. Please try again.";
+        const newErrors: typeof errors = {};
+        
+        if (paymentResult.error) {
+          // Handle server-side validation errors
+          if (paymentResult.field_errors) {
+            // Map server field errors to client field errors
+            if (paymentResult.field_errors.customer_name) {
+              newErrors.customerName = paymentResult.field_errors.customer_name;
+            }
+            if (paymentResult.field_errors.customer_email) {
+              newErrors.customerEmail = paymentResult.field_errors.customer_email;
+            }
+            if (paymentResult.field_errors.plate) {
+              newErrors.vehicleReg = paymentResult.field_errors.plate;
+            }
+            if (paymentResult.field_errors.start_at) {
+              newErrors.startDate = paymentResult.field_errors.start_at;
+            }
+            if (paymentResult.field_errors.end_at) {
+              newErrors.endDate = paymentResult.field_errors.end_at;
+            }
+            
+            // If we have field errors, show them and return early
+            if (Object.keys(newErrors).length > 0) {
+              setErrors(newErrors);
+              toast({
+                title: "Please fix the errors below",
+                description: "Some fields need to be corrected before you can continue.",
+                variant: "destructive",
+              });
+              return;
+            }
+          }
+          
+          // Handle specific error cases
+          if (paymentResult.error.includes('email')) {
+            newErrors.customerEmail = "Please check your email address";
+            errorMessage = "There's an issue with your email address. Please check and try again.";
+          } else if (paymentResult.error.includes('tenant') || paymentResult.error.includes('Stripe not connected')) {
+            errorMessage = "This parking service is temporarily unavailable. Please try again later.";
+          } else if (paymentResult.error.includes('Invalid amount')) {
+            errorMessage = "There's an issue with the booking amount. Please refresh and try again.";
+          } else if (paymentResult.details && Array.isArray(paymentResult.details)) {
+            errorMessage = paymentResult.details.join('. ');
+          } else {
+            errorMessage = paymentResult.error;
+          }
+        }
+        
+        if (Object.keys(newErrors).length > 0) {
+          setErrors(newErrors);
+        } else {
+          setErrors({ general: errorMessage });
+        }
+        
         toast({
           title: "Payment Failed",
-          description: paymentResult.error || "Unable to process payment. Please try again.",
+          description: errorMessage,
           variant: "destructive",
         });
         return;
@@ -200,11 +338,17 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
                 id="startDate"
                 type="date"
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  clearError('startDate');
+                }}
                 min={today}
                 required
-                className="text-sm"
+                className={`text-sm ${errors.startDate ? 'border-red-500 focus:border-red-500' : ''}`}
               />
+              {errors.startDate && (
+                <p className="text-red-500 text-xs">{errors.startDate}</p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="endDate" className="flex items-center gap-1 text-sm">
@@ -215,11 +359,17 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
                 id="endDate"
                 type="date"
                 value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  clearError('endDate');
+                }}
                 min={startDate || today}
                 required
-                className="text-sm"
+                className={`text-sm ${errors.endDate ? 'border-red-500 focus:border-red-500' : ''}`}
               />
+              {errors.endDate && (
+                <p className="text-red-500 text-xs">{errors.endDate}</p>
+              )}
             </div>
           </div>
 
@@ -231,11 +381,17 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
                 id="customerName"
                 type="text"
                 value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
+                onChange={(e) => {
+                  setCustomerName(e.target.value);
+                  clearError('customerName');
+                }}
                 placeholder="John Doe"
                 required
-                className="text-sm"
+                className={`text-sm ${errors.customerName ? 'border-red-500 focus:border-red-500' : ''}`}
               />
+              {errors.customerName && (
+                <p className="text-red-500 text-xs">{errors.customerName}</p>
+              )}
             </div>
             
             <div className="space-y-2">
@@ -244,11 +400,17 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
                 id="customerEmail"
                 type="email"
                 value={customerEmail}
-                onChange={(e) => setCustomerEmail(e.target.value)}
+                onChange={(e) => {
+                  setCustomerEmail(e.target.value);
+                  clearError('customerEmail');
+                }}
                 placeholder="john@example.com"
                 required
-                className="text-sm"
+                className={`text-sm ${errors.customerEmail ? 'border-red-500 focus:border-red-500' : ''}`}
               />
+              {errors.customerEmail && (
+                <p className="text-red-500 text-xs">{errors.customerEmail}</p>
+              )}
             </div>
             
             <div className="space-y-2">
@@ -269,11 +431,17 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
                 id="vehicleReg"
                 type="text"
                 value={vehicleReg}
-                onChange={(e) => setVehicleReg(e.target.value.toUpperCase())}
+                onChange={(e) => {
+                  setVehicleReg(e.target.value.toUpperCase());
+                  clearError('vehicleReg');
+                }}
                 placeholder="AB12 CDE"
                 required
-                className="text-sm uppercase"
+                className={`text-sm uppercase ${errors.vehicleReg ? 'border-red-500 focus:border-red-500' : ''}`}
               />
+              {errors.vehicleReg && (
+                <p className="text-red-500 text-xs">{errors.vehicleReg}</p>
+              )}
             </div>
             
             <div className="space-y-2">
@@ -288,6 +456,13 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
               />
             </div>
           </div>
+
+          {/* General Error Display */}
+          {errors.general && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+              <p className="text-red-700 text-sm">{errors.general}</p>
+            </div>
+          )}
 
           {/* Price Display */}
           {calculatedPrice && (

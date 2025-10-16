@@ -34,14 +34,49 @@ export async function POST(req: Request) {
       application_fee_cents = 0,
     } = body;
 
-    if (!tenant_id || !start_at || !end_at) {
-      return NextResponse.json({ error: 'tenant_id, start_at, end_at required' }, { status: 400 });
+    // Comprehensive validation
+    const validationErrors: string[] = []
+    const fieldErrors: Record<string, string> = {}
+    
+    if (!tenant_id) {
+      validationErrors.push('Tenant ID is required')
+      fieldErrors.tenant_id = 'Tenant ID is required'
+    }
+    if (!start_at) {
+      validationErrors.push('Arrival date is required')
+      fieldErrors.start_at = 'Arrival date is required'
+    }
+    if (!end_at) {
+      validationErrors.push('Departure date is required')
+      fieldErrors.end_at = 'Departure date is required'
+    }
+    if (customer_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer_email)) {
+      validationErrors.push('Valid email address is required')
+      fieldErrors.customer_email = 'Valid email address is required'
+    }
+    if (customer_name && customer_name.trim().length < 2) {
+      validationErrors.push('Full name must be at least 2 characters')
+      fieldErrors.customer_name = 'Full name must be at least 2 characters'
+    }
+    if (plate && plate.trim().length < 2) {
+      validationErrors.push('Vehicle registration must be at least 2 characters')
+      fieldErrors.plate = 'Vehicle registration must be at least 2 characters'
+    }
+    
+    if (validationErrors.length > 0) {
+      return NextResponse.json({ 
+        error: 'Validation failed', 
+        details: validationErrors,
+        field_errors: fieldErrors
+      }, { status: 400 });
     }
 
     const { accountId } = await getTenantStripeAccountId(tenant_id);
     if (!accountId) return NextResponse.json({ error: 'Stripe not connected for this tenant' }, { status: 400 });
 
-    const supabase = await getServerSupabase();
+    // Use admin client to bypass RLS for public operations
+    const { createAdminClient } = await import('@/lib/supabase/admin');
+    const supabase = createAdminClient();
 
     // Get tenant slug for proper cancel URL
     const { data: tenant, error: tenantError } = await supabase

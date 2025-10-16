@@ -24,7 +24,9 @@ export async function getAuthedUserTenantId() {
 }
 
 export async function getTenantStripeAccountId(tenantId: string) {
-  const supabase = await getServerSupabase();
+  // Use admin client to bypass RLS for public operations
+  const { createAdminClient } = await import('@/lib/supabase/admin');
+  const supabase = createAdminClient();
   const { data, error } = await supabase
     .from('tenant_stripe')
     .select('stripe_account_id, connected')
