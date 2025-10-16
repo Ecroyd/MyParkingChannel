@@ -1,11 +1,17 @@
 import './globals.css';
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import SwTools from '@/components/SwTools';
 import { Analytics } from "@vercel/analytics/next";
 
 export const metadata: Metadata = {
   title: 'Parking Channel',
-  viewport: 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 const isDev = process.env.NODE_ENV === 'development';

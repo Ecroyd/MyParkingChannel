@@ -79,31 +79,51 @@ export default async function BookingsServerPage() {
 
   // Get bookings using admin client to bypass RLS
   console.log('🔍 Bookings: Fetching bookings for tenant:', tenant.id)
-  const { data: bookings, error: bookingsError } = await adminClient
-    .from('bookings')
-    .select('id, reference, customer_name, customer_email, customer_phone, plate, car_make, car_model, car_color, start_at, end_at, status, money_charged, money_received, flight_number, source, created_at, stripe_payment_intent_id, payment_status')
-    .eq('tenant_id', tenant.id)
-    .order('start_at', { ascending: false })
-    .limit(500);
+  
+  let bookings: any[] = [];
+  
+  try {
+    const { data: bookingsData, error: bookingsError } = await adminClient
+      .from('bookings')
+      .select('*')
+      .eq('tenant_id', tenant.id)
+      .order('start_at', { ascending: false })
+      .limit(500);
 
-  if (bookingsError) {
-    console.log('❌ Bookings: Error fetching bookings:', bookingsError)
+    if (bookingsError) {
+      console.log('❌ Bookings: Error fetching bookings:', bookingsError)
+      console.log('❌ Bookings: Error details:', JSON.stringify(bookingsError, null, 2))
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-gray-600">Error loading bookings: {bookingsError.message}</p>
+            <p className="text-sm text-gray-500 mt-2">Check console for details</p>
+          </div>
+        </div>
+      );
+    }
+
+    bookings = bookingsData || [];
+    console.log('📊 Bookings: Bookings found:', bookings.length)
+    if (bookings.length > 0) {
+      console.log('📊 Bookings: Sample booking:', bookings[0])
+    }
+  } catch (error) {
+    console.log('❌ Bookings: Exception during query:', error)
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <p className="text-gray-600">Error loading bookings</p>
+          <p className="text-gray-600">Exception loading bookings: {error instanceof Error ? error.message : 'Unknown error'}</p>
         </div>
       </div>
     );
   }
 
-  console.log('📊 Bookings: Bookings found:', bookings?.length || 0, bookings)
-
   return (
     <BookingsServerClient
       user={user}
       tenant={tenant}
-      bookings={bookings || []}
+      bookings={bookings}
     />
   );
 }
