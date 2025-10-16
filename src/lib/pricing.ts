@@ -11,10 +11,17 @@ export async function getQuoteCents(tenantId: string, startAt: string, endAt: st
   // Use admin client to bypass RLS for public operations
   const supabase = createAdminClient();
   const { data: tp } = await supabase.from('tenant_pricing').select('daily_rate, currency').eq('tenant_id', tenantId).maybeSingle();
-  if (!tp?.daily_rate) throw new Error('No tenant_pricing found');
+  
+  // Calculate days
   const dayMs = 24 * 60 * 60 * 1000;
   const days = Math.max(1, Math.ceil((new Date(endAt).getTime() - new Date(startAt).getTime()) / dayMs));
-  const amount_cents = Math.round(Number(tp.daily_rate) * 100 * days);
-  const currency = (tp.currency ?? 'GBP').toLowerCase();
+  
+  // Use pricing data if available, otherwise use fallback
+  const dailyRate = tp?.daily_rate || 7.0; // £7 fallback rate
+  const currency = (tp?.currency ?? 'GBP').toLowerCase();
+  const amount_cents = Math.round(Number(dailyRate) * 100 * days);
+  
+  console.log(`[getQuoteCents] Tenant: ${tenantId}, Days: ${days}, Rate: £${dailyRate}, Total: £${amount_cents/100}`);
+  
   return { amount_cents, currency };
 }
