@@ -438,32 +438,33 @@ export default function ExemptionsPanel() {
                     className="mt-1"
                   />
                   <div className="space-y-2 flex-1">
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      className={cn(
-                        "px-2 py-0.5 rounded-full text-xs flex items-center gap-1",
-                        meta.badgeClass
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        className={cn(
+                          "px-2 py-0.5 rounded-full text-xs flex items-center gap-1",
+                          meta.badgeClass
+                        )}
+                      >
+                        {meta.icon}
+                        {meta.label}
+                      </Badge>
+                      {item.vehicle_reg && (
+                        <span className="font-mono text-sm font-semibold">
+                          {item.vehicle_reg.toUpperCase()}
+                        </span>
                       )}
-                    >
-                      {meta.icon}
-                      {meta.label}
-                    </Badge>
-                    {item.vehicle_reg && (
-                      <span className="font-mono text-sm font-semibold">
-                        {item.vehicle_reg.toUpperCase()}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xs text-muted-foreground space-y-1">
-                    <div>
-                      Breach: {new Date(item.breach_point).toLocaleString()}
                     </div>
-                    {item.overdue_by && (
-                      <div>Overdue {humanizeDuration(item.overdue_by)}</div>
-                    )}
-                    {item.booking_id && (
-                      <div>Booking: {item.booking_id.slice(0, 8)}…</div>
-                    )}
+                    <div className="text-xs text-muted-foreground space-y-1">
+                      <div>
+                        Breach: {new Date(item.breach_point).toLocaleString()}
+                      </div>
+                      {item.overdue_by && (
+                        <div>Overdue {humanizeDuration(item.overdue_by)}</div>
+                      )}
+                      {item.booking_id && (
+                        <div>Booking: {item.booking_id.slice(0, 8)}…</div>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
