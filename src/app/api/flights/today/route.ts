@@ -12,7 +12,8 @@ export async function GET(req: NextRequest) {
     }
 
     // Call the RPC function to get flights with counts
-    const { data, error } = await supabaseAdmin.rpc(
+    const supa = supabaseAdmin();
+    const { data, error } = await supa.rpc(
       "get_flights_today_with_counts",
       {
         p_tenant_id: tenantId,

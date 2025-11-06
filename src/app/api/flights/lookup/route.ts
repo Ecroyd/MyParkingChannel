@@ -33,7 +33,8 @@ export async function POST(req: NextRequest) {
     const cacheKey = `${flightNumber}|${flightDate ?? "none"}`;
 
     // 1) Check cache
-    const { data: cacheRow } = await supabaseAdmin
+    const supa = supabaseAdmin();
+    const { data: cacheRow } = await supa
       .from("flight_status_cache")
       .select("response, expires_at")
       .eq("tenant_id", tenantId)
@@ -71,7 +72,7 @@ export async function POST(req: NextRequest) {
     const expiresAt = new Date(
       Date.now() + CACHE_TTL_SECONDS * 1000
     ).toISOString();
-    await supabaseAdmin.from("flight_status_cache").upsert({
+    await supa.from("flight_status_cache").upsert({
       tenant_id: tenantId,
       flight_query: cacheKey,
       response: json,
@@ -161,7 +162,8 @@ async function normalizeAndPersist(
     updated_at: new Date().toISOString(),
   };
 
-  await supabaseAdmin.from("flight_instances").upsert(upsert, {
+  const supa = supabaseAdmin();
+  await supa.from("flight_instances").upsert(upsert, {
     onConflict: "tenant_id,flight_number,flight_date",
   });
 

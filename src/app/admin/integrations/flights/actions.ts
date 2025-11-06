@@ -15,7 +15,8 @@ export async function saveAviationstackKey(tenantId: string, apiKey: string) {
     is_active: true,
   };
 
-  const { error } = await supabaseAdmin
+  const supa = supabaseAdmin();
+  const { error } = await supa
     .from("tenant_flight_providers")
     .upsert(up, { onConflict: "tenant_id,provider_name" });
 

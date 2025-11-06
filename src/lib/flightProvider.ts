@@ -1,7 +1,8 @@
 import { supabaseAdmin } from "@/lib/supabase/server";
 
 export async function getTenantAviationstack(tenantId: string) {
-  const { data, error } = await supabaseAdmin
+  const supa = supabaseAdmin();
+  const { data, error } = await supa
     .from("tenant_flight_providers")
     .select("provider_base_url, api_key, is_active")
     .eq("tenant_id", tenantId)
