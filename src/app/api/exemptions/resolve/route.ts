@@ -69,11 +69,9 @@ export async function POST(req: NextRequest) {
           .from("bookings")
           .update({ checked_out_at: resolvedAt })
           .eq("id", ex.bookingId);
-        // Convert PostgrestFilterBuilder to Promise
+        // Convert PromiseLike to Promise
         bookingUpdatePromises.push(
-          new Promise((resolve, reject) => {
-            query.then(resolve).catch(reject);
-          })
+          Promise.resolve(query).then((result) => result)
         );
       } else if (ex.exemptionType === "NO_SHOW" && ex.bookingId) {
         // Mark booking as checked in (they showed up late)
@@ -81,11 +79,9 @@ export async function POST(req: NextRequest) {
           .from("bookings")
           .update({ checked_in_at: resolvedAt })
           .eq("id", ex.bookingId);
-        // Convert PostgrestFilterBuilder to Promise
+        // Convert PromiseLike to Promise
         bookingUpdatePromises.push(
-          new Promise((resolve, reject) => {
-            query.then(resolve).catch(reject);
-          })
+          Promise.resolve(query).then((result) => result)
         );
       }
     }
