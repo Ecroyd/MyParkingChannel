@@ -158,6 +158,8 @@ export async function POST(req: NextRequest) {
       .upsert({
         tenant_id: tenantId,
         daily_rate: body.value || 7.0,
+        minute_rate: (body.value || 7.0) / (24 * 60),
+        billing_type: 'day',
         currency: 'GBP'
       }, { onConflict: 'tenant_id' })
       .select("*")

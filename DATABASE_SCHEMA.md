@@ -34,6 +34,8 @@ CREATE TABLE tenant_pricing (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
   daily_rate DECIMAL(10,2) DEFAULT 7.0,
+  minute_rate DECIMAL(10,4) DEFAULT 0.0049, -- daily_rate / (24 * 60) for per-minute billing
+  billing_type TEXT DEFAULT 'day', -- 'day' or 'minute'
   currency TEXT DEFAULT 'GBP',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

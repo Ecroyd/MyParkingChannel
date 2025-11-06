@@ -139,6 +139,8 @@ export async function POST(req: Request) {
     await sb.from('tenant_pricing').insert({
       tenant_id: tenantId,
       daily_rate: 7.0,
+      minute_rate: 7.0 / (24 * 60),
+      billing_type: 'day',
       currency: 'GBP',
     });
 

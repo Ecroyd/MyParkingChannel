@@ -192,8 +192,8 @@ export default function BookingsPageClient({
                   <td className="text-fg/60">{r.customer_email}</td>
                   <td className="font-medium">{r.plate}</td>
                   <td className="text-fg/60">{r.flight_number || '-'}</td>
-                  <td>{new Date(r.start_at).toLocaleDateString('en-GB', { timeZone: 'UTC' })}</td>
-                  <td>{new Date(r.end_at).toLocaleDateString('en-GB', { timeZone: 'UTC' })}</td>
+                  <td>{new Date(r.start_at).toLocaleString('en-GB', { timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
+                  <td>{new Date(r.end_at).toLocaleString('en-GB', { timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
                   <td>
                     {r.status === 'checked_in' && <span className="badge">Checked-in</span>}
                     {r.status === 'checked_out' && <span className="badge">Checked-out</span>}

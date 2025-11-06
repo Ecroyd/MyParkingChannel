@@ -28,7 +28,13 @@ export async function POST(req: Request) {
 
   // Upsert basic records (idempotent)
   await sb.from("sites").upsert({ tenant_id: tId!, slug: slug || "", status: "published", template: "default" }, { onConflict: "tenant_id" });
-  await sb.from("tenant_pricing").upsert({ tenant_id: tId!, daily_rate: 7.0 }, { onConflict: "tenant_id" });
+  await sb.from("tenant_pricing").upsert({ 
+    tenant_id: tId!, 
+    daily_rate: 7.0,
+    minute_rate: 7.0 / (24 * 60),
+    billing_type: 'day',
+    currency: 'GBP'
+  }, { onConflict: "tenant_id" });
   await sb.from("tenant_branding").upsert(
     { tenant_id: tId!, app_name: name || slug || "Parking", short_name: "Parking", theme_color: "#0ea5e9", background_color: "#ffffff" },
     { onConflict: "tenant_id" }

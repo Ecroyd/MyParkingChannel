@@ -40,6 +40,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         .upsert({
           tenant_id: tenantId,
           daily_rate: body.value || 7.0,
+          minute_rate: (body.value || 7.0) / (24 * 60),
+          billing_type: 'day',
           currency: body.currency || 'GBP'
         }, { onConflict: 'tenant_id' })
         .select("*")

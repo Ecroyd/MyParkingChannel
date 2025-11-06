@@ -30,6 +30,8 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
   const [loading, setLoading] = useState(false);
   const [pricing, setPricing] = useState<PricingInfo | null>(null);
   const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
+  const [showCustomerDetails, setShowCustomerDetails] = useState(false);
+  const [showQuote, setShowQuote] = useState(false);
   
   // Error state management
   const [errors, setErrors] = useState<{
@@ -53,6 +55,30 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
   useEffect(() => {
     calculatePrice();
   }, [startDate, endDate, pricing]);
+
+  // Show quote when price is calculated
+  useEffect(() => {
+    if (calculatedPrice && calculatedPrice > 0 && startDate && endDate) {
+      // Show quote with a slight delay for smooth transition
+      const quoteTimer = setTimeout(() => {
+        setShowQuote(true);
+      }, 200);
+      
+      // Expand customer details after quote is shown
+      const expandTimer = setTimeout(() => {
+        setShowCustomerDetails(true);
+      }, 700);
+      
+      return () => {
+        clearTimeout(quoteTimer);
+        clearTimeout(expandTimer);
+      };
+    } else {
+      // Reset when dates are cleared or price is invalid
+      setShowQuote(false);
+      setShowCustomerDetails(false);
+    }
+  }, [calculatedPrice, startDate, endDate]);
 
   // Clear errors when user starts typing
   const clearError = (field: keyof typeof errors) => {
@@ -81,16 +107,15 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
         return undefined;
       
       case 'startDate':
-        if (!value) return 'Arrival date is required';
+        if (!value) return 'Arrival date and time is required';
         const start = new Date(value);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        if (start < today) return 'Arrival date cannot be in the past';
+        const now = new Date();
+        if (start < now) return 'Arrival date and time cannot be in the past';
         return undefined;
       
       case 'endDate':
-        if (!value) return 'Departure date is required';
-        if (startDate && value <= startDate) return 'Departure must be after arrival date';
+        if (!value) return 'Departure date and time is required';
+        if (startDate && value <= startDate) return 'Departure must be after arrival date and time';
         return undefined;
       
       default:
@@ -193,10 +218,10 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
     }
 
     if (!calculatedPrice) {
-      setErrors({ general: "Please select valid start and end dates." });
+      setErrors({ general: "Please select valid start and end dates and times." });
       toast({
         title: "Invalid Dates",
-        description: "Please select valid start and end dates.",
+        description: "Please select valid start and end dates and times.",
         variant: "destructive",
       });
       return;
@@ -313,7 +338,18 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
     }
   };
 
-  const today = new Date().toISOString().split('T')[0];
+  // Get current datetime in local format for datetime-local input
+  const getCurrentDateTimeLocal = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  };
+  
+  const minDateTime = getCurrentDateTimeLocal();
 
   return (
     <Card className="w-full max-w-md mx-auto shadow-lg">
@@ -327,22 +363,22 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
       
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Date Selection */}
+          {/* Date & Time Selection */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label htmlFor="startDate" className="flex items-center gap-1 text-sm">
                 <Calendar className="h-4 w-4" />
-                Arrival
+                Arrival Date & Time
               </Label>
               <Input
                 id="startDate"
-                type="date"
+                type="datetime-local"
                 value={startDate}
                 onChange={(e) => {
                   setStartDate(e.target.value);
                   clearError('startDate');
                 }}
-                min={today}
+                min={minDateTime}
                 required
                 className={`text-sm ${errors.startDate ? 'border-red-500 focus:border-red-500' : ''}`}
               />
@@ -353,108 +389,52 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
             <div className="space-y-2">
               <Label htmlFor="endDate" className="flex items-center gap-1 text-sm">
                 <Calendar className="h-4 w-4" />
-                Departure
+                Departure Date & Time
               </Label>
               <Input
                 id="endDate"
-                type="date"
+                type="datetime-local"
                 value={endDate}
                 onChange={(e) => {
                   setEndDate(e.target.value);
                   clearError('endDate');
                 }}
-                min={startDate || today}
+                min={startDate || minDateTime}
                 required
                 className={`text-sm ${errors.endDate ? 'border-red-500 focus:border-red-500' : ''}`}
               />
               {errors.endDate && (
                 <p className="text-red-500 text-xs">{errors.endDate}</p>
               )}
+              <p className="text-xs text-gray-500 italic">
+                If unsure, please use your return flight time
+              </p>
             </div>
           </div>
 
-          {/* Customer Information */}
-          <div className="space-y-3">
-            <div className="space-y-2">
-              <Label htmlFor="customerName" className="text-sm">Full Name *</Label>
-              <Input
-                id="customerName"
-                type="text"
-                value={customerName}
-                onChange={(e) => {
-                  setCustomerName(e.target.value);
-                  clearError('customerName');
-                }}
-                placeholder="John Doe"
-                required
-                className={`text-sm ${errors.customerName ? 'border-red-500 focus:border-red-500' : ''}`}
-              />
-              {errors.customerName && (
-                <p className="text-red-500 text-xs">{errors.customerName}</p>
-              )}
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="customerEmail" className="text-sm">Email Address *</Label>
-              <Input
-                id="customerEmail"
-                type="email"
-                value={customerEmail}
-                onChange={(e) => {
-                  setCustomerEmail(e.target.value);
-                  clearError('customerEmail');
-                }}
-                placeholder="john@example.com"
-                required
-                className={`text-sm ${errors.customerEmail ? 'border-red-500 focus:border-red-500' : ''}`}
-              />
-              {errors.customerEmail && (
-                <p className="text-red-500 text-xs">{errors.customerEmail}</p>
-              )}
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="customerPhone" className="text-sm">Phone Number (optional)</Label>
-              <Input
-                id="customerPhone"
-                type="tel"
-                value={customerPhone}
-                onChange={(e) => setCustomerPhone(e.target.value)}
-                placeholder="+44 1234 567890"
-                className="text-sm"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="vehicleReg" className="text-sm">Vehicle Registration *</Label>
-              <Input
-                id="vehicleReg"
-                type="text"
-                value={vehicleReg}
-                onChange={(e) => {
-                  setVehicleReg(e.target.value.toUpperCase());
-                  clearError('vehicleReg');
-                }}
-                placeholder="AB12 CDE"
-                required
-                className={`text-sm uppercase ${errors.vehicleReg ? 'border-red-500 focus:border-red-500' : ''}`}
-              />
-              {errors.vehicleReg && (
-                <p className="text-red-500 text-xs">{errors.vehicleReg}</p>
-              )}
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="flightNumber" className="text-sm">Flight Number (optional)</Label>
-              <Input
-                id="flightNumber"
-                type="text"
-                value={flightNumber}
-                onChange={(e) => setFlightNumber(e.target.value.toUpperCase())}
-                placeholder="BA123"
-                className="text-sm uppercase"
-              />
-            </div>
+          {/* Quote Display - Smooth fade in */}
+          <div
+            className={`transition-all duration-500 ease-out overflow-hidden ${
+              showQuote
+                ? 'opacity-100 max-h-32 mt-4 translate-y-0'
+                : 'opacity-0 max-h-0 mt-0 -translate-y-2'
+            }`}
+          >
+            {calculatedPrice && calculatedPrice > 0 && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-blue-900">Total Price:</span>
+                  <span className="text-lg font-bold text-blue-900">
+                    £{calculatedPrice.toFixed(2)}
+                  </span>
+                </div>
+                {pricing && (
+                  <p className="text-xs text-blue-700 mt-1">
+                    £{pricing.dailyRate.toFixed(2)} per day
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* General Error Display */}
@@ -464,41 +444,124 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
             </div>
           )}
 
-          {/* Price Display */}
-          {calculatedPrice && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-blue-900">Total Price:</span>
-                <span className="text-lg font-bold text-blue-900">
-                  £{calculatedPrice.toFixed(2)}
-                </span>
-              </div>
-              {pricing && (
-                <p className="text-xs text-blue-700 mt-1">
-                  £{pricing.dailyRate.toFixed(2)} per day
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Submit Button */}
-          <Button
-            type="submit"
-            disabled={loading || !calculatedPrice}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+          {/* Customer Information - Smooth expansion */}
+          <div
+            className={`transition-all duration-700 ease-out overflow-hidden ${
+              showCustomerDetails
+                ? 'opacity-100 max-h-[800px] mt-4 translate-y-0'
+                : 'opacity-0 max-h-0 mt-0 -translate-y-4'
+            }`}
           >
-            {loading ? (
-              <div className="flex items-center gap-2">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                Creating Booking...
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <Label htmlFor="customerName" className="text-sm">Full Name *</Label>
+                <Input
+                  id="customerName"
+                  type="text"
+                  value={customerName}
+                  onChange={(e) => {
+                    setCustomerName(e.target.value);
+                    clearError('customerName');
+                  }}
+                  placeholder="John Doe"
+                  required
+                  className={`text-sm ${errors.customerName ? 'border-red-500 focus:border-red-500' : ''}`}
+                />
+                {errors.customerName && (
+                  <p className="text-red-500 text-xs">{errors.customerName}</p>
+                )}
               </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <CreditCard className="h-4 w-4" />
-                Book Now
+              
+              <div className="space-y-2">
+                <Label htmlFor="customerEmail" className="text-sm">Email Address *</Label>
+                <Input
+                  id="customerEmail"
+                  type="email"
+                  value={customerEmail}
+                  onChange={(e) => {
+                    setCustomerEmail(e.target.value);
+                    clearError('customerEmail');
+                  }}
+                  placeholder="john@example.com"
+                  required
+                  className={`text-sm ${errors.customerEmail ? 'border-red-500 focus:border-red-500' : ''}`}
+                />
+                {errors.customerEmail && (
+                  <p className="text-red-500 text-xs">{errors.customerEmail}</p>
+                )}
               </div>
-            )}
-          </Button>
+              
+              <div className="space-y-2">
+                <Label htmlFor="customerPhone" className="text-sm">Phone Number (optional)</Label>
+                <Input
+                  id="customerPhone"
+                  type="tel"
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  placeholder="+44 1234 567890"
+                  className="text-sm"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="vehicleReg" className="text-sm">Vehicle Registration *</Label>
+                <Input
+                  id="vehicleReg"
+                  type="text"
+                  value={vehicleReg}
+                  onChange={(e) => {
+                    setVehicleReg(e.target.value.toUpperCase());
+                    clearError('vehicleReg');
+                  }}
+                  placeholder="AB12 CDE"
+                  required
+                  className={`text-sm uppercase ${errors.vehicleReg ? 'border-red-500 focus:border-red-500' : ''}`}
+                />
+                {errors.vehicleReg && (
+                  <p className="text-red-500 text-xs">{errors.vehicleReg}</p>
+                )}
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="flightNumber" className="text-sm">Flight Number (optional)</Label>
+                <Input
+                  id="flightNumber"
+                  type="text"
+                  value={flightNumber}
+                  onChange={(e) => setFlightNumber(e.target.value.toUpperCase())}
+                  placeholder="BA123"
+                  className="text-sm uppercase"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Submit Button - Smooth fade in */}
+          <div
+            className={`transition-all duration-500 ease-out overflow-hidden ${
+              showCustomerDetails
+                ? 'opacity-100 max-h-20 mt-4 translate-y-0'
+                : 'opacity-0 max-h-0 mt-0 -translate-y-2'
+            }`}
+          >
+            <Button
+              type="submit"
+              disabled={loading || !calculatedPrice || !showCustomerDetails}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {loading ? (
+                <div className="flex items-center gap-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  Creating Booking...
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <CreditCard className="h-4 w-4" />
+                  Book Now
+                </div>
+              )}
+            </Button>
+          </div>
         </form>
 
         {/* Trust Indicators */}

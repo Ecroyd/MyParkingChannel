@@ -8,6 +8,7 @@ const COOKIE_NAME = 'booking_session';
 const secret = new TextEncoder().encode(process.env.BOOKING_SESSION_SECRET || 'change-me-in-env');
 
 // whitelist keys customers are allowed to change
+// Note: start_at and end_at are only allowed for direct/manual bookings (checked in handler)
 const ALLOWED: Record<string, true> = {
   plate: true,
   car_make: true,
@@ -15,6 +16,8 @@ const ALLOWED: Record<string, true> = {
   car_color: true,
   customer_email: true,
   flight_number: true,
+  start_at: true,
+  end_at: true,
 };
 
 export async function POST(req: Request) {
@@ -49,11 +52,34 @@ export async function POST(req: Request) {
 
     const supabase = createServerClientDirect({ admin: true });
 
+    // Check booking source to determine allowed changes
+    const { data: booking, error: bookingError } = await supabase
+      .from('bookings')
+      .select('id, source')
+      .eq('id', booking_id)
+      .eq('tenant_id', tenant_id)
+      .maybeSingle();
+
+    if (bookingError || !booking) {
+      return NextResponse.json({ message: 'Booking not found.' }, { status: 404 });
+    }
+
+    const isDirectBooking = booking.source === 'direct' || booking.source === 'manual';
+
+    // Remove date changes if not direct/manual booking
+    if (!isDirectBooking) {
+      delete allowedChanges.start_at;
+      delete allowedChanges.end_at;
+      // Also remove customer_email for channel bookings
+      delete allowedChanges.customer_email;
+    }
+
     console.log('Update booking attempt:', { 
       tenant_id, 
       booking_id, 
       reference, 
-      allowedChanges 
+      allowedChanges,
+      isDirectBooking
     });
 
     // Try RPC function first, fallback to direct update if RPC doesn't exist

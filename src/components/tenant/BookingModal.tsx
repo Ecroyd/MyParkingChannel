@@ -2,10 +2,30 @@
 import { useState, useMemo } from "react";
 
 export default function BookingModal({ slug }: { slug: string }) {
-  const today = useMemo(() => new Date().toISOString().slice(0,10), []);
-  const tomorrow = useMemo(() => {
-    const d = new Date(); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10);
-  }, []);
+  // Get current datetime in local format for datetime-local input
+  const getCurrentDateTimeLocal = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  };
+  
+  const getTomorrowDateTimeLocal = () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const year = tomorrow.getFullYear();
+    const month = String(tomorrow.getMonth() + 1).padStart(2, '0');
+    const day = String(tomorrow.getDate()).padStart(2, '0');
+    const hours = String(tomorrow.getHours()).padStart(2, '0');
+    const minutes = String(tomorrow.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  };
+
+  const today = useMemo(() => getCurrentDateTimeLocal(), []);
+  const tomorrow = useMemo(() => getTomorrowDateTimeLocal(), []);
 
   const [start, setStart] = useState(today);
   const [end, setEnd] = useState(tomorrow);
@@ -44,12 +64,15 @@ export default function BookingModal({ slug }: { slug: string }) {
     <div className="space-y-4">
       <div className="grid sm:grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium mb-1">Arrival date</label>
-          <input type="date" value={start} onChange={e=>setStart(e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" />
+          <label className="block text-sm font-medium mb-1">Arrival Date & Time</label>
+          <input type="datetime-local" value={start} onChange={e=>setStart(e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" />
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1">Departure date</label>
-          <input type="date" value={end} onChange={e=>setEnd(e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" />
+          <label className="block text-sm font-medium mb-1">Departure Date & Time</label>
+          <input type="datetime-local" value={end} onChange={e=>setEnd(e.target.value)} min={start} className="w-full rounded-xl border border-slate-300 px-3 py-2" />
+          <p className="text-xs text-gray-500 italic mt-1">
+            If unsure, please use your return flight time
+          </p>
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Email</label>

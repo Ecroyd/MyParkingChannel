@@ -78,6 +78,10 @@ export default async function DirectionsPage({ params }: PageProps) {
     address?.country
   ].filter(Boolean).join(", ");
 
+  // Get coordinates - check both formats
+  const latitude = p?.latitude ?? p?.geo?.lat ?? null;
+  const longitude = p?.longitude ?? p?.geo?.lng ?? null;
+
   return (
     <>
       <Header title={title} logoUrl={p?.logo_url} tenantSlug={resolvedParams.slug} />
@@ -179,8 +183,8 @@ export default async function DirectionsPage({ params }: PageProps) {
               <h2 className="text-xl font-semibold text-slate-900 mb-4">Location Map</h2>
               <LocationMap 
                 className="h-80 w-full"
-                lat={p?.latitude}
-                lng={p?.longitude}
+                lat={latitude}
+                lng={longitude}
                 zoom={15}
                 title={p?.business_name || "Parking Location"}
                 address={fullAddress}

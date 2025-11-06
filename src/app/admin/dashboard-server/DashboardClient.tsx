@@ -6,6 +6,8 @@ import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
 import DateRangeModal from '@/components/admin/DateRangeModal';
 import { useDateRangeModal } from '@/hooks/useDateRangeModal';
 import { Calendar } from 'lucide-react';
+import ExemptionsPanel from '../../_components/ExemptionsPanel';
+import FlightsToday from '../../_components/FlightsToday';
 
 interface DashboardClientProps {
   user: any;
@@ -131,6 +133,12 @@ export default function DashboardClient({
           </div>
         </div>
       </div>
+
+      {/* Exemptions Panel */}
+      <ExemptionsPanel />
+
+      {/* Flights Today */}
+      <FlightsToday />
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

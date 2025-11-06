@@ -13,6 +13,9 @@ export const bookingRuleTypeSchema = z.enum(['arrival', 'return', 'both'])
 // Booking rule kind schema
 export const bookingRuleKindSchema = z.enum(['blackout', 'surcharge'])
 
+// Time schema (HH:mm format)
+export const timeSchema = z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/).nullable().optional()
+
 // Main booking rule schema
 export const bookingRuleSchema = z.object({
   id: z.string().uuid().optional(),
@@ -28,12 +31,32 @@ export const bookingRuleSchema = z.object({
   // One-off date override
   specific_date: z.string().date().nullable().optional(),
   
+  // Time-based arrival restrictions
+  arrival_time_start: timeSchema,
+  arrival_time_end: timeSchema,
+  
   // Surcharge settings
   surcharge_amount: z.number().positive().nullable().optional(),
   
   notes: z.string().optional(),
   created_at: z.string().datetime().optional()
-})
+}).refine(
+  (data) => {
+    // If arrival_time_start is provided, arrival_time_end must also be provided
+    if (data.arrival_time_start && !data.arrival_time_end) {
+      return false
+    }
+    // If arrival_time_end is provided, arrival_time_start must also be provided
+    if (data.arrival_time_end && !data.arrival_time_start) {
+      return false
+    }
+    return true
+  },
+  {
+    message: "Both arrival time start and end must be provided together",
+    path: ["arrival_time_start"]
+  }
+)
 
 // Schema for creating a new booking rule
 export const createBookingRuleSchema = bookingRuleSchema.omit({

@@ -8,7 +8,247 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Eye, EyeOff, Lock, CheckCircle } from 'lucide-react'
+import { Eye, EyeOff, Lock, CheckCircle, DollarSign } from 'lucide-react'
+
+function PricingSettings() {
+  const [pricing, setPricing] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null)
+  
+  const [formData, setFormData] = useState({
+    daily_rate: 7.0,
+    minute_rate: 0.0049,
+    billing_type: 'day' as 'day' | 'minute',
+    currency: 'GBP'
+  })
+
+  useEffect(() => {
+    async function loadPricing() {
+      try {
+        const response = await fetch('/api/pricing/tenant')
+        const result = await response.json()
+        
+        if (result.success && result.data) {
+          setPricing(result.data)
+          setFormData({
+            daily_rate: result.data.daily_rate || 7.0,
+            minute_rate: result.data.minute_rate || (result.data.daily_rate ? result.data.daily_rate / (24 * 60) : 0.0049),
+            billing_type: result.data.billing_type || 'day',
+            currency: result.data.currency || 'GBP'
+          })
+        }
+      } catch (err) {
+        console.error('Load pricing error:', err)
+        setMessage({ type: 'error', text: 'Failed to load pricing settings' })
+      } finally {
+        setLoading(false)
+      }
+    }
+    
+    loadPricing()
+  }, [])
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    setMessage(null)
+
+    try {
+      const response = await fetch('/api/pricing/tenant', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData)
+      })
+
+      const result = await response.json()
+
+      if (!result.success) {
+        setMessage({ type: 'error', text: result.error || 'Failed to update pricing settings' })
+      } else {
+        setMessage({ type: 'success', text: 'Pricing settings updated successfully!' })
+        setPricing(result.data)
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: 'An error occurred while updating pricing settings' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleBillingTypeChange = (type: 'day' | 'minute') => {
+    setFormData(prev => {
+      if (type === 'minute' && prev.daily_rate) {
+        // Calculate minute_rate from daily_rate
+        return {
+          ...prev,
+          billing_type: type,
+          minute_rate: prev.daily_rate / (24 * 60)
+        }
+      } else if (type === 'day' && prev.minute_rate) {
+        // Calculate daily_rate from minute_rate
+        return {
+          ...prev,
+          billing_type: type,
+          daily_rate: prev.minute_rate * (24 * 60)
+        }
+      }
+      return { ...prev, billing_type: type }
+    })
+  }
+
+  const handleDailyRateChange = (value: string) => {
+    const rate = parseFloat(value) || 0
+    setFormData(prev => ({
+      ...prev,
+      daily_rate: rate,
+      ...(prev.billing_type === 'minute' && { minute_rate: rate / (24 * 60) })
+    }))
+  }
+
+  const handleMinuteRateChange = (value: string) => {
+    const rate = parseFloat(value) || 0
+    setFormData(prev => ({
+      ...prev,
+      minute_rate: rate,
+      ...(prev.billing_type === 'day' && { daily_rate: rate * (24 * 60) })
+    }))
+  }
+
+  if (loading) {
+    return (
+      <Card className="shadow-soft">
+        <CardContent className="p-6">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600">Loading pricing settings...</p>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <Card className="shadow-soft">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <DollarSign className="h-4 w-4" />
+          Pricing Configuration
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSave} className="space-y-4">
+          {message && (
+            <Alert variant={message.type === 'error' ? 'destructive' : 'default'}>
+              <AlertDescription className="flex items-center gap-2">
+                {message.type === 'success' && <CheckCircle className="h-4 w-4" />}
+                {message.text}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          <div className="space-y-2">
+            <Label>Billing Type</Label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="billing_type"
+                  value="day"
+                  checked={formData.billing_type === 'day'}
+                  onChange={() => handleBillingTypeChange('day')}
+                />
+                <span>Per Day</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="billing_type"
+                  value="minute"
+                  checked={formData.billing_type === 'minute'}
+                  onChange={() => handleBillingTypeChange('minute')}
+                />
+                <span>Per Minute</span>
+              </label>
+            </div>
+            <p className="text-xs text-gray-500">
+              {formData.billing_type === 'day' 
+                ? 'Bookings will be charged per day (24 hours)'
+                : 'Bookings will be charged per minute for precise billing'}
+            </p>
+          </div>
+
+          {formData.billing_type === 'day' ? (
+            <div className="space-y-2">
+              <Label htmlFor="daily_rate">Daily Rate (£)</Label>
+              <Input
+                id="daily_rate"
+                type="number"
+                step="0.01"
+                min="0"
+                value={formData.daily_rate}
+                onChange={(e) => handleDailyRateChange(e.target.value)}
+                placeholder="7.00"
+                required
+              />
+              <p className="text-xs text-gray-500">
+                Equivalent: £{(formData.daily_rate / (24 * 60)).toFixed(4)} per minute
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="minute_rate">Minute Rate (£)</Label>
+              <Input
+                id="minute_rate"
+                type="number"
+                step="0.0001"
+                min="0"
+                value={formData.minute_rate.toFixed(4)}
+                onChange={(e) => handleMinuteRateChange(e.target.value)}
+                placeholder="0.0049"
+                required
+              />
+              <p className="text-xs text-gray-500">
+                Equivalent: £{(formData.minute_rate * (24 * 60)).toFixed(2)} per day
+              </p>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label htmlFor="currency">Currency</Label>
+            <select
+              id="currency"
+              value={formData.currency}
+              onChange={(e) => setFormData(prev => ({ ...prev, currency: e.target.value }))}
+              className="w-full rounded-xl border bg-white/70 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+            >
+              <option value="GBP">GBP (£)</option>
+              <option value="USD">USD ($)</option>
+              <option value="EUR">EUR (€)</option>
+            </select>
+          </div>
+
+          <Button 
+            type="submit" 
+            disabled={saving}
+            className="w-full"
+          >
+            {saving ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                Saving...
+              </>
+            ) : (
+              'Save Pricing Settings'
+            )}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  )
+}
 
 export default function SettingsPage() {
   const [user, setUser] = useState<any>(null)
@@ -159,6 +399,7 @@ export default function SettingsPage() {
       <Tabs defaultValue="profile">
         <TabsList>
           <TabsTrigger value="profile">Profile</TabsTrigger>
+          <TabsTrigger value="pricing">Pricing</TabsTrigger>
           <TabsTrigger value="security">Security</TabsTrigger>
           <TabsTrigger value="members">Members</TabsTrigger>
           <TabsTrigger value="billing" disabled>Billing</TabsTrigger>
@@ -188,6 +429,10 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="pricing" className="pt-4">
+          <PricingSettings />
         </TabsContent>
 
         <TabsContent value="security" className="pt-4">

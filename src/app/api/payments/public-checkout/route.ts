@@ -43,12 +43,12 @@ export async function POST(req: Request) {
       fieldErrors.tenant_id = 'Tenant ID is required'
     }
     if (!start_at) {
-      validationErrors.push('Arrival date is required')
-      fieldErrors.start_at = 'Arrival date is required'
+      validationErrors.push('Arrival date and time is required')
+      fieldErrors.start_at = 'Arrival date and time is required'
     }
     if (!end_at) {
-      validationErrors.push('Departure date is required')
-      fieldErrors.end_at = 'Departure date is required'
+      validationErrors.push('Departure date and time is required')
+      fieldErrors.end_at = 'Departure date and time is required'
     }
     if (customer_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer_email)) {
       validationErrors.push('Valid email address is required')

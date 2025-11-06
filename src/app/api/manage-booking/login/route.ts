@@ -14,12 +14,25 @@ function normalizeLastName(s: string) {
 
 export async function POST(req: Request) {
   try {
-    const { tenantSlug, lastName, reference } = await req.json();
+    const { tenantSlug, lookupMethod, reference, plate, lastName } = await req.json();
 
-    console.log('Manage booking login attempt:', { tenantSlug, lastName, reference });
+    console.log('Manage booking login attempt:', { tenantSlug, lookupMethod, reference, plate, lastName });
 
-    if (!tenantSlug || !lastName || !reference) {
-      return NextResponse.json({ message: 'Missing fields.' }, { status: 400 });
+    if (!tenantSlug) {
+      return NextResponse.json({ message: 'Missing tenant slug.' }, { status: 400 });
+    }
+
+    // Validate lookup method and required fields
+    if (lookupMethod === 'reference') {
+      if (!reference || !lastName) {
+        return NextResponse.json({ message: 'Missing fields. Reference and last name are required.' }, { status: 400 });
+      }
+    } else if (lookupMethod === 'plate') {
+      if (!plate) {
+        return NextResponse.json({ message: 'Missing fields. Registration plate is required.' }, { status: 400 });
+      }
+    } else {
+      return NextResponse.json({ message: 'Invalid lookup method. Use "reference" or "plate".' }, { status: 400 });
     }
 
     // Use admin client to bypass RLS
@@ -38,13 +51,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ message: 'Unknown site.' }, { status: 404 });
     }
 
-    // bookings table must include: reference (text), customer_name (text), tenant_id
-    const { data: booking, error: berr } = await supabase
+    // Query booking based on lookup method
+    let query = supabase
       .from('bookings')
-      .select('id, tenant_id, reference, customer_name, customer_email, plate, car_make, car_model, car_color, flight_number, start_at, end_at')
-      .eq('tenant_id', tenant.id)
-      .eq('reference', reference)
-      .maybeSingle();
+      .select('id, tenant_id, reference, customer_name, customer_email, plate, car_make, car_model, car_color, flight_number, start_at, end_at, source')
+      .eq('tenant_id', tenant.id);
+
+    if (lookupMethod === 'reference') {
+      query = query.eq('reference', reference);
+    } else {
+      // Normalize plate: uppercase and remove spaces
+      const normalizedPlate = plate.toUpperCase().replace(/\s+/g, '');
+      query = query.eq('plate', normalizedPlate);
+    }
+
+    const { data: booking, error: berr } = await query.maybeSingle();
 
     console.log('Booking lookup result:', { booking, error: berr });
 
@@ -52,12 +73,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ message: 'Booking not found.' }, { status: 404 });
     }
 
-    // simple name check: compare last token of customer_name with provided lastName
-    const bookingLast = normalizeLastName(booking.customer_name.split(/\s+/).slice(-1)[0] || '');
-    const providedLast = normalizeLastName(lastName);
+    // Name verification (required for reference lookup, optional for plate lookup)
+    if (lastName) {
+      const bookingLast = normalizeLastName(booking.customer_name.split(/\s+/).slice(-1)[0] || '');
+      const providedLast = normalizeLastName(lastName);
 
-    if (!bookingLast || bookingLast !== providedLast) {
-      return NextResponse.json({ message: 'Name and reference do not match.' }, { status: 401 });
+      if (!bookingLast || bookingLast !== providedLast) {
+        return NextResponse.json({ 
+          message: lookupMethod === 'reference' 
+            ? 'Name and reference do not match.' 
+            : 'Name and registration plate do not match.' 
+        }, { status: 401 });
+      }
+    } else if (lookupMethod === 'reference') {
+      // Last name is required for reference lookup
+      return NextResponse.json({ message: 'Last name is required for reference lookup.' }, { status: 400 });
     }
 
     // issue short-lived booking session (cookie)

@@ -24,7 +24,18 @@ export function evaluateBookingRules(rules: BookingRule[], dates: BookingDates):
 
     // Check if rule applies to arrival
     if (rule.type === 'arrival' || rule.type === 'both') {
-      matches = matches || evaluateRuleCondition(rule, arrivalDay, arrivalMonth, startDate)
+      const dateMatches = evaluateRuleCondition(rule, arrivalDay, arrivalMonth, startDate)
+      
+      if (dateMatches) {
+        // If rule has time restrictions, check them
+        if ((rule as any).arrival_time_start && (rule as any).arrival_time_end) {
+          const timeMatches = evaluateArrivalTime(rule, startDate)
+          matches = matches || timeMatches
+        } else {
+          // No time restrictions, date match is enough
+          matches = matches || dateMatches
+        }
+      }
     }
 
     // Check if rule applies to return
@@ -105,6 +116,42 @@ function evaluateRuleCondition(
 }
 
 /**
+ * Evaluate if arrival time falls within restricted time range
+ * @param rule The booking rule with time restrictions
+ * @param arrivalDate The arrival date/time
+ * @returns True if arrival time is within restricted range
+ */
+function evaluateArrivalTime(rule: BookingRule, arrivalDate: Date): boolean {
+  const arrivalTimeStart = (rule as any).arrival_time_start
+  const arrivalTimeEnd = (rule as any).arrival_time_end
+  
+  if (!arrivalTimeStart || !arrivalTimeEnd) {
+    return true // No time restriction, allow
+  }
+  
+  // Extract time from arrival date (HH:mm format)
+  const arrivalHours = arrivalDate.getHours()
+  const arrivalMinutes = arrivalDate.getMinutes()
+  const arrivalTimeMinutes = arrivalHours * 60 + arrivalMinutes
+  
+  // Parse time range (HH:mm format)
+  const [startHours, startMinutes] = arrivalTimeStart.split(':').map(Number)
+  const [endHours, endMinutes] = arrivalTimeEnd.split(':').map(Number)
+  const startTimeMinutes = startHours * 60 + startMinutes
+  const endTimeMinutes = endHours * 60 + endMinutes
+  
+  // Check if arrival time falls within restricted range
+  // Handle case where time range spans midnight (e.g., 22:00 to 06:00)
+  if (startTimeMinutes > endTimeMinutes) {
+    // Time range spans midnight
+    return arrivalTimeMinutes >= startTimeMinutes || arrivalTimeMinutes <= endTimeMinutes
+  } else {
+    // Normal time range within same day
+    return arrivalTimeMinutes >= startTimeMinutes && arrivalTimeMinutes <= endTimeMinutes
+  }
+}
+
+/**
  * Get a human-readable description of a booking rule
  * @param rule The booking rule to describe
  * @returns Human-readable description
@@ -140,6 +187,11 @@ export function getRuleDescription(rule: BookingRule): string {
     const startDate = new Date(rule.date_range_start)
     const endDate = new Date(rule.date_range_end)
     conditions.push(`from ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}`)
+  }
+  
+  // Add time restrictions if present
+  if ((rule as any).arrival_time_start && (rule as any).arrival_time_end) {
+    conditions.push(`between ${(rule as any).arrival_time_start} and ${(rule as any).arrival_time_end}`)
   }
   
   if (conditions.length > 0) {

@@ -56,6 +56,9 @@ export default function BookingRuleDialog({
   const [startDate, setStartDate] = useState<string>('')
   const [endDate, setEndDate] = useState<string>('')
   const [useSpecificDate, setUseSpecificDate] = useState(false)
+  const [arrivalTimeStart, setArrivalTimeStart] = useState<string>('')
+  const [arrivalTimeEnd, setArrivalTimeEnd] = useState<string>('')
+  const [useTimeRestriction, setUseTimeRestriction] = useState(false)
 
   const {
     register,
@@ -72,6 +75,8 @@ export default function BookingRuleDialog({
       rule_kind: 'blackout',
       applies_to_days: null,
       specific_date: null,
+      arrival_time_start: null,
+      arrival_time_end: null,
       surcharge_amount: null,
       notes: ''
     },
@@ -96,6 +101,8 @@ export default function BookingRuleDialog({
           rule_kind: rule.rule_kind,
           applies_to_days: rule.applies_to_days,
           specific_date: rule.specific_date,
+          arrival_time_start: (rule as any).arrival_time_start || null,
+          arrival_time_end: (rule as any).arrival_time_end || null,
           surcharge_amount: rule.surcharge_amount,
           notes: rule.notes || ''
         })
@@ -107,6 +114,9 @@ export default function BookingRuleDialog({
           setEndDate(`2024-${endMonth.toString().padStart(2, '0')}-28`)
         }
         setUseSpecificDate(!!rule.specific_date)
+        setArrivalTimeStart((rule as any).arrival_time_start || '')
+        setArrivalTimeEnd((rule as any).arrival_time_end || '')
+        setUseTimeRestriction(!!(rule as any).arrival_time_start && !!(rule as any).arrival_time_end)
       } else {
         // Creating new rule - ensure defaults are set
         reset({
@@ -122,6 +132,9 @@ export default function BookingRuleDialog({
         setStartDate('')
         setEndDate('')
         setUseSpecificDate(false)
+        setArrivalTimeStart('')
+        setArrivalTimeEnd('')
+        setUseTimeRestriction(false)
       }
     }
   }, [open, rule, tenantId, reset])
@@ -158,6 +171,26 @@ export default function BookingRuleDialog({
     }
   }
 
+  const handleTimeRestrictionToggle = (checked: boolean) => {
+    setUseTimeRestriction(checked)
+    if (!checked) {
+      setArrivalTimeStart('')
+      setArrivalTimeEnd('')
+      setValue('arrival_time_start', null)
+      setValue('arrival_time_end', null)
+    }
+  }
+
+  const handleArrivalTimeStartChange = (time: string) => {
+    setArrivalTimeStart(time)
+    setValue('arrival_time_start', time || null)
+  }
+
+  const handleArrivalTimeEndChange = (time: string) => {
+    setArrivalTimeEnd(time)
+    setValue('arrival_time_end', time || null)
+  }
+
   const onSubmit = (data: CreateBookingRule) => {
     console.log('Form submitted with data:', data)
     console.log('Selected days:', selectedDays)
@@ -171,7 +204,9 @@ export default function BookingRuleDialog({
       applies_to_days: selectedDays.length > 0 ? selectedDays : null,
       date_range_start: startDate || null,
       date_range_end: endDate || null,
-      specific_date: useSpecificDate ? data.specific_date : null
+      specific_date: useSpecificDate ? data.specific_date : null,
+      arrival_time_start: useTimeRestriction ? arrivalTimeStart || null : null,
+      arrival_time_end: useTimeRestriction ? arrivalTimeEnd || null : null
     }
     
     console.log('Final form data:', formData)
@@ -319,6 +354,48 @@ export default function BookingRuleDialog({
                 />
               </div>
             </div>
+          </div>
+
+          {/* Time-based Arrival Restrictions */}
+          <div className="space-y-2">
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="use_time_restriction"
+                checked={useTimeRestriction}
+                onCheckedChange={handleTimeRestrictionToggle}
+              />
+              <Label htmlFor="use_time_restriction">Restrict arrivals between certain times</Label>
+            </div>
+            {useTimeRestriction && (
+              <div className="space-y-3 pl-6 border-l-2 border-blue-200">
+                <p className="text-xs text-gray-500">
+                  Reject bookings arriving between these times. Access will be unavailable at that time.
+                </p>
+                <div className="flex items-center gap-4">
+                  <div className="flex-1">
+                    <Label htmlFor="arrival_time_start" className="text-sm">From Time</Label>
+                    <Input
+                      type="time"
+                      value={arrivalTimeStart}
+                      onChange={(e) => handleArrivalTimeStartChange(e.target.value)}
+                      required={useTimeRestriction}
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <Label htmlFor="arrival_time_end" className="text-sm">To Time</Label>
+                    <Input
+                      type="time"
+                      value={arrivalTimeEnd}
+                      onChange={(e) => handleArrivalTimeEndChange(e.target.value)}
+                      required={useTimeRestriction}
+                    />
+                  </div>
+                </div>
+                {errors.arrival_time_start && (
+                  <p className="text-sm text-red-600">{errors.arrival_time_start.message}</p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Notes */}

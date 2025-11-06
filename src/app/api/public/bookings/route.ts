@@ -39,8 +39,8 @@ export async function POST(req: NextRequest) {
     if (!customer_name || customer_name.trim().length < 2) validationErrors.push('Full name must be at least 2 characters')
     if (!customer_email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer_email)) validationErrors.push('Valid email address is required')
     if (!plate || plate.trim().length < 2) validationErrors.push('Vehicle registration must be at least 2 characters')
-    if (!start_at) validationErrors.push('Arrival date is required')
-    if (!end_at) validationErrors.push('Departure date is required')
+    if (!start_at) validationErrors.push('Arrival date and time is required')
+    if (!end_at) validationErrors.push('Departure date and time is required')
     
     if (validationErrors.length > 0) {
       return NextResponse.json({ 
@@ -50,8 +50,8 @@ export async function POST(req: NextRequest) {
           customer_name: !customer_name || customer_name.trim().length < 2 ? 'Full name must be at least 2 characters' : undefined,
           customer_email: !customer_email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer_email) ? 'Valid email address is required' : undefined,
           plate: !plate || plate.trim().length < 2 ? 'Vehicle registration must be at least 2 characters' : undefined,
-          start_at: !start_at ? 'Arrival date is required' : undefined,
-          end_at: !end_at ? 'Departure date is required' : undefined
+          start_at: !start_at ? 'Arrival date and time is required' : undefined,
+          end_at: !end_at ? 'Departure date and time is required' : undefined
         }
       }, { status: 400 })
     }
@@ -61,9 +61,9 @@ export async function POST(req: NextRequest) {
     if (!(e > s)) {
       return NextResponse.json({ 
         error: 'Invalid dates', 
-        details: ['Departure date must be after arrival date'],
+        details: ['Departure date and time must be after arrival date and time'],
         field_errors: {
-          end_at: 'Departure date must be after arrival date'
+          end_at: 'Departure date and time must be after arrival date and time'
         }
       }, { status: 400 })
     }
@@ -73,9 +73,9 @@ export async function POST(req: NextRequest) {
     if (s < now) {
       return NextResponse.json({ 
         error: 'Invalid dates', 
-        details: ['Arrival date cannot be in the past'],
+        details: ['Arrival date and time cannot be in the past'],
         field_errors: {
-          start_at: 'Arrival date cannot be in the past'
+          start_at: 'Arrival date and time cannot be in the past'
         }
       }, { status: 400 })
     }
@@ -114,6 +114,13 @@ export async function POST(req: NextRequest) {
       
       if (blockingRules.length > 0) {
         const rule = blockingRules[0] // Get the first blocking rule for user-friendly message
+        let timeMessage = ''
+        
+        // Check for time restrictions
+        if ((rule as any).arrival_time_start && (rule as any).arrival_time_end) {
+          timeMessage = ` Access will be unavailable between ${(rule as any).arrival_time_start} and ${(rule as any).arrival_time_end}.`
+        }
+        
         if (rule.specific_date) {
           const date = new Date(rule.specific_date).toLocaleDateString('en-GB', {
             weekday: 'long',
@@ -121,7 +128,7 @@ export async function POST(req: NextRequest) {
             month: 'long',
             day: 'numeric'
           })
-          userFriendlyMessage = `Bookings are not available on ${date}. Please select different dates.`
+          userFriendlyMessage = `Bookings are not available on ${date}.${timeMessage} Please select different dates and times.`
         } else if (rule.applies_to_days && (rule as any).month_range) {
           const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
           const days = rule.applies_to_days.map(d => dayNames[d]).join(', ')
@@ -131,7 +138,10 @@ export async function POST(req: NextRequest) {
           const monthRange = startMonth === endMonth ? 
             monthNames[startMonth] : 
             `${monthNames[startMonth]} to ${monthNames[endMonth]}`
-          userFriendlyMessage = `Bookings are not available on ${days} in ${monthRange}. Please select different dates.`
+          userFriendlyMessage = `Bookings are not available on ${days} in ${monthRange}.${timeMessage} Please select different dates and times.`
+        } else if ((rule as any).arrival_time_start && (rule as any).arrival_time_end) {
+          // Time-only restriction
+          userFriendlyMessage = `Bookings arriving between ${(rule as any).arrival_time_start} and ${(rule as any).arrival_time_end} are not available. Access will be unavailable at that time. Please select a different arrival time.`
         }
       }
       
