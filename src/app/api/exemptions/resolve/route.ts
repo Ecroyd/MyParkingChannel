@@ -61,30 +61,38 @@ export async function POST(req: NextRequest) {
     }));
 
     // Update bookings for OVERSTAY and NO_SHOW exemptions
-    const bookingUpdates: Promise<any>[] = [];
+    const bookingUpdatePromises: Promise<any>[] = [];
     for (const ex of exemptionsToResolve) {
       if (ex.exemptionType === "OVERSTAY" && ex.bookingId) {
         // Mark booking as checked out
-        bookingUpdates.push(
-          adminClient
-            .from("bookings")
-            .update({ checked_out_at: resolvedAt })
-            .eq("id", ex.bookingId)
+        const query = adminClient
+          .from("bookings")
+          .update({ checked_out_at: resolvedAt })
+          .eq("id", ex.bookingId);
+        // Convert PostgrestFilterBuilder to Promise
+        bookingUpdatePromises.push(
+          new Promise((resolve, reject) => {
+            query.then(resolve).catch(reject);
+          })
         );
       } else if (ex.exemptionType === "NO_SHOW" && ex.bookingId) {
         // Mark booking as checked in (they showed up late)
-        bookingUpdates.push(
-          adminClient
-            .from("bookings")
-            .update({ checked_in_at: resolvedAt })
-            .eq("id", ex.bookingId)
+        const query = adminClient
+          .from("bookings")
+          .update({ checked_in_at: resolvedAt })
+          .eq("id", ex.bookingId);
+        // Convert PostgrestFilterBuilder to Promise
+        bookingUpdatePromises.push(
+          new Promise((resolve, reject) => {
+            query.then(resolve).catch(reject);
+          })
         );
       }
     }
 
     // Execute booking updates and exemption inserts in parallel
     const [bookingResults, exemptionResult] = await Promise.all([
-      Promise.all(bookingUpdates),
+      bookingUpdatePromises.length > 0 ? Promise.all(bookingUpdatePromises) : Promise.resolve([]),
       adminClient.from("exemptions").insert(inserts),
     ]);
 
