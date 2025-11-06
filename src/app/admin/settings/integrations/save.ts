@@ -67,6 +67,7 @@ export async function saveAnprSettings(formData: FormData) {
                 },
                 { onConflict: "tenant_id,key" }
               )
+              .then((r) => r)
           );
         }
         
@@ -83,6 +84,7 @@ export async function saveAnprSettings(formData: FormData) {
                 },
                 { onConflict: "tenant_id,key" }
               )
+              .then((r) => r)
           );
         }
 
