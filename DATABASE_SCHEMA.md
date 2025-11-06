@@ -118,8 +118,14 @@ CREATE TABLE bookings (
   customer_name TEXT,
   customer_email TEXT,
   reference TEXT,
-  start_at TIMESTAMP WITH TIME ZONE NOT NULL,
-  end_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  start_at TIMESTAMP WITH TIME ZONE NOT NULL, -- Stored in UTC
+  end_at TIMESTAMP WITH TIME ZONE NOT NULL,   -- Stored in UTC
+  start_at_local TIMESTAMP GENERATED ALWAYS AS (
+    (start_at AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/London'
+  ) STORED, -- Generated column for local time filtering
+  end_at_local TIMESTAMP GENERATED ALWAYS AS (
+    (end_at AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/London'
+  ) STORED, -- Generated column for local time filtering
   status TEXT DEFAULT 'confirmed', -- 'confirmed', 'cancelled', 'completed'
   money_received BOOLEAN DEFAULT false,
   stripe_payment_intent_id TEXT,
@@ -127,7 +133,17 @@ CREATE TABLE bookings (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Indexes for local time queries
+CREATE INDEX idx_bookings_start_at_local ON bookings(start_at_local);
+CREATE INDEX idx_bookings_end_at_local ON bookings(end_at_local);
 ```
+
+**Date/Time Handling:**
+- All dates are stored in UTC (`TIMESTAMP WITH TIME ZONE`)
+- Incoming dates are parsed as `Europe/London` timezone, then converted to UTC
+- Generated columns `start_at_local` and `end_at_local` provide easy filtering by local time
+- Use `normalise_booking_times()` RPC function to parse dates on insert
 
 ### 9. `booking_extensions` - Booking extension payments
 ```sql
@@ -224,6 +240,26 @@ Based on the code analysis:
    - Apply `pricing_rules` for date ranges, seasons, etc.
    - Calculate final amount with surcharges/blackouts
 
+## Database Functions
+
+### Date/Time Parsing Functions
+
+**`parse_datetime_to_utc(p_text text, p_tz text DEFAULT 'Europe/London')`**
+- Parses various date formats (ISO8601, DD/MM/YYYY, Excel serials) and converts to UTC
+- Handles timezone conversion automatically (Europe/London handles GMT/BST)
+- Returns `timestamptz` in UTC
+
+**`normalise_booking_times(p_start text, p_end text, p_tz text DEFAULT 'Europe/London')`**
+- RPC function to parse both start and end times in one call
+- Returns table with `start_utc` and `end_utc` columns
+- Use this function in import/insert operations
+
+**Usage:**
+```sql
+SELECT * FROM normalise_booking_times('12/10/2025 10:00', '15/10/2025 14:30', 'Europe/London');
+-- Returns: start_utc, end_utc (both in UTC)
+```
+
 ## API Endpoints
 
 - `GET /api/pricing/tiers` - List pricing tiers
@@ -234,6 +270,14 @@ Based on the code analysis:
 - `POST /api/pricing/rules` - Create pricing rule
 
 The system is designed to work with both simple and complex pricing setups, automatically detecting which tables exist and using the appropriate logic.
+
+## Date/Time Best Practices
+
+1. **Storage**: Always store dates in UTC (`TIMESTAMP WITH TIME ZONE`)
+2. **Ingest**: Parse incoming dates as `Europe/London`, then convert to UTC
+3. **Display**: Use generated `*_local` columns or `AT TIME ZONE 'Europe/London'` for display
+4. **Filtering**: Use `start_at_local` and `end_at_local` for date-based filters
+5. **Operations**: Use UTC for operational comparisons (e.g., `end_at < NOW()`)
 
 
 

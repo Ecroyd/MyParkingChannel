@@ -4,8 +4,6 @@ import { requireUser } from '@/lib/auth/requireUser'
 import { TenantContext } from '@/lib/tenant/resolveTenant'
 import { uploadPreviewSchema } from '@/lib/validation/upload'
 import { bookingSchema } from '@/lib/validation/booking'
-import { zonedTimeToUtc, utcToZonedTime } from 'date-fns-tz'
-import { parseISO, format } from 'date-fns'
 
 export const POST = withTenant(async (tenant: TenantContext, request: Request) => {
   const user = await requireUser()
@@ -29,6 +27,29 @@ export const POST = withTenant(async (tenant: TenantContext, request: Request) =
       const row = rows[i]
       
       try {
+        // Parse dates using Postgres function (handles all formats, converts to UTC)
+        const tz = 'Europe/London'; // per-tenant later if needed
+        const startRaw = row[mapping.start_at];
+        const endRaw = row[mapping.end_at];
+
+        // Use RPC function to parse and normalize to UTC in the database
+        const { data: parsed, error: parseErr } = await supabase
+          .rpc('normalise_booking_times', {
+            p_start: startRaw,
+            p_end: endRaw,
+            p_tz: tz
+          });
+
+        if (parseErr || !parsed || parsed.length === 0) {
+          throw new Error(`Failed to parse dates: ${parseErr?.message || 'No result'}`);
+        }
+
+        const { start_utc, end_utc } = parsed[0];
+
+        if (!start_utc || !end_utc) {
+          throw new Error('Invalid dates: start_at or end_at is null');
+        }
+
         // Map row data to booking format
         const bookingData = {
           reference: row[mapping.reference],
@@ -38,14 +59,8 @@ export const POST = withTenant(async (tenant: TenantContext, request: Request) =
           car_make: mapping.car_make ? row[mapping.car_make] : undefined,
           car_model: mapping.car_model ? row[mapping.car_model] : undefined,
           car_color: mapping.car_color ? row[mapping.car_color] : undefined,
-          start_at: zonedTimeToUtc(
-            parseISO(row[mapping.start_at]), 
-            'Europe/London' // Always use UK timezone for all tenants
-          ).toISOString(),
-          end_at: zonedTimeToUtc(
-            parseISO(row[mapping.end_at]), 
-            'Europe/London' // Always use UK timezone for all tenants
-          ).toISOString(),
+          start_at: start_utc, // Already UTC from Postgres
+          end_at: end_utc,     // Already UTC from Postgres
           money_charged: mapping.money_charged ? parseFloat(row[mapping.money_charged]) : 0,
           money_received: mapping.money_received ? parseFloat(row[mapping.money_received]) : 0,
           notes: mapping.notes ? row[mapping.notes] : undefined,

@@ -111,8 +111,8 @@ function sortByTime(primary: keyof Row, fallback: keyof Row) {
   return (a: Row, b: Row) => {
     const ax = a[primary] ?? a[fallback];
     const bx = b[primary] ?? b[fallback];
-    const ta = ax ? Date.parse(ax) : 0;
-    const tb = bx ? Date.parse(bx) : 0;
+    const ta = ax && typeof ax === 'string' ? Date.parse(ax) : 0;
+    const tb = bx && typeof bx === 'string' ? Date.parse(bx) : 0;
     return ta - tb;
   };
 }

@@ -17,11 +17,8 @@ function toNumberOrNull(v:any): number|null {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
-function toTimestampOrNull(s:any): string|null {
-  if (!s || typeof s !== "string" || !s.trim()) return null;
-  const t = Date.parse(s);
-  return Number.isNaN(t) ? null : new Date(t).toISOString();
-}
+// Note: Date parsing is now done via RPC function in the prepare step
+// This function is kept for backward compatibility but dates should be parsed via RPC
 function sanitize(r: InRow) {
   return {
     source: (r.source||"").toString().toUpperCase(),
@@ -30,8 +27,8 @@ function sanitize(r: InRow) {
     customer_lastname: (r.customer_lastname||"").toString().toUpperCase(),
     customer_title: (r.customer_title||"").toString().toUpperCase(),
     customer_firstname: (r.customer_firstname||"").toString(),
-    start_at: toTimestampOrNull(r.start_at),
-    end_at: toTimestampOrNull(r.end_at),
+    start_at: r.start_at, // Will be parsed via RPC in prepare step
+    end_at: r.end_at,     // Will be parsed via RPC in prepare step
     vehicle_reg: (r.vehicle_reg||"").toString().toUpperCase(),
     vehicle_colour: (r.vehicle_colour||"").toString().toUpperCase(),
     vehicle_make: (r.vehicle_make||"").toString().toUpperCase(),
@@ -115,34 +112,59 @@ export async function POST(req: Request) {
     console.log("❌ Invalid rows found:", invalidRows);
   }
 
-  const prepared = validRows.map((r) => {
-    const dedupe_key = crypto.createHash("sha256").update(`${r.source.toLowerCase()}|${r.reference.toUpperCase()}|${r.vehicle_reg.toUpperCase()}|${r.start_at}`).digest("hex");
-    
-    const stagingRecord = {
-      tenant_id: tenantId,
-      source: sourceMapping || 'other',
-      reference: r.reference,
-      customer_name: r.customer_name,
-      customer_lastname: r.customer_lastname,
-      customer_title: r.customer_title,
-      customer_firstname: r.customer_firstname,
-      start_at: r.start_at,
-      end_at: r.end_at,
-      vehicle_reg: r.vehicle_reg,
-      vehicle_colour: r.vehicle_colour,
-      vehicle_make: r.vehicle_make,
-      vehicle_model: r.vehicle_model,
-      flight_number: r.flight_number,
-      phone: r.phone,
-      status: r.status,
-      price: r.price,
-      money_received: r.money_received,
-      notes: r.notes,
-      dedupe_key
-    };
+  // Parse dates using Postgres RPC function (handles all formats, converts to UTC)
+  const tz = 'Europe/London';
+  const prepared: any[] = [];
+  
+  for (const r of validRows) {
+    try {
+      // Use RPC function to parse and normalize to UTC in the database
+      const { data: parsed, error: parseErr } = await supabase
+        .rpc('normalise_booking_times', {
+          p_start: r.start_at,
+          p_end: r.end_at,
+          p_tz: tz
+        });
 
-    return mapStagingToBookings(stagingRecord);
-  });
+      if (parseErr || !parsed || parsed.length === 0 || !parsed[0].start_utc || !parsed[0].end_utc) {
+        console.error(`Failed to parse dates for row ${r.reference}:`, parseErr);
+        // Skip this row or use fallback
+        continue;
+      }
+
+      const { start_utc, end_utc } = parsed[0];
+      const dedupe_key = crypto.createHash("sha256").update(`${r.source.toLowerCase()}|${r.reference.toUpperCase()}|${r.vehicle_reg.toUpperCase()}|${start_utc}`).digest("hex");
+      
+      const stagingRecord = {
+        tenant_id: tenantId,
+        source: sourceMapping || 'other',
+        reference: r.reference,
+        customer_name: r.customer_name,
+        customer_lastname: r.customer_lastname,
+        customer_title: r.customer_title,
+        customer_firstname: r.customer_firstname,
+        start_at: start_utc, // Already UTC from Postgres
+        end_at: end_utc,     // Already UTC from Postgres
+        vehicle_reg: r.vehicle_reg,
+        vehicle_colour: r.vehicle_colour,
+        vehicle_make: r.vehicle_make,
+        vehicle_model: r.vehicle_model,
+        flight_number: r.flight_number,
+        phone: r.phone,
+        status: r.status,
+        price: r.price,
+        money_received: r.money_received,
+        notes: r.notes,
+        dedupe_key
+      };
+
+      prepared.push(mapStagingToBookings(stagingRecord));
+    } catch (error) {
+      console.error(`Error processing row ${r.reference}:`, error);
+      // Skip this row
+      continue;
+    }
+  }
   
   console.log("📊 Prepared records count:", prepared.length);
   console.log("📊 Sample prepared record:", prepared[0]);
