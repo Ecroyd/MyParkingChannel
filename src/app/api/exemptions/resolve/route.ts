@@ -14,9 +14,20 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { tenantId, exemptionType, bookingId, sourceEventId } = body;
+    const { exemptions, tenantId, exemptionType, bookingId, sourceEventId } = body;
 
-    if (!tenantId) {
+    // Support both single and bulk resolve
+    const exemptionsToResolve = exemptions || [
+      { tenantId, exemptionType, bookingId, sourceEventId },
+    ];
+
+    if (!exemptionsToResolve || exemptionsToResolve.length === 0) {
+      return NextResponse.json({ error: "No exemptions provided" }, { status: 400 });
+    }
+
+    // Get tenant ID from first exemption
+    const firstTenantId = exemptionsToResolve[0].tenantId;
+    if (!firstTenantId) {
       return NextResponse.json({ error: "tenantId required" }, { status: 400 });
     }
 
@@ -25,31 +36,69 @@ export async function POST(req: NextRequest) {
       .from("user_tenants")
       .select("tenant_id")
       .eq("user_id", user.id)
-      .eq("tenant_id", tenantId)
+      .eq("tenant_id", firstTenantId)
       .maybeSingle();
 
     if (!userTenant) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 
-    // Create a resolved row in 'exemptions' table
-    const { error } = await adminClient.from("exemptions").insert({
-      tenant_id: tenantId,
-      exemption_type: exemptionType || "OVERSTAY",
-      booking_id: bookingId || null,
-      source_event_id: sourceEventId || null,
-      detected_at: new Date().toISOString(),
-      resolved_at: new Date().toISOString(),
+    // Resolve each exemption
+    const resolvedAt = new Date().toISOString();
+    const inserts = exemptionsToResolve.map((ex: any) => ({
+      tenant_id: ex.tenantId,
+      exemption_type: ex.exemptionType || "OVERSTAY",
+      vehicle_reg: ex.vehicleReg || null,
+      booking_id: ex.bookingId || null,
+      source_event_id: ex.sourceEventId || null,
+      detected_at: ex.breachPoint || new Date().toISOString(),
+      resolved_at: resolvedAt,
       resolution_note: "Manually resolved",
       resolution_by: user.id,
-    });
+      meta: {
+        resolved_bulk: exemptionsToResolve.length > 1,
+      },
+    }));
+
+    // Update bookings for OVERSTAY and NO_SHOW exemptions
+    const bookingUpdates: Promise<any>[] = [];
+    for (const ex of exemptionsToResolve) {
+      if (ex.exemptionType === "OVERSTAY" && ex.bookingId) {
+        // Mark booking as checked out
+        bookingUpdates.push(
+          adminClient
+            .from("bookings")
+            .update({ checked_out_at: resolvedAt })
+            .eq("id", ex.bookingId)
+        );
+      } else if (ex.exemptionType === "NO_SHOW" && ex.bookingId) {
+        // Mark booking as checked in (they showed up late)
+        bookingUpdates.push(
+          adminClient
+            .from("bookings")
+            .update({ checked_in_at: resolvedAt })
+            .eq("id", ex.bookingId)
+        );
+      }
+    }
+
+    // Execute booking updates and exemption inserts in parallel
+    const [bookingResults, exemptionResult] = await Promise.all([
+      Promise.all(bookingUpdates),
+      adminClient.from("exemptions").insert(inserts),
+    ]);
+
+    const { error } = exemptionResult;
 
     if (error) {
-      console.error("Error resolving exemption:", error);
+      console.error("Error resolving exemptions:", error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+      ok: true,
+      resolved: inserts.length,
+    });
   } catch (error: any) {
     console.error("Error in resolve exemption API:", error);
     return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 });
