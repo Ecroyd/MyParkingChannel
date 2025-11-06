@@ -25,6 +25,7 @@ type Booking = {
   start_at: string;
   end_at: string;
   source: 'direct' | 'manual' | 'parkvia' | 'holidayextras' | 'other';
+  status?: string;
 };
 
 export default function ManageBookingPage() {
