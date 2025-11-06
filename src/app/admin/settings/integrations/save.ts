@@ -52,11 +52,10 @@ export async function saveAnprSettings(formData: FormData) {
 
       if (secretsError) {
         // If column-based doesn't work, try key-value approach
-        const operations: Promise<{ error: any }>[] = [];
-        
+        // Execute operations individually to avoid type issues
         if (apiKey) {
-          operations.push(
-            supa
+          try {
+            const { error: apiKeyError } = await supa
               .from("tenant_secrets")
               .upsert(
                 {
@@ -66,14 +65,19 @@ export async function saveAnprSettings(formData: FormData) {
                   updated_at: new Date().toISOString(),
                 },
                 { onConflict: "tenant_id,key" }
-              )
-              .then((r) => r)
-          );
+              );
+            
+            if (apiKeyError) {
+              console.warn("Could not save API key to tenant_secrets:", apiKeyError);
+            }
+          } catch (err) {
+            console.warn("Error saving API key to tenant_secrets:", err);
+          }
         }
         
         if (baseUrl) {
-          operations.push(
-            supa
+          try {
+            const { error: baseUrlError } = await supa
               .from("tenant_secrets")
               .upsert(
                 {
@@ -83,18 +87,13 @@ export async function saveAnprSettings(formData: FormData) {
                   updated_at: new Date().toISOString(),
                 },
                 { onConflict: "tenant_id,key" }
-              )
-              .then((r) => r)
-          );
-        }
-
-        // Execute all operations
-        if (operations.length > 0) {
-          const results = await Promise.all(operations);
-          const errors = results.map((r) => r.error).filter(Boolean);
-          
-          if (errors.length > 0) {
-            console.warn("Could not save to tenant_secrets using key-value approach:", errors);
+              );
+            
+            if (baseUrlError) {
+              console.warn("Could not save base URL to tenant_secrets:", baseUrlError);
+            }
+          } catch (err) {
+            console.warn("Error saving base URL to tenant_secrets:", err);
           }
         }
       }
