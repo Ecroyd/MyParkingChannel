@@ -7,14 +7,33 @@ export async function GET(req: Request) {
   if (!tenantId) return NextResponse.json({ error: "tenantId required" }, { status: 400 });
 
   const supabase = await getServerSupabase();
-  const { data, error } = await supabase
-    .from("booking_import_mappings")
-    .select("id, name, mapping, created_at")
-    .eq("tenant_id", tenantId)
-    .order("created_at", { ascending: false });
+  
+  // Fetch all mappings using pagination to avoid the 1000 row limit
+  let allMappings: any[] = [];
+  let page = 0;
+  const pageSize = 1000;
+  let hasMore = true;
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json({ mappings: data ?? [] });
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from("booking_import_mappings")
+      .select("id, name, mapping, created_at")
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: false })
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    
+    if (data && data.length > 0) {
+      allMappings = allMappings.concat(data);
+      hasMore = data.length === pageSize;
+      page++;
+    } else {
+      hasMore = false;
+    }
+  }
+
+  return NextResponse.json({ mappings: allMappings });
 }
 
 export async function POST(req: Request) {

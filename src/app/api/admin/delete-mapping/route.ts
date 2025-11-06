@@ -14,16 +14,34 @@ export async function POST(req: Request) {
     // Find and delete mappings where customer_name is mapped to customer_title
     console.log('🔍 Looking for problematic mappings...');
     
-    const { data: mappings, error: fetchError } = await adminClient
-      .from('booking_import_mappings')
-      .select('*')
-      .eq('tenant_id', tenantId);
-    
-    if (fetchError) {
-      console.error('❌ Error fetching mappings:', fetchError);
-      return NextResponse.json({ error: 'Failed to fetch mappings' }, { status: 500 });
+    // Fetch all mappings using pagination to avoid the 1000 row limit
+    let allMappings: any[] = [];
+    let page = 0;
+    const pageSize = 1000;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data, error: fetchError } = await adminClient
+        .from('booking_import_mappings')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .range(page * pageSize, (page + 1) * pageSize - 1);
+      
+      if (fetchError) {
+        console.error('❌ Error fetching mappings:', fetchError);
+        return NextResponse.json({ error: 'Failed to fetch mappings' }, { status: 500 });
+      }
+      
+      if (data && data.length > 0) {
+        allMappings = allMappings.concat(data);
+        hasMore = data.length === pageSize;
+        page++;
+      } else {
+        hasMore = false;
+      }
     }
     
+    const mappings = allMappings;
     console.log(`📊 Found ${mappings?.length || 0} mappings for tenant ${tenantId}`);
     
     // Look for problematic mappings
