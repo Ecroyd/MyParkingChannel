@@ -16,8 +16,8 @@ export const bookingRuleKindSchema = z.enum(['blackout', 'surcharge'])
 // Time schema (HH:mm format)
 export const timeSchema = z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/).nullable().optional()
 
-// Main booking rule schema
-export const bookingRuleSchema = z.object({
+// Main booking rule base schema (before refinements)
+const bookingRuleBaseSchema = z.object({
   id: z.string().uuid().optional(),
   tenant_id: z.string().uuid(),
   type: bookingRuleTypeSchema,
@@ -40,7 +40,10 @@ export const bookingRuleSchema = z.object({
   
   notes: z.string().optional(),
   created_at: z.string().datetime().optional()
-}).refine(
+})
+
+// Main booking rule schema with refinements
+export const bookingRuleSchema = bookingRuleBaseSchema.refine(
   (data) => {
     // If arrival_time_start is provided, arrival_time_end must also be provided
     if (data.arrival_time_start && !data.arrival_time_end) {
@@ -59,7 +62,7 @@ export const bookingRuleSchema = z.object({
 )
 
 // Schema for creating a new booking rule
-export const createBookingRuleSchema = bookingRuleSchema.omit({
+export const createBookingRuleSchema = bookingRuleBaseSchema.omit({
   id: true,
   created_at: true
 }).refine(
@@ -98,7 +101,7 @@ export const createBookingRuleSchema = bookingRuleSchema.omit({
 )
 
 // Schema for updating a booking rule
-export const updateBookingRuleSchema = bookingRuleSchema.omit({
+export const updateBookingRuleSchema = bookingRuleBaseSchema.omit({
   id: true,
   tenant_id: true,
   created_at: true
