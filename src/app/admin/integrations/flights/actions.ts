@@ -25,7 +25,8 @@ export async function upsertFlightProvider(args: SaveArgs) {
     throw new Error("tenantId and apiKey required");
   }
 
-  const { error } = await supabaseAdmin.from("tenant_flight_providers").upsert(
+  const supa = supabaseAdmin();
+  const { error } = await supa.from("tenant_flight_providers").upsert(
     {
       tenant_id: tenantId,
       provider_name: providerName,
@@ -56,7 +57,8 @@ export async function setAirlineOverride(
     throw new Error("tenantId, airlineIata, and providerName required");
   }
 
-  const { error } = await supabaseAdmin
+  const supa = supabaseAdmin();
+  const { error } = await supa
     .from("tenant_airline_provider_overrides")
     .upsert(
       {
