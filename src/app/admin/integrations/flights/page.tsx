@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useTenant } from "@/hooks/useTenant";
 import { saveAviationstackKey } from "./actions";
-import { Loader2, Save, Eye, EyeOff, Plane } from "lucide-react";
+import { Loader2, Save, Eye, EyeOff, Plane, CheckCircle2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
 export default function FlightsIntegrationPage() {
@@ -16,6 +16,7 @@ export default function FlightsIntegrationPage() {
   const [showApiKey, setShowApiKey] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [hasApiKey, setHasApiKey] = useState(false);
   const [testFlightNumber, setTestFlightNumber] = useState("");
   const [testFlightDate, setTestFlightDate] = useState("");
   const [testing, setTesting] = useState(false);
@@ -37,10 +38,14 @@ export default function FlightsIntegrationPage() {
       const json = await res.json();
       if (json.success && json.hasProvider) {
         // Provider exists, but we don't show the key
+        setHasApiKey(true);
         setApiKey(""); // Clear field
+      } else {
+        setHasApiKey(false);
       }
     } catch (err) {
       console.error("Failed to load settings:", err);
+      setHasApiKey(false);
     } finally {
       setLoading(false);
     }
@@ -75,6 +80,8 @@ export default function FlightsIntegrationPage() {
       });
       setApiKey(""); // Clear after saving
       setTestResult(null); // Clear test result
+      // Refresh status to show API key is now configured
+      await loadSettings();
     } catch (err: any) {
       toast({
         title: "Error",
@@ -162,16 +169,41 @@ export default function FlightsIntegrationPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
+          {hasApiKey && (
+            <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-green-600" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-green-900">
+                  API Key Configured
+                </p>
+                <p className="text-xs text-green-700">
+                  An active Aviationstack API key is configured for this tenant.
+                  You can update it below.
+                </p>
+              </div>
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="apiKey">Aviationstack API Key</Label>
+              <Label htmlFor="apiKey">
+                Aviationstack API Key
+                {hasApiKey && (
+                  <span className="ml-2 text-xs text-gray-500">
+                    (Update existing key)
+                  </span>
+                )}
+              </Label>
               <div className="flex gap-2">
                 <Input
                   id="apiKey"
                   type={showApiKey ? "text" : "password"}
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="Enter your Aviationstack API key"
+                  placeholder={
+                    hasApiKey
+                      ? "Enter new API key to update"
+                      : "Enter your Aviationstack API key"
+                  }
                 />
                 <Button
                   type="button"
@@ -200,7 +232,7 @@ export default function FlightsIntegrationPage() {
               ) : (
                 <>
                   <Save className="mr-2 h-4 w-4" />
-                  Save API Key
+                  {hasApiKey ? "Update API Key" : "Save API Key"}
                 </>
               )}
             </Button>
