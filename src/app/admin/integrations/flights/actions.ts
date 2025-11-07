@@ -10,7 +10,7 @@ export async function saveAviationstackKey(tenantId: string, apiKey: string) {
   const up = {
     tenant_id: tenantId,
     provider_name: "aviationstack",
-    provider_base_url: "http://api.aviationstack.com/v1/flights",
+    provider_base_url: "https://api.aviationstack.com/v1/flights",
     api_key: apiKey,
     is_active: true,
   };

@@ -75,8 +75,16 @@ export async function POST(req: NextRequest) {
     url.searchParams.set("access_key", provider.apiKey);
     url.searchParams.set("flight_iata", flightNumber); // Aviationstack accepts IATA flight like BA123
     if (flightDate) url.searchParams.set("flight_date", flightDate); // YYYY-MM-DD
+    
+    // Add limit parameter to get more results (Aviationstack default is 100)
+    url.searchParams.set("limit", "100");
 
     console.log(`[FLIGHT LOOKUP] Fetching from Aviationstack: ${url.toString().replace(/access_key=[^&]+/, 'access_key=***')}`);
+    console.log(`[FLIGHT LOOKUP] Request parameters:`, {
+      flight_iata: flightNumber,
+      flight_date: flightDate || 'not set',
+      limit: '100',
+    });
 
     const res = await fetch(url.toString());
     const responseText = await res.text();
@@ -101,12 +109,34 @@ export async function POST(req: NextRequest) {
     }
 
     console.log(`[FLIGHT LOOKUP] API response received. Has data array: ${Array.isArray(json?.data)}, Length: ${json?.data?.length || 0}`);
+    console.log(`[FLIGHT LOOKUP] Full API response structure:`, {
+      hasData: !!json?.data,
+      dataLength: json?.data?.length,
+      pagination: json?.pagination,
+      error: json?.error,
+      success: json?.success,
+      firstKeys: Object.keys(json || {}).slice(0, 10),
+    });
+    
+    // Log the actual response text for debugging (first 500 chars)
+    if (json?.data?.length === 0) {
+      console.warn(`[FLIGHT LOOKUP] Empty data array. Full response (first 500 chars):`, responseText.substring(0, 500));
+    }
     
     // Check for API errors in response
     if (json.error) {
       console.error("[FLIGHT LOOKUP] Aviationstack API returned error:", json.error);
       return NextResponse.json(
         { error: json.error.info || json.error.message || "API error", details: json },
+        { status: 400 }
+      );
+    }
+
+    // Check if API returned success: false
+    if (json.success === false) {
+      console.error("[FLIGHT LOOKUP] Aviationstack API returned success: false", json);
+      return NextResponse.json(
+        { error: json.error?.info || "API request failed", details: json },
         { status: 400 }
       );
     }
@@ -139,10 +169,19 @@ export async function POST(req: NextRequest) {
           flight_date: json.data[0]?.flight_date || json.data[0]?.flight?.date,
         } : null,
       });
+      
+      // Provide more helpful error message
+      let errorMessage = "Flight not found";
+      if (json?.data?.length === 0) {
+        errorMessage = `No flights found for ${flightNumber}${flightDate ? ` on ${flightDate}` : ''}. The flight may not exist in Aviationstack's database, or the flight number format may be incorrect. Try using the IATA format (e.g., BA123) or include a specific date.`;
+      } else {
+        errorMessage = normalized.error || "Flight not found in API response";
+      }
+      
       return NextResponse.json({ 
         source: "provider", 
         ...normalized,
-        error: normalized.error || "Flight not found in API response"
+        error: errorMessage
       });
     }
 
