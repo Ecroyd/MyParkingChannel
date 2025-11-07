@@ -29,7 +29,16 @@ export const ADMIN_NAV: NavNode[] = [
   // ——— Sites & Integrations ———
   { key: "tenant-sites", label: "Tenant Sites", href: "/admin/tenant-sites-server", section: "Sites & Integrations" },
   { key: "site-seo", label: "Site & SEO", href: "/admin/site-seo", section: "Sites & Integrations" },
-  { key: "integrations", label: "Integrations", href: "/admin/integrations", section: "Sites & Integrations", feature: "integrations" },
+  { 
+    key: "integrations", 
+    label: "Integrations", 
+    href: "/admin/integrations", 
+    section: "Sites & Integrations", 
+    feature: "integrations",
+    children: [
+      { key: "integrations-flights", label: "Flight Data", href: "/admin/integrations/flights" },
+    ],
+  },
   { key: "devices", label: "Gate Devices", href: "/admin/devices", section: "Sites & Integrations", feature: "devices" },
 
       // ——— Platform Management (Admin Only) ———
