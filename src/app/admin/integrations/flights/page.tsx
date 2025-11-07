@@ -6,21 +6,43 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useTenant } from "@/hooks/useTenant";
-import { saveAviationstackKey } from "./actions";
+import {
+  upsertFlightProvider,
+  setAirlineOverride,
+  saveAviationstackKey,
+} from "./actions";
 import { Loader2, Save, Eye, EyeOff, Plane, CheckCircle2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
 export default function FlightsIntegrationPage() {
   const { tenantId, loading: tenantLoading } = useTenant();
-  const [apiKey, setApiKey] = useState("");
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [hasApiKey, setHasApiKey] = useState(false);
+  const [hasAviationstack, setHasAviationstack] = useState(false);
+  const [hasAeroDataBox, setHasAeroDataBox] = useState(false);
+
+  // Aviationstack
+  const [avApiKey, setAvApiKey] = useState("");
+  const [showAvApiKey, setShowAvApiKey] = useState(false);
+  const [savingAv, setSavingAv] = useState(false);
+
+  // AeroDataBox
+  const [adBaseUrl, setAdBaseUrl] = useState(
+    "https://aerodatabox.p.rapidapi.com"
+  );
+  const [adApiKey, setAdApiKey] = useState("");
+  const [showAdApiKey, setShowAdApiKey] = useState(false);
+  const [adMode, setAdMode] = useState<"rapidapi" | "direct">("rapidapi");
+  const [adHost, setAdHost] = useState("aerodatabox.p.rapidapi.com");
+  const [savingAd, setSavingAd] = useState(false);
+
+  // Test lookup
   const [testFlightNumber, setTestFlightNumber] = useState("");
   const [testFlightDate, setTestFlightDate] = useState("");
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
+
+  // Airline overrides
+  const [savingOverrides, setSavingOverrides] = useState(false);
 
   useEffect(() => {
     if (tenantId) {
@@ -31,28 +53,94 @@ export default function FlightsIntegrationPage() {
   async function loadSettings() {
     if (!tenantId) return;
     try {
-      // Check if provider exists (we don't load the key for security)
       const res = await fetch(
         `/api/admin/integrations/flights?tenantId=${tenantId}`
       );
       const json = await res.json();
-      if (json.success && json.hasProvider) {
-        // Provider exists, but we don't show the key
-        setHasApiKey(true);
-        setApiKey(""); // Clear field
-      } else {
-        setHasApiKey(false);
+      if (json.success) {
+        setHasAviationstack(json.hasAviationstack || false);
+        setHasAeroDataBox(json.hasAeroDataBox || false);
       }
     } catch (err) {
       console.error("Failed to load settings:", err);
-      setHasApiKey(false);
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSaveAviationstack(e: React.FormEvent) {
     e.preventDefault();
+    if (!tenantId || !avApiKey) {
+      toast({
+        title: "Error",
+        description: "Tenant ID and API key are required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSavingAv(true);
+    try {
+      await saveAviationstackKey(tenantId, avApiKey);
+      toast({
+        title: "Success",
+        description: "Aviationstack API key saved successfully",
+      });
+      setAvApiKey("");
+      await loadSettings();
+    } catch (err: any) {
+      toast({
+        title: "Error",
+        description: err.message || "Failed to save API key",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingAv(false);
+    }
+  }
+
+  async function handleSaveAeroDataBox(e: React.FormEvent) {
+    e.preventDefault();
+    if (!tenantId || !adApiKey) {
+      toast({
+        title: "Error",
+        description: "Tenant ID and API key are required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSavingAd(true);
+    try {
+      await upsertFlightProvider({
+        tenantId,
+        providerName: "aerodatabox",
+        baseUrl: adBaseUrl,
+        apiKey: adApiKey,
+        priority: 60,
+        metadata: {
+          mode: adMode,
+          rapidapiHost: adHost,
+        },
+      });
+      toast({
+        title: "Success",
+        description: "AeroDataBox API key saved successfully",
+      });
+      setAdApiKey("");
+      await loadSettings();
+    } catch (err: any) {
+      toast({
+        title: "Error",
+        description: err.message || "Failed to save API key",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingAd(false);
+    }
+  }
+
+  async function handleSeedOverrides() {
     if (!tenantId) {
       toast({
         title: "Error",
@@ -62,34 +150,24 @@ export default function FlightsIntegrationPage() {
       return;
     }
 
-    if (!apiKey) {
-      toast({
-        title: "Error",
-        description: "API key is required",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setSaving(true);
+    setSavingOverrides(true);
     try {
-      await saveAviationstackKey(tenantId, apiKey);
+      // Route low-cost carriers to AeroDataBox first
+      await setAirlineOverride(tenantId, "FR", "aerodatabox", 1); // Ryanair
+      await setAirlineOverride(tenantId, "LM", "aerodatabox", 1); // Loganair
+      await setAirlineOverride(tenantId, "SI", "aerodatabox", 1); // Blue Islands
       toast({
         title: "Success",
-        description: "Aviationstack API key saved successfully",
+        description: "Airline overrides saved (FR/LM/SI → AeroDataBox first)",
       });
-      setApiKey(""); // Clear after saving
-      setTestResult(null); // Clear test result
-      // Refresh status to show API key is now configured
-      await loadSettings();
     } catch (err: any) {
       toast({
         title: "Error",
-        description: err.message || "Failed to save API key",
+        description: err.message || "Failed to save overrides",
         variant: "destructive",
       });
     } finally {
-      setSaving(false);
+      setSavingOverrides(false);
     }
   }
 
@@ -117,13 +195,13 @@ export default function FlightsIntegrationPage() {
       });
 
       const json = await res.json();
-      if (json.error) {
+      if (json.error || !json.ok) {
         toast({
           title: "Test Failed",
-          description: json.error,
+          description: json.error || "Flight not found",
           variant: "destructive",
         });
-        setTestResult({ error: json.error });
+        setTestResult({ error: json.error || "Flight not found" });
       } else {
         toast({
           title: "Test Success",
@@ -154,22 +232,23 @@ export default function FlightsIntegrationPage() {
   return (
     <div className="max-w-2xl space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Flight Data Integration</h1>
+        <h1 className="text-2xl font-semibold">Flight Data Providers</h1>
         <p className="text-gray-600 mt-1">
-          Configure Aviationstack API key for flight status lookups. Results are
-          cached to control costs.
+          Configure multiple flight data providers for better coverage. Low-cost
+          carriers (FR, LM, SI) can be routed to AeroDataBox first.
         </p>
       </div>
 
+      {/* Aviationstack */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Plane className="h-5 w-5" />
-            Aviationstack Configuration
+            Aviationstack
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {hasApiKey && (
+          {hasAviationstack && (
             <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md flex items-center gap-2">
               <CheckCircle2 className="h-5 w-5 text-green-600" />
               <div className="flex-1">
@@ -177,41 +256,29 @@ export default function FlightsIntegrationPage() {
                   API Key Configured
                 </p>
                 <p className="text-xs text-green-700">
-                  An active Aviationstack API key is configured for this tenant.
-                  You can update it below.
+                  Aviationstack is active for this tenant.
                 </p>
               </div>
             </div>
           )}
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSaveAviationstack} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="apiKey">
-                Aviationstack API Key
-                {hasApiKey && (
-                  <span className="ml-2 text-xs text-gray-500">
-                    (Update existing key)
-                  </span>
-                )}
-              </Label>
+              <Label htmlFor="avApiKey">Aviationstack API Key</Label>
               <div className="flex gap-2">
                 <Input
-                  id="apiKey"
-                  type={showApiKey ? "text" : "password"}
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder={
-                    hasApiKey
-                      ? "Enter new API key to update"
-                      : "Enter your Aviationstack API key"
-                  }
+                  id="avApiKey"
+                  type={showAvApiKey ? "text" : "password"}
+                  value={avApiKey}
+                  onChange={(e) => setAvApiKey(e.target.value)}
+                  placeholder="Enter your Aviationstack API key"
                 />
                 <Button
                   type="button"
                   variant="outline"
                   size="icon"
-                  onClick={() => setShowApiKey(!showApiKey)}
+                  onClick={() => setShowAvApiKey(!showAvApiKey)}
                 >
-                  {showApiKey ? (
+                  {showAvApiKey ? (
                     <EyeOff className="h-4 w-4" />
                   ) : (
                     <Eye className="h-4 w-4" />
@@ -219,12 +286,11 @@ export default function FlightsIntegrationPage() {
                 </Button>
               </div>
               <p className="text-xs text-gray-500">
-                API key is stored securely on the server
+                Priority: 50 (tried after airline overrides)
               </p>
             </div>
-
-            <Button type="submit" disabled={saving} className="w-full">
-              {saving ? (
+            <Button type="submit" disabled={savingAv} className="w-full">
+              {savingAv ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Saving...
@@ -232,7 +298,7 @@ export default function FlightsIntegrationPage() {
               ) : (
                 <>
                   <Save className="mr-2 h-4 w-4" />
-                  {hasApiKey ? "Update API Key" : "Save API Key"}
+                  {hasAviationstack ? "Update API Key" : "Save API Key"}
                 </>
               )}
             </Button>
@@ -240,7 +306,143 @@ export default function FlightsIntegrationPage() {
         </CardContent>
       </Card>
 
-      {/* Test Flight Lookup Widget */}
+      {/* AeroDataBox */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Plane className="h-5 w-5" />
+            AeroDataBox
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {hasAeroDataBox && (
+            <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-green-600" />
+              <div className="flex-1">
+                <p className="text-sm font-medium text-green-900">
+                  API Key Configured
+                </p>
+                <p className="text-xs text-green-700">
+                  AeroDataBox is active for this tenant.
+                </p>
+              </div>
+            </div>
+          )}
+          <form onSubmit={handleSaveAeroDataBox} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="adMode">API Mode</Label>
+              <select
+                id="adMode"
+                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
+                value={adMode}
+                onChange={(e) =>
+                  setAdMode(e.target.value as "rapidapi" | "direct")
+                }
+              >
+                <option value="rapidapi">RapidAPI</option>
+                <option value="direct">Direct</option>
+              </select>
+              <p className="text-xs text-gray-500">
+                Use RapidAPI (default) or direct API. RapidAPI requires Host +
+                Key headers.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="adBaseUrl">Base URL</Label>
+              <Input
+                id="adBaseUrl"
+                value={adBaseUrl}
+                onChange={(e) => setAdBaseUrl(e.target.value)}
+                placeholder="https://aerodatabox.p.rapidapi.com"
+              />
+            </div>
+            {adMode === "rapidapi" && (
+              <div className="space-y-2">
+                <Label htmlFor="adHost">RapidAPI Host</Label>
+                <Input
+                  id="adHost"
+                  value={adHost}
+                  onChange={(e) => setAdHost(e.target.value)}
+                  placeholder="aerodatabox.p.rapidapi.com"
+                />
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="adApiKey">API Key</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="adApiKey"
+                  type={showAdApiKey ? "text" : "password"}
+                  value={adApiKey}
+                  onChange={(e) => setAdApiKey(e.target.value)}
+                  placeholder="Enter your AeroDataBox API key"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setShowAdApiKey(!showAdApiKey)}
+                >
+                  {showAdApiKey ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+              <p className="text-xs text-gray-500">
+                Priority: 60 (tried after Aviationstack)
+              </p>
+            </div>
+            <Button type="submit" disabled={savingAd} className="w-full">
+              {savingAd ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="mr-2 h-4 w-4" />
+                  {hasAeroDataBox ? "Update API Key" : "Save API Key"}
+                </>
+              )}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      {/* Airline Overrides */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Airline Overrides</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Route specific airlines to preferred providers. Low-cost carriers
+            (FR, LM, SI) typically have better coverage in AeroDataBox.
+          </p>
+          <Button
+            onClick={handleSeedOverrides}
+            disabled={savingOverrides || !tenantId}
+            className="w-full"
+          >
+            {savingOverrides ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              "Seed FR / LM / SI → AeroDataBox"
+            )}
+          </Button>
+          <p className="text-xs text-gray-500">
+            This will set Ryanair (FR), Loganair (LM), and Blue Islands (SI) to
+            use AeroDataBox first.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Test Flight Lookup */}
       <Card>
         <CardHeader>
           <CardTitle>Test Flight Lookup</CardTitle>
@@ -252,10 +454,9 @@ export default function FlightsIntegrationPage() {
               id="testFlightNumber"
               value={testFlightNumber}
               onChange={(e) => setTestFlightNumber(e.target.value.toUpperCase())}
-              placeholder="e.g. BA123"
+              placeholder="e.g. BA123 or FR6421"
             />
           </div>
-
           <div className="space-y-2">
             <Label htmlFor="testFlightDate">Flight Date (optional)</Label>
             <Input
@@ -268,7 +469,6 @@ export default function FlightsIntegrationPage() {
               Leave empty to use today's date
             </p>
           </div>
-
           <Button
             onClick={handleTestLookup}
             disabled={testing || !testFlightNumber || !tenantId}
@@ -283,7 +483,6 @@ export default function FlightsIntegrationPage() {
               "Test Lookup"
             )}
           </Button>
-
           {testResult && (
             <div className="mt-4 p-4 bg-gray-50 rounded-lg">
               <h3 className="font-semibold mb-2">Test Result:</h3>
@@ -305,22 +504,6 @@ export default function FlightsIntegrationPage() {
                       <p>
                         <strong>Status:</strong> {testResult.flight.status || "N/A"}
                       </p>
-                      {testResult.flight.scheduled_departure && (
-                        <p>
-                          <strong>Scheduled Departure:</strong>{" "}
-                          {new Date(
-                            testResult.flight.scheduled_departure
-                          ).toLocaleString()}
-                        </p>
-                      )}
-                      {testResult.flight.scheduled_arrival && (
-                        <p>
-                          <strong>Scheduled Arrival:</strong>{" "}
-                          {new Date(
-                            testResult.flight.scheduled_arrival
-                          ).toLocaleString()}
-                        </p>
-                      )}
                     </>
                   )}
                 </div>
@@ -332,4 +515,3 @@ export default function FlightsIntegrationPage() {
     </div>
   );
 }
-

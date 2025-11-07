@@ -30,23 +30,31 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 
-    // Check if provider exists (don't return the key)
-    const { data, error } = await adminClient
+    // Check if providers exist (don't return the keys)
+    const { data: providers, error } = await adminClient
       .from("tenant_flight_providers")
       .select("id, provider_name, is_active")
       .eq("tenant_id", tenantId)
-      .eq("provider_name", "aviationstack")
-      .maybeSingle();
+      .eq("is_active", true);
 
     if (error) {
-      console.error("Error fetching flight provider:", error);
+      console.error("Error fetching flight providers:", error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    const hasAviationstack = providers?.some(
+      (p) => p.provider_name === "aviationstack"
+    );
+    const hasAeroDataBox = providers?.some(
+      (p) => p.provider_name === "aerodatabox"
+    );
+
     return NextResponse.json({
       success: true,
-      hasProvider: !!data,
-      provider: data || null,
+      hasProvider: hasAviationstack || hasAeroDataBox,
+      hasAviationstack: hasAviationstack || false,
+      hasAeroDataBox: hasAeroDataBox || false,
+      providers: providers || [],
     });
   } catch (error: any) {
     console.error("Error in flight integrations API:", error);
