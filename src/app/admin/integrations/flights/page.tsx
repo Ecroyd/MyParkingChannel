@@ -128,6 +128,8 @@ export default function FlightsIntegrationPage() {
         description: "AeroDataBox API key saved successfully",
       });
       setAdApiKey("");
+      setTestResult(null); // Clear test result
+      // Refresh status to show API key is now configured
       await loadSettings();
     } catch (err: any) {
       toast({

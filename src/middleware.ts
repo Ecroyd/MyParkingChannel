@@ -11,6 +11,7 @@ const IGNORE_PREFIXES = [
   '/_next',
   '/admin',
   '/login',
+  '/~offline',
   '/favicon.ico',
   '/robots.txt',
   '/manifest.webmanifest',
