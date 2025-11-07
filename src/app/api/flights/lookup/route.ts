@@ -257,7 +257,8 @@ async function upsertInstance(
   n: NormalizedFlight
 ) {
   const obj = buildUpsertObj(flightNumber, flightDate, n);
-  const { error } = await supabaseAdmin.from("flight_instances").upsert(
+  const supa = supabaseAdmin();
+  const { error } = await supa.from("flight_instances").upsert(
     {
       tenant_id: tenantId,
       ...obj,
