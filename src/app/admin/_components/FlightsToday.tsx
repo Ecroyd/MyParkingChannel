@@ -103,9 +103,21 @@ export default function FlightsToday() {
       const json = await res.json();
 
       if (json.error) {
-        setScanError(json.error);
+        // Show detailed error message
+        const errorMsg = json.details 
+          ? `${json.error}${json.details ? `: ${typeof json.details === 'string' ? json.details.substring(0, 200) : JSON.stringify(json.details).substring(0, 200)}` : ''}`
+          : json.error;
+        setScanError(errorMsg);
         setFlightDetails(null);
         setScanSource(null);
+        console.error("[FLIGHT SCANNER] API error:", json);
+      } else if (!json.ok && json.error) {
+        // Handle case where normalizeAndPersist returned ok: false
+        const errorMsg = json.error || "Flight not found in API response";
+        setScanError(errorMsg);
+        setFlightDetails(null);
+        setScanSource(null);
+        console.warn("[FLIGHT SCANNER] No flight found:", json);
       } else if (json.flight) {
         setFlightDetails(json.flight);
         setScanSource(json.source || null);
@@ -113,9 +125,12 @@ export default function FlightsToday() {
         // Refresh the flights list to include the newly looked up flight
         loadFlights();
       } else {
-        setScanError("Flight not found");
+        // Fallback error
+        const errorMsg = json.error || "Flight not found. Check server logs for details.";
+        setScanError(errorMsg);
         setFlightDetails(null);
         setScanSource(null);
+        console.warn("[FLIGHT SCANNER] Unexpected response format:", json);
       }
     } catch (err: any) {
       setScanError(err.message || "Failed to lookup flight");
