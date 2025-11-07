@@ -9,7 +9,8 @@ export type ProviderCfg = {
 };
 
 export async function getActiveProviders(tenantId: string): Promise<ProviderCfg[]> {
-  const { data, error } = await supabaseAdmin
+  const supa = supabaseAdmin();
+  const { data, error } = await supa
     .from("tenant_flight_providers")
     .select("provider_name, provider_base_url, api_key, metadata, priority, is_active")
     .eq("tenant_id", tenantId)
@@ -34,7 +35,8 @@ export async function getAirlineOverrides(
   tenantId: string,
   airlineIata: string
 ): Promise<string[]> {
-  const { data, error } = await supabaseAdmin
+  const supa = supabaseAdmin();
+  const { data, error } = await supa
     .from("tenant_airline_provider_overrides")
     .select("provider_name, priority")
     .eq("tenant_id", tenantId)
