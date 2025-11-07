@@ -163,9 +163,16 @@ async function normalizeAndPersist(
   };
 
   const supa = supabaseAdmin();
-  await supa.from("flight_instances").upsert(upsert, {
-    onConflict: "tenant_id,flight_number,flight_date",
-  });
+  const { error: upsertError } = await supa
+    .from("flight_instances")
+    .upsert(upsert, {
+      onConflict: "tenant_id,flight_number,flight_date",
+    });
+
+  if (upsertError) {
+    console.error("Error upserting flight instance:", upsertError);
+    // Continue anyway - we still return the flight data
+  }
 
   return { ok: true, flight: upsert, raw: best };
 }
