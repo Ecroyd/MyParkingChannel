@@ -21,7 +21,8 @@ export async function generateMetadata({
     title,
     description: "Secure airport parking. Simple booking. Close to the terminal.",
     icons: {
-      icon: ctx.branding?.icon_192_url || "/favicon.ico",
+      icon: ctx.branding?.icon_192_url || "/icons/car logo.png",
+      apple: ctx.branding?.icon_192_url || "/icons/car logo.png",
     },
   };
 }

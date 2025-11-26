@@ -5,6 +5,10 @@ import { Analytics } from "@vercel/analytics/next";
 
 export const metadata: Metadata = {
   title: 'Parking Channel',
+  icons: {
+    icon: '/icons/car logo.png',
+    apple: '/icons/car logo.png',
+  },
 };
 
 export const viewport: Viewport = {

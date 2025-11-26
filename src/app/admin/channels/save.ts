@@ -25,8 +25,8 @@ export async function saveHolidayExtrasSettings(formData: FormData) {
 
   const supa = supabaseAdmin();
 
-  // Store all settings in tenant_secrets using key-value approach with scope
-  const secrets = [
+  // Store encrypted secrets (with value_ciphertext)
+  const encryptedSecrets = [
     {
       tenant_id: tenantId,
       scope: "holiday_extras",
@@ -43,9 +43,9 @@ export async function saveHolidayExtrasSettings(formData: FormData) {
     },
   ];
 
-  // Add optional fields if provided
+  // Add optional password if provided
   if (password) {
-    secrets.push({
+    encryptedSecrets.push({
       tenant_id: tenantId,
       scope: "holiday_extras",
       key: "password",
@@ -54,18 +54,21 @@ export async function saveHolidayExtrasSettings(formData: FormData) {
     });
   }
 
+  // Store plain text secrets (with value)
+  const plainSecrets = [];
+  
   if (initials) {
-    secrets.push({
+    plainSecrets.push({
       tenant_id: tenantId,
       scope: "holiday_extras",
       key: "initials",
-      value: initials, // Not encrypted, just a simple string
+      value: initials,
       updated_at: new Date().toISOString(),
     });
   }
 
   // Environment, system, and lang are not sensitive, store as plain values
-  secrets.push(
+  plainSecrets.push(
     {
       tenant_id: tenantId,
       scope: "holiday_extras",
@@ -89,8 +92,8 @@ export async function saveHolidayExtrasSettings(formData: FormData) {
     }
   );
 
-  // Upsert each secret individually
-  for (const secret of secrets) {
+  // Upsert encrypted secrets
+  for (const secret of encryptedSecrets) {
     // Try with scope first
     let { error } = await supa
       .from("tenant_secrets")
@@ -104,8 +107,35 @@ export async function saveHolidayExtrasSettings(formData: FormData) {
           {
             tenant_id: secret.tenant_id,
             key: secret.key,
-            value: secret.value,
             value_ciphertext: secret.value_ciphertext,
+            updated_at: secret.updated_at,
+          },
+          { onConflict: "tenant_id,key" }
+        );
+      
+      if (error2) {
+        console.error(`Error saving secret ${secret.key}:`, error2);
+        throw new Error(`Failed to save ${secret.key}: ${error2.message}`);
+      }
+    }
+  }
+
+  // Upsert plain text secrets
+  for (const secret of plainSecrets) {
+    // Try with scope first
+    let { error } = await supa
+      .from("tenant_secrets")
+      .upsert(secret as any, { onConflict: "tenant_id,scope,key" });
+
+    // If that fails, try without scope (fallback for different table structures)
+    if (error) {
+      const { error: error2 } = await supa
+        .from("tenant_secrets")
+        .upsert(
+          {
+            tenant_id: secret.tenant_id,
+            key: secret.key,
+            value: secret.value,
             updated_at: secret.updated_at,
           },
           { onConflict: "tenant_id,key" }
