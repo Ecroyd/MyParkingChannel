@@ -127,11 +127,8 @@ export default function AnprAdminClient({ tenantId }: Props) {
   );
 }
 
-/**
- * GATE EVENTS TABLE (live ANPR hits)
- * Expects a backend endpoint like:
- *   GET /api/admin/gate-events?tenantId=...&from=yyyy-mm-dd&to=yyyy-mm-dd&limit=200
- */
+/* ---------------------- GATE EVENTS: LIVE HITS ----------------------- */
+
 function GateEventsTable({
   tenantId,
   fromDate,
@@ -159,7 +156,7 @@ function GateEventsTable({
           to: toDate,
           limit: '200',
         });
-        // TODO: if your API path differs, change this URL:
+        // adjust path if your backend is different
         const res = await fetch(`/api/admin/gate-events?${params.toString()}`);
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
@@ -182,7 +179,7 @@ function GateEventsTable({
     };
 
     fetchEvents();
-    timer = setInterval(fetchEvents, 5000); // live-ish
+    timer = setInterval(fetchEvents, 5000);
 
     return () => {
       aborted = true;
@@ -308,12 +305,8 @@ function GateEventsTable({
   );
 }
 
-/**
- * GATE DEVICES PANEL
- * Expects backend endpoints:
- *   GET  /api/admin/gate-devices?tenantId=...
- *   POST /api/admin/gate-devices/:id/generate-key
- */
+/* --------------------- GATE DEVICES + API KEYS ---------------------- */
+
 function GateDevicesPanel({ tenantId }: { tenantId: string }) {
   const [devices, setDevices] = useState<GateDevice[]>([]);
   const [loading, setLoading] = useState(false);
@@ -322,13 +315,20 @@ function GateDevicesPanel({ tenantId }: { tenantId: string }) {
   const [generatingFor, setGeneratingFor] = useState<string | null>(null);
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   const [generatedMessage, setGeneratedMessage] = useState<string | null>(null);
+  const [integrationOrigin, setIntegrationOrigin] = useState<string>('');
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setIntegrationOrigin(window.location.origin);
+    }
+  }, []);
 
   const loadDevices = async () => {
     try {
       setLoading(true);
       setError(null);
       const params = new URLSearchParams({ tenantId });
-      // TODO: change this URL if your path differs
+      // adjust path if your backend is different
       const res = await fetch(`/api/admin/gate-devices?${params.toString()}`);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -354,7 +354,8 @@ function GateDevicesPanel({ tenantId }: { tenantId: string }) {
       setGeneratingFor(deviceId);
       setGeneratedKey(null);
       setGeneratedMessage(null);
-      // TODO: change this URL if your path differs
+
+      // adjust path if your backend is different
       const res = await fetch(
         `/api/admin/gate-devices/${deviceId}/generate-key`,
         {
@@ -373,21 +374,27 @@ function GateDevicesPanel({ tenantId }: { tenantId: string }) {
       );
     } catch (err: any) {
       console.error(err);
-      alert(err.message || 'Failed to generate key'); // or toast
+      alert(err.message || 'Failed to generate key'); // swap for toast if you like
     } finally {
       setGeneratingFor(null);
     }
   };
 
+  const webhookUrl = integrationOrigin
+    ? `${integrationOrigin}/api/gates/events`
+    : '/api/gates/events';
+
   return (
     <div className="space-y-4">
+      {/* Intro + integration overview */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h2 className="text-lg font-semibold mb-1">Gate Devices</h2>
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold">Gate Devices</h2>
           <p className="text-xs text-gray-600 max-w-xl">
-            Configure ANPR devices, QR readers, and other gate controllers. For
-            Snap ANPR, generate an API key here and paste it into the Snap box
-            or local bridge so it can send plate reads to this tenant.
+            Configure ANPR cameras, QR readers, and other gate controllers. For
+            Snap ANPR, generate an API key for the device and give your
+            installer the endpoint + headers below so the box (or bridge) can
+            POST plate reads to this tenant.
           </p>
         </div>
         <button
@@ -401,10 +408,15 @@ function GateDevicesPanel({ tenantId }: { tenantId: string }) {
 
       {error && <div className="text-xs text-red-600">{error}</div>}
 
+      {/* Devices table */}
       <div className="border border-gray-200 rounded-lg overflow-hidden">
         <div className="px-3 py-2 bg-gray-50 border-b flex justify-between items-center">
           <span className="text-xs text-gray-600">
             {devices.length} devices
+          </span>
+          <span className="text-[10px] text-gray-400">
+            Gate devices come from your main settings / infra. Use this page to
+            wire them into ANPR.
           </span>
         </div>
         <div className="overflow-x-auto">
@@ -427,7 +439,8 @@ function GateDevicesPanel({ tenantId }: { tenantId: string }) {
                     colSpan={5}
                     className="px-3 py-4 text-center text-gray-500"
                   >
-                    No gate devices configured yet.
+                    No gate devices configured yet. Add a device in your main
+                    gate settings, then come back here to generate an API key.
                   </td>
                 </tr>
               )}
@@ -451,6 +464,7 @@ function GateDevicesPanel({ tenantId }: { tenantId: string }) {
                     : dev.kind;
 
                 const isGenerating = generatingFor === dev.id;
+                const canGenerate = dev.status === 'active';
 
                 return (
                   <tr key={dev.id} className="hover:bg-gray-50">
@@ -480,16 +494,16 @@ function GateDevicesPanel({ tenantId }: { tenantId: string }) {
                       </span>
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-col gap-1">
                         <button
                           onClick={() => handleGenerateKey(dev.id)}
-                          disabled={isGenerating || dev.status !== 'active'}
+                          disabled={isGenerating || !canGenerate}
                           className="text-[11px] border px-2 py-0.5 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {isGenerating ? 'Generating…' : 'Generate API Key'}
                         </button>
                         <span className="text-[10px] text-gray-400">
-                          Use this for Snap / bridge config
+                          Give this key + endpoint to your ANPR installer.
                         </span>
                       </div>
                     </td>
@@ -501,40 +515,85 @@ function GateDevicesPanel({ tenantId }: { tenantId: string }) {
         </div>
       </div>
 
-      {/* Generated key drawer / box */}
-      {generatedKey && (
-        <div className="border border-blue-200 bg-blue-50 rounded-lg px-3 py-3 space-y-2">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div>
-              <p className="text-sm font-medium text-blue-900">
-                New device API key
-              </p>
-              {generatedMessage && (
-                <p className="text-xs text-blue-800">{generatedMessage}</p>
-              )}
-            </div>
-            <button
-              onClick={() => {
-                navigator.clipboard
-                  .writeText(generatedKey)
-                  .catch(() => undefined);
-              }}
-              className="text-[11px] border border-blue-400 text-blue-700 px-2 py-0.5 rounded hover:bg-blue-100"
-            >
-              Copy key
-            </button>
-          </div>
-          <div className="bg-white border border-blue-200 rounded px-2 py-1 font-mono text-[11px] break-all">
-            {generatedKey}
-          </div>
-          <p className="text-[10px] text-blue-800">
-            Paste this into the Snap ANPR box or your local ANPR bridge
-            configuration. This key will not be shown again if you leave this
-            page.
+      {/* Integration instructions + generated key */}
+      <div className="grid gap-4 md:grid-cols-2">
+        {/* Connection details card */}
+        <div className="border border-gray-200 rounded-lg p-3 space-y-2">
+          <h3 className="text-sm font-semibold">How to connect Snap ANPR</h3>
+          <p className="text-xs text-gray-600">
+            Ask your installer to POST every plate read to this endpoint:
           </p>
+          <div className="bg-gray-50 border rounded px-2 py-1 font-mono text-[11px] break-all">
+            {webhookUrl}
+          </div>
+          <p className="text-xs text-gray-600">With headers:</p>
+          <div className="bg-gray-50 border rounded px-2 py-1 font-mono text-[11px] break-all">
+            Content-Type: application/json
+            <br />
+            x-gate-api-key: YOUR_GENERATED_KEY
+          </div>
+          <p className="text-xs text-gray-600">
+            And a JSON body like this (fields can be mapped from Snap&apos;s
+            output):
+          </p>
+          <pre className="bg-gray-50 border rounded px-2 py-2 text-[10px] font-mono overflow-x-auto">
+{`{
+  "plate": "AB12 CDE",
+  "direction": "entry",
+  "seenAt": "2025-01-01T10:15:00Z",
+  "raw": {
+    "source": "snap",
+    "cameraId": "CAM-1"
+  }
+}`}
+          </pre>
         </div>
-      )}
+
+        {/* Generated key card */}
+        {generatedKey ? (
+          <div className="border border-blue-200 bg-blue-50 rounded-lg px-3 py-3 space-y-2">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div>
+                <p className="text-sm font-semibold text-blue-900">
+                  New device API key
+                </p>
+                {generatedMessage && (
+                  <p className="text-xs text-blue-800">{generatedMessage}</p>
+                )}
+              </div>
+              <button
+                onClick={() =>
+                  navigator.clipboard.writeText(generatedKey).catch(() => {})
+                }
+                className="text-[11px] border border-blue-400 text-blue-700 px-2 py-0.5 rounded hover:bg-blue-100"
+              >
+                Copy key
+              </button>
+            </div>
+            <div className="bg-white border border-blue-200 rounded px-2 py-1 font-mono text-[11px] break-all">
+              {generatedKey}
+            </div>
+            <p className="text-[10px] text-blue-800">
+              Give this key to your Snap ANPR installer or bridge script
+              together with the URL on the left. Once they&apos;ve configured
+              it, plate reads will start appearing in the Gate Events tab.
+            </p>
+          </div>
+        ) : (
+          <div className="border border-dashed border-blue-200 rounded-lg px-3 py-3 text-xs text-blue-900 bg-blue-50/40">
+            <p className="font-semibold mb-1">
+              Generate a key to connect your first ANPR device
+            </p>
+            <p>
+              Pick a device in the table above (e.g. your Snap ANPR processor),
+              click <span className="font-mono">Generate API Key</span>, then
+              paste that key into the Snap box or local bridge along with the
+              endpoint URL. When it&apos;s working, you&apos;ll see live hits in
+              the Gate Events tab.
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
-
