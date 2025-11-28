@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
+import { SupplierApiDocs } from "@/components/admin/SupplierApiDocs";
 
 type PartnerApiKey = {
   id: string;
@@ -395,6 +396,9 @@ export default function PartnerApisPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Supplier API Docs */}
+      <SupplierApiDocs />
     </div>
   );
 }
