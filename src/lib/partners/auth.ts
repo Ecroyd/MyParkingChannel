@@ -29,12 +29,10 @@ export async function authenticatePartnerApiKey(
   }
 
   // Fire-and-forget update of last_used_at (ignore errors)
-  supabase
+  void supabase
     .from("partner_api_keys")
     .update({ last_used_at: new Date().toISOString() })
-    .eq("api_key_hash", hash)
-    .then(() => {})
-    .catch(() => {});
+    .eq("api_key_hash", hash);
 
   return {
     tenantId: data.tenant_id,
