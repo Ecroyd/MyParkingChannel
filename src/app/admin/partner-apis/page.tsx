@@ -301,7 +301,7 @@ export default function PartnerApisPage() {
 
       {/* Create Dialog */}
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent>
+        <DialogContent className="bg-white">
           <DialogHeader>
             <DialogTitle>Create Partner API Key</DialogTitle>
             <DialogDescription>
