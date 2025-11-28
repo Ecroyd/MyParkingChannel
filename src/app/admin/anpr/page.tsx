@@ -3,11 +3,12 @@
 import AnprAdminClient from '@/components/admin/anpr/AnprAdminClient';
 
 type Props = {
-  searchParams: { [key: string]: string | string[] | undefined };
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 };
 
-export default function AnprPage({ searchParams }: Props) {
-  const tenantIdParam = searchParams.tenantId;
+export default async function AnprPage({ searchParams }: Props) {
+  const resolvedSearchParams = await searchParams;
+  const tenantIdParam = resolvedSearchParams.tenantId;
 
   const tenantId =
     typeof tenantIdParam === 'string' ? tenantIdParam : undefined;
