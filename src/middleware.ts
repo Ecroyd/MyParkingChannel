@@ -56,6 +56,10 @@ export default function middleware(req: NextRequest) {
   // 2) Do not process if we've already been rewritten to /sites/[slug]
   if (pathname.startsWith(`${SITES_PREFIX}/`)) return NextResponse.next();
 
+  // 3) Allow root path to be handled by the page.tsx to check for tenant
+  // This allows the root page to show the landing page if no tenant is configured
+  if (pathname === '/') return NextResponse.next();
+
   const host = getHost(req);
 
   /**
