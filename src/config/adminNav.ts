@@ -37,7 +37,6 @@ export const ADMIN_NAV: NavNode[] = [
     section: "Sites & Integrations", 
     feature: "integrations",
   },
-  { key: "channels", label: "Channels", href: "/admin/channels", section: "Sites & Integrations" },
   { key: "partner-apis", label: "Partner APIs", href: "/admin/partner-apis", section: "Sites & Integrations" },
   { key: "devices", label: "Gate Devices", href: "/admin/devices", section: "Sites & Integrations", feature: "devices" },
 
