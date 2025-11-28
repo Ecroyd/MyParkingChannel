@@ -126,8 +126,9 @@ function TiersPane(){
 
 function SeasonsPane(){
   const [seasons,setSeasons]=useState<Season[]>([]);
+  const [tiers,setTiers]=useState<Tier[]>([]);
   const [ranges,setRanges]=useState<Record<string,SeasonRange[]>>({});
-  const [draft,setDraft]=useState<Partial<Season & {startDate:string;endDate:string}>>({code:"summer",name:"Summer",color:"#22c55e"});
+  const [draft,setDraft]=useState<Partial<Season & {startDate:string;endDate:string;tier_id:string}>>({color:"#22c55e"});
 
   const load=async()=>{
     const r=await api.get("/api/pricing/seasons"); const j=await r.json();
@@ -140,7 +141,14 @@ function SeasonsPane(){
     }
     setRanges(map);
   };
-  useEffect(()=>{ load(); },[]);
+  
+  const loadTiers=async()=>{
+    const r=await api.get("/api/pricing/tiers"); const j=await r.json();
+    if(j.error) return toast.error(j.error);
+    setTiers(j.data || []);
+  };
+
+  useEffect(()=>{ load(); loadTiers(); },[]);
 
   const add=async()=>{
     if(!draft.code || !draft.name) {
@@ -151,18 +159,43 @@ function SeasonsPane(){
     if(j.error) {
       toast.error(j.error);
     } else {
-      toast.success("Season added");
+      const seasonId = j.data.id;
+      let successMessages = ["Season added"];
+      
       // If date range is provided, add it
       if(draft.startDate && draft.endDate) {
-        const rangeR=await api.post(`/api/pricing/seasons/${j.data.id}/ranges`,{start:draft.startDate,end:draft.endDate});
+        const rangeR=await api.post(`/api/pricing/seasons/${seasonId}/ranges`,{start:draft.startDate,end:draft.endDate});
         const rangeJ=await rangeR.json();
         if(rangeJ.error) {
           toast.error(`Season created but range failed: ${rangeJ.error}`);
         } else {
-          toast.success("Season and date range added");
+          successMessages.push("date range added");
         }
       }
-      setDraft({code:"",name:"",color:"#22c55e",startDate:"",endDate:""}); 
+      
+      // If tier is selected, create a pricing rule
+      if(draft.tier_id) {
+        const rulePayload:any = {
+          season_id: seasonId,
+          tier_id: draft.tier_id,
+          priority: 100,
+          is_active: true
+        };
+        // If date range was provided, use it for the rule too
+        if(draft.startDate && draft.endDate) {
+          rulePayload.date_range = `[${draft.startDate},${draft.endDate})`;
+        }
+        const ruleR=await api.post("/api/pricing/rules",rulePayload);
+        const ruleJ=await ruleR.json();
+        if(ruleJ.error) {
+          toast.error(`Season created but pricing rule failed: ${ruleJ.error}`);
+        } else {
+          successMessages.push("pricing rule created");
+        }
+      }
+      
+      toast.success(successMessages.join(", "));
+      setDraft({color:"#22c55e",startDate:"",endDate:"",tier_id:""}); 
       load(); 
     }
   };
@@ -179,6 +212,8 @@ function SeasonsPane(){
           <Input placeholder="Code" value={draft.code||""} onChange={v=>setDraft(d=>({...d,code:v}))}/>
           <Input placeholder="Name" value={draft.name||""} onChange={v=>setDraft(d=>({...d,name:v}))}/>
           <Input placeholder="Color #RRGGBB" value={draft.color||""} onChange={v=>setDraft(d=>({...d,color:v}))}/>
+          <Select value={draft.tier_id||""} onChange={v=>setDraft(d=>({...d,tier_id:v}))}
+            options={[["","Select Tier (optional)"],...tiers.map(t=>[t.id,`${t.label} (${t.code})`] as [string, string])]} />
           <Input type="date" placeholder="Start Date (optional)" value={draft.startDate||""} onChange={v=>setDraft(d=>({...d,startDate:v}))}/>
           <Input type="date" placeholder="End Date (optional)" value={draft.endDate||""} onChange={v=>setDraft(d=>({...d,endDate:v}))}/>
         </div>
