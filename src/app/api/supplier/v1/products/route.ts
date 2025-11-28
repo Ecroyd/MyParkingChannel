@@ -1,43 +1,73 @@
-// src/app/api/supplier/v1/products/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { authenticatePartnerApiKey } from "@/lib/partners/auth";
-import { createAdminClient } from "@/lib/supabase/admin";
+// app/api/supplier/v1/products/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { createAdminClient } from '@/lib/supabase/admin';
+import {
+  authenticateSupplierApi,
+  SupplierAuthError,
+} from '@/lib/supplier/auth';
+import { SupplierProduct } from '@/lib/supplier/types';
 
 export async function GET(req: NextRequest) {
-  const auth = await authenticatePartnerApiKey(req.headers);
+  try {
+    const rawKey = req.headers.get('x-api-key');
+    const auth = await authenticateSupplierApi(rawKey);
 
-  if (!auth) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+    if (!auth.scopes.includes('products')) {
+      return NextResponse.json(
+        { error: { code: 'FORBIDDEN', message: 'Scope products not granted' } },
+        { status: 403 }
+      );
+    }
 
-  const supabase = createAdminClient();
+    const supabase = createAdminClient();
 
-  // TODO: Replace this with a real "car park products for this tenant" lookup.
-  // e.g. tenant_sites, tenant_products, etc.
-  const { data: tenantProfile } = await supabase
-    .from("tenant_public_profile")
-    .select("business_name")
-    .eq("tenant_id", auth.tenantId)
-    .maybeSingle();
+    // For now, return a default product since we don't have a parking_products table yet
+    // TODO: Replace with real parking_products table query when available
+    const { data: tenantProfile } = await supabase
+      .from('tenant_public_profile')
+      .select('business_name, airport_code')
+      .eq('tenant_id', auth.tenantId)
+      .maybeSingle();
 
-  const displayName = tenantProfile?.business_name || "Car Park";
-  const airportCode = null; // TODO: add airport_code field to tenant_public_profile if needed
+    const displayName = tenantProfile?.business_name || 'Car Park';
+    const airportCode = tenantProfile?.airport_code || null;
 
-  return NextResponse.json({
-    products: [
+    // Return default product structure
+    const products: SupplierProduct[] = [
       {
         id: `default-${auth.tenantId}`,
-        code: `DEFAULT_${auth.tenantId}`, // partner-facing product code
+        code: `DEFAULT_${auth.tenantId}`,
         name: displayName,
-        description: "Standard airport parking",
-        airport_code: airportCode,
-        type: "park_and_ride", // or "meet_and_greet", "on_airport"
-        currency: "GBP",
-        min_stay_days: 1,
+        description: 'Standard airport parking',
+        location: {
+          airport_code: airportCode || undefined,
+        },
+        min_stay_hours: 24,
         max_stay_days: 60,
-        tags: ["default"],
+        lead_time_hours: 2,
+        cancellation_policy: {
+          free_until_hours_before: 24,
+          fee_percentage_after: 100,
+        },
+        features: ['cctv', 'fenced', 'park_and_ride'],
+        currency: 'GBP',
+        status: 'active',
       },
-    ],
-  });
-}
+    ];
 
+    return NextResponse.json(products, { status: 200 });
+  } catch (err: any) {
+    if (err instanceof SupplierAuthError) {
+      return NextResponse.json(
+        { error: { code: err.code, message: err.message } },
+        { status: err.status }
+      );
+    }
+
+    console.error('Products handler error', err);
+    return NextResponse.json(
+      { error: { code: 'INTERNAL_ERROR', message: 'Unexpected error' } },
+      { status: 500 }
+    );
+  }
+}

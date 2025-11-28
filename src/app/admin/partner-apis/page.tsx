@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { useTenant } from "@/hooks/useTenant";
-import { Loader2, Plus, Trash2, Eye, EyeOff, Copy, Check, X } from "lucide-react";
+import { Loader2, Plus, Trash2, Eye, EyeOff, Copy, Check, X, Download } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import {
   Dialog,
@@ -276,6 +276,19 @@ export default function PartnerApisPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex gap-2 justify-end">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          asChild
+                        >
+                          <a
+                            href={`/api/admin/partner-apis/spec?keyId=${key.id}`}
+                            download
+                          >
+                            <Download className="mr-1 h-3 w-3" />
+                            Spec
+                          </a>
+                        </Button>
                         <Button
                           variant="outline"
                           size="sm"

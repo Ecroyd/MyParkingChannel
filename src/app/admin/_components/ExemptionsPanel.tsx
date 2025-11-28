@@ -349,6 +349,18 @@ export default function ExemptionsPanel() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <CardTitle className="text-lg font-semibold">Exemptions</CardTitle>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setIsMinimized(!isMinimized)}
+                className="h-8 w-8 p-0"
+              >
+                {isMinimized ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronUp className="h-4 w-4" />
+                )}
+              </Button>
               {items.length > 0 && (
                 <Badge variant="secondary" className="text-xs">
                   {items.length}
@@ -371,18 +383,6 @@ export default function ExemptionsPanel() {
                   </SelectContent>
                 </Select>
               </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setIsMinimized(!isMinimized)}
-                className="h-8 w-8 p-0"
-              >
-                {isMinimized ? (
-                  <ChevronDown className="h-4 w-4" />
-                ) : (
-                  <ChevronUp className="h-4 w-4" />
-                )}
-              </Button>
             {selectedItems.size > 0 && (
               <Button
                 size="sm"
