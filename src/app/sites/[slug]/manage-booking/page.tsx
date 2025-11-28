@@ -614,7 +614,13 @@ export default function ManageBookingPage() {
                     required
                   />
                   <p className="text-xs text-slate-500">
-                    Current pick-up: {new Date(booking.end_at).toLocaleString()}
+                    Current pick-up: {new Date(booking.end_at).toLocaleString('en-GB', { 
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
                   </p>
                 </div>
                 <div className="flex items-center gap-3">

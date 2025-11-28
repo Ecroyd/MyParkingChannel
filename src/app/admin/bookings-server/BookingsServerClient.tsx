@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { CalendarDays, Search, Plus, Filter, Trash2, Eye, Edit } from 'lucide-react';
+import { CalendarDays, Search, Plus, Filter, Trash2, Eye, Edit, ArrowUpDown } from 'lucide-react';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
 import { toast } from 'sonner';
 
@@ -24,6 +24,7 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [sortOrder, setSortOrder] = useState<'closest' | 'most_recent'>('closest');
   const [selectedBookings, setSelectedBookings] = useState<Set<string>>(new Set());
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -85,13 +86,31 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
     );
   };
 
-  // Filter bookings when date range or search changes
+  const sortBookings = (bookings: any[], sortOrder: 'closest' | 'most_recent') => {
+    const sorted = [...bookings];
+    sorted.sort((a, b) => {
+      const dateA = new Date(a.start_at).getTime();
+      const dateB = new Date(b.start_at).getTime();
+      
+      if (sortOrder === 'closest') {
+        // Closest date first (ascending)
+        return dateA - dateB;
+      } else {
+        // Most recent first (descending)
+        return dateB - dateA;
+      }
+    });
+    return sorted;
+  };
+
+  // Filter and sort bookings when filters or sort order changes
   useEffect(() => {
     const dateRangeObj = getDateRange();
     const dateFiltered = filterBookingsByDate(bookings, dateRangeObj);
     const searchFiltered = filterBookingsBySearch(dateFiltered, searchTerm);
-    setFilteredBookings(searchFiltered);
-  }, [dateRange, customStartDate, customEndDate, searchTerm, bookings]);
+    const sorted = sortBookings(searchFiltered, sortOrder);
+    setFilteredBookings(sorted);
+  }, [dateRange, customStartDate, customEndDate, searchTerm, sortOrder, bookings]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -104,7 +123,7 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-GB', {
+    return new Date(dateString).toLocaleString('en-GB', {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
@@ -247,6 +266,23 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
                   className="pl-10"
                 />
               </div>
+            </div>
+
+            {/* Sort Order */}
+            <div className="space-y-2">
+              <Label htmlFor="sortOrder">Sort By</Label>
+              <Select value={sortOrder} onValueChange={(value: 'closest' | 'most_recent') => setSortOrder(value)}>
+                <SelectTrigger>
+                  <div className="flex items-center gap-2">
+                    <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                    <SelectValue placeholder="Sort order" />
+                  </div>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="closest">Closest First</SelectItem>
+                  <SelectItem value="most_recent">Most Recent</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </CardContent>

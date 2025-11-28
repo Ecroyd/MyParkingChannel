@@ -295,7 +295,10 @@ export default function FlightsToday() {
                     <div className="font-medium">
                       {new Date(
                         flightDetails.scheduled_departure
-                      ).toLocaleTimeString([], {
+                      ).toLocaleString('en-GB', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
@@ -308,7 +311,10 @@ export default function FlightsToday() {
                     <div className="font-medium">
                       {new Date(
                         flightDetails.estimated_departure
-                      ).toLocaleTimeString([], {
+                      ).toLocaleString('en-GB', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
@@ -321,7 +327,10 @@ export default function FlightsToday() {
                     <div className="font-medium">
                       {new Date(
                         flightDetails.scheduled_arrival
-                      ).toLocaleTimeString([], {
+                      ).toLocaleString('en-GB', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
@@ -334,7 +343,10 @@ export default function FlightsToday() {
                     <div className="font-medium">
                       {new Date(
                         flightDetails.estimated_arrival
-                      ).toLocaleTimeString([], {
+                      ).toLocaleString('en-GB', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
@@ -436,7 +448,13 @@ function FlightList({
 
 function timeLabel(estimated: string | null, scheduled: string | null) {
   const fmt = (iso: string) =>
-    new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    new Date(iso).toLocaleString('en-GB', { 
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: "2-digit", 
+      minute: "2-digit" 
+    });
   if (estimated && scheduled && estimated !== scheduled) {
     return `ETA ${fmt(estimated)} (sched ${fmt(scheduled)})`;
   }

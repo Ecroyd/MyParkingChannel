@@ -150,7 +150,7 @@ export function DeparturesTable({ tenantSlug, onBookingUpdate }: DeparturesTable
                     <div>
                       <div className="font-medium">{booking.reference}</div>
                       <div className="text-sm text-muted-foreground">
-                        {format(parseISO(booking.start_at), 'HH:mm')} - {format(parseISO(booking.end_at), 'HH:mm')}
+                        {format(parseISO(booking.start_at), 'dd/MM/yyyy HH:mm')} - {format(parseISO(booking.end_at), 'dd/MM/yyyy HH:mm')}
                       </div>
                     </div>
                     <div className="flex items-center space-x-2">

@@ -90,7 +90,7 @@ async function SuccessContent({ searchParams }: { searchParams: Promise<{ tenant
   }
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-GB', {
+    return new Date(dateString).toLocaleString('en-GB', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
@@ -138,11 +138,11 @@ async function SuccessContent({ searchParams }: { searchParams: Promise<{ tenant
         <h2 className="text-xl font-semibold mb-4">Parking Details</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <p className="text-sm text-gray-500">Arrival Date</p>
+            <p className="text-sm text-gray-500">Arrival Date & Time</p>
             <p className="font-semibold">{formatDate(booking.start_at)}</p>
           </div>
           <div>
-            <p className="text-sm text-gray-500">Departure Date</p>
+            <p className="text-sm text-gray-500">Departure Date & Time</p>
             <p className="font-semibold">{formatDate(booking.end_at)}</p>
           </div>
           <div>

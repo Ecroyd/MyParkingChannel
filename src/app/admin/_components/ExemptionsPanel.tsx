@@ -5,9 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 import { useTenant } from "@/hooks/useTenant";
 import { cn } from "@/lib/utils";
-import { Loader2, RefreshCw, AlertTriangle, Clock, Shield, Camera, CheckSquare, ChevronDown, ChevronUp, X } from "lucide-react";
+import { Loader2, RefreshCw, AlertTriangle, Clock, Shield, Camera, CheckSquare, ChevronDown, ChevronUp, X, ArrowUpDown } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { toMoney } from "@/lib/money";
 
@@ -53,6 +55,7 @@ export default function ExemptionsPanel() {
   const { tenantId, loading: tenantLoading } = useTenant();
   const [items, setItems] = useState<Exemption[]>([]);
   const [filter, setFilter] = useState<Exemption["exemption_type"] | "ALL">("ALL");
+  const [sortOrder, setSortOrder] = useState<'closest' | 'most_recent'>('closest');
   const [isLoading, setLoading] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [resolving, setResolving] = useState(false);
@@ -109,8 +112,24 @@ export default function ExemptionsPanel() {
   }, [tenantId]);
 
   const filtered = useMemo(() => {
-    return filter === "ALL" ? items : items.filter((i) => i.exemption_type === filter);
-  }, [items, filter]);
+    const filteredItems = filter === "ALL" ? items : items.filter((i) => i.exemption_type === filter);
+    
+    // Sort by breach_point date
+    const sorted = [...filteredItems];
+    sorted.sort((a, b) => {
+      const dateA = new Date(a.breach_point).getTime();
+      const dateB = new Date(b.breach_point).getTime();
+      
+      if (sortOrder === 'closest') {
+        // Closest date first (ascending)
+        return dateA - dateB;
+      } else {
+        // Most recent first (descending)
+        return dateB - dateA;
+      }
+    });
+    return sorted;
+  }, [items, filter, sortOrder]);
 
   const counts = useMemo(() => {
     const counts: Record<string, number> = { ALL: items.length };
@@ -337,6 +356,21 @@ export default function ExemptionsPanel() {
               )}
             </div>
             <div className="flex gap-2 flex-wrap items-center">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="exemptionsSort" className="text-sm text-gray-600">Sort:</Label>
+                <Select value={sortOrder} onValueChange={(value: 'closest' | 'most_recent') => setSortOrder(value)}>
+                  <SelectTrigger className="w-[140px] h-8">
+                    <div className="flex items-center gap-2">
+                      <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                      <SelectValue />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="closest">Closest First</SelectItem>
+                    <SelectItem value="most_recent">Most Recent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <Button
                 size="sm"
                 variant="ghost"

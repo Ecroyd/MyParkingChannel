@@ -146,7 +146,7 @@ function TableWithToolbar({
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-600">
             <tr>
-              <Th>Time</Th>
+              <Th>Date & Time</Th>
               <Th>Reference</Th>
               <Th>Customer</Th>
               <Th>Plate</Th>
@@ -160,7 +160,10 @@ function TableWithToolbar({
               <tr><td colSpan={7} className="p-6 text-center text-gray-400">No {type} yet.</td></tr>
             ) : rows.map((r) => {
               const timeField = type === 'arrivals' ? r.start_at : r.end_at
-              const time = new Date(timeField).toLocaleTimeString('en-US', { 
+              const time = new Date(timeField).toLocaleString('en-GB', { 
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
                 hour: '2-digit', 
                 minute: '2-digit',
                 hour12: false 

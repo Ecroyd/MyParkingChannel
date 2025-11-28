@@ -90,8 +90,20 @@ export default function BookingDetailsModal({
                   <Info label="Make" value={booking.car_make || '—'} />
                   <Info label="Model" value={booking.car_model || '—'} />
                   <Info label="Colour" value={booking.car_color || '—'} />
-                  <Info label="Start" value={new Date(booking.start_at).toLocaleString()} />
-                  <Info label="End" value={new Date(booking.end_at).toLocaleString()} />
+                  <Info label="Arrival Date & Time" value={new Date(booking.start_at).toLocaleString('en-GB', { 
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })} />
+                  <Info label="Departure Date & Time" value={new Date(booking.end_at).toLocaleString('en-GB', { 
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })} />
                   <Info label="Charged" value={toMoney(Math.round((booking.money_charged ?? 0) * 100))} />
                   <Info label="Flight" value={booking.flight_number || '—'} />
                   <div className="col-span-2">

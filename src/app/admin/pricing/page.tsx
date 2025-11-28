@@ -127,7 +127,7 @@ function TiersPane(){
 function SeasonsPane(){
   const [seasons,setSeasons]=useState<Season[]>([]);
   const [ranges,setRanges]=useState<Record<string,SeasonRange[]>>({});
-  const [draft,setDraft]=useState<Partial<Season>>({code:"summer",name:"Summer",color:"#22c55e"});
+  const [draft,setDraft]=useState<Partial<Season & {startDate:string;endDate:string}>>({code:"summer",name:"Summer",color:"#22c55e"});
 
   const load=async()=>{
     const r=await api.get("/api/pricing/seasons"); const j=await r.json();
@@ -143,8 +143,28 @@ function SeasonsPane(){
   useEffect(()=>{ load(); },[]);
 
   const add=async()=>{
-    const r=await api.post("/api/pricing/seasons",draft); const j=await r.json();
-    if(j.error) toast.error(j.error); else { toast.success("Season added"); setDraft({}); load(); }
+    if(!draft.code || !draft.name) {
+      return toast.error("Code and name are required");
+    }
+    const r=await api.post("/api/pricing/seasons",{code:draft.code,name:draft.name,color:draft.color}); 
+    const j=await r.json();
+    if(j.error) {
+      toast.error(j.error);
+    } else {
+      toast.success("Season added");
+      // If date range is provided, add it
+      if(draft.startDate && draft.endDate) {
+        const rangeR=await api.post(`/api/pricing/seasons/${j.data.id}/ranges`,{start:draft.startDate,end:draft.endDate});
+        const rangeJ=await rangeR.json();
+        if(rangeJ.error) {
+          toast.error(`Season created but range failed: ${rangeJ.error}`);
+        } else {
+          toast.success("Season and date range added");
+        }
+      }
+      setDraft({code:"",name:"",color:"#22c55e",startDate:"",endDate:""}); 
+      load(); 
+    }
   };
 
   const addRange=async(seasonId:string,start:string,end:string)=>{
@@ -159,6 +179,8 @@ function SeasonsPane(){
           <Input placeholder="Code" value={draft.code||""} onChange={v=>setDraft(d=>({...d,code:v}))}/>
           <Input placeholder="Name" value={draft.name||""} onChange={v=>setDraft(d=>({...d,name:v}))}/>
           <Input placeholder="Color #RRGGBB" value={draft.color||""} onChange={v=>setDraft(d=>({...d,color:v}))}/>
+          <Input type="date" placeholder="Start Date (optional)" value={draft.startDate||""} onChange={v=>setDraft(d=>({...d,startDate:v}))}/>
+          <Input type="date" placeholder="End Date (optional)" value={draft.endDate||""} onChange={v=>setDraft(d=>({...d,endDate:v}))}/>
         </div>
         <div className="mt-4"><Button onClick={add}>Save Season</Button></div>
       </Card>

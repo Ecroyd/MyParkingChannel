@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { LogIn, LogOut, Car, DollarSign } from 'lucide-react';
+import { LogIn, LogOut, Car, DollarSign, ArrowUpDown } from 'lucide-react';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
 import DateRangeSelector from '@/components/admin/DateRangeSelector';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 
 interface Booking {
   id: string;
@@ -67,6 +69,9 @@ export default function TodayServerClient({
   const [arrivals, setArrivals] = useState(initialArrivals);
   const [departures, setDepartures] = useState(initialDepartures);
   const [currentlyParked, setCurrentlyParked] = useState(initialCurrentlyParked);
+  const [arrivalsSort, setArrivalsSort] = useState<'closest' | 'most_recent'>('closest');
+  const [departuresSort, setDeparturesSort] = useState<'closest' | 'most_recent'>('closest');
+  const [parkedSort, setParkedSort] = useState<'closest' | 'most_recent'>('closest');
 
   const handleBookingClick = (booking: Booking) => {
     setSelectedBookingId(booking.id);
@@ -107,6 +112,35 @@ export default function TodayServerClient({
   const handleDateRangeChange = (dateRange: { from: string; to: string }) => {
     fetchDataForDateRange(dateRange.from, dateRange.to);
   };
+
+  const sortBookings = (bookings: Booking[], sortOrder: 'closest' | 'most_recent', dateField: 'start_at' | 'end_at') => {
+    const sorted = [...bookings];
+    sorted.sort((a, b) => {
+      const dateA = new Date(a[dateField]).getTime();
+      const dateB = new Date(b[dateField]).getTime();
+      
+      if (sortOrder === 'closest') {
+        // Closest date first (ascending)
+        return dateA - dateB;
+      } else {
+        // Most recent first (descending)
+        return dateB - dateA;
+      }
+    });
+    return sorted;
+  };
+
+  const sortedArrivals = useMemo(() => {
+    return sortBookings(arrivals, arrivalsSort, 'start_at');
+  }, [arrivals, arrivalsSort]);
+
+  const sortedDepartures = useMemo(() => {
+    return sortBookings(departures, departuresSort, 'end_at');
+  }, [departures, departuresSort]);
+
+  const sortedCurrentlyParked = useMemo(() => {
+    return sortBookings(currentlyParked, parkedSort, 'start_at');
+  }, [currentlyParked, parkedSort]);
 
   const StatCard = ({ label, value, delta, variant, rightSlot }: {
     label: string;
@@ -175,7 +209,14 @@ export default function TodayServerClient({
           {booking.plate}
         </td>
         <td className="px-4 py-3 text-sm text-gray-900">
-          {new Date(time).toLocaleTimeString('en-GB', { timeZone: 'UTC' })}
+          {new Date(time).toLocaleString('en-GB', { 
+            timeZone: 'UTC',
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          })}
         </td>
         <td className="px-4 py-3 text-sm text-gray-900">
           £{booking.money_charged || 0}
@@ -249,8 +290,27 @@ export default function TodayServerClient({
         {/* Arrivals */}
         <section className="bg-white rounded-lg border border-gray-200">
           <div className="p-4 border-b border-gray-200">
-            <h2 className="text-lg font-semibold text-gray-900">Arrivals</h2>
-            <p className="text-sm text-gray-600">Incoming bookings</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Arrivals</h2>
+                <p className="text-sm text-gray-600">Incoming bookings</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="arrivalsSort" className="text-sm text-gray-600">Sort:</Label>
+                <Select value={arrivalsSort} onValueChange={(value: 'closest' | 'most_recent') => setArrivalsSort(value)}>
+                  <SelectTrigger className="w-[140px]">
+                    <div className="flex items-center gap-2">
+                      <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                      <SelectValue />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="closest">Closest First</SelectItem>
+                    <SelectItem value="most_recent">Most Recent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -259,16 +319,16 @@ export default function TodayServerClient({
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reference</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Plate</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date & Time</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {arrivals.map((booking) => (
+                {sortedArrivals.map((booking) => (
                   <BookingRow key={booking.id} booking={booking} type="arrival" />
                 ))}
-                {arrivals.length === 0 && (
+                {sortedArrivals.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
                       No arrivals in this period
@@ -283,8 +343,27 @@ export default function TodayServerClient({
         {/* Departures */}
         <section className="bg-white rounded-lg border border-gray-200">
           <div className="p-4 border-b border-gray-200">
-            <h2 className="text-lg font-semibold text-gray-900">Departures</h2>
-            <p className="text-sm text-gray-600">Outgoing bookings</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Departures</h2>
+                <p className="text-sm text-gray-600">Outgoing bookings</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="departuresSort" className="text-sm text-gray-600">Sort:</Label>
+                <Select value={departuresSort} onValueChange={(value: 'closest' | 'most_recent') => setDeparturesSort(value)}>
+                  <SelectTrigger className="w-[140px]">
+                    <div className="flex items-center gap-2">
+                      <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                      <SelectValue />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="closest">Closest First</SelectItem>
+                    <SelectItem value="most_recent">Most Recent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -293,16 +372,16 @@ export default function TodayServerClient({
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reference</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Plate</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date & Time</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {departures.map((booking) => (
+                {sortedDepartures.map((booking) => (
                   <BookingRow key={booking.id} booking={booking} type="departure" />
                 ))}
-                {departures.length === 0 && (
+                {sortedDepartures.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
                       No departures in this period
@@ -317,8 +396,27 @@ export default function TodayServerClient({
         {/* Currently Parked */}
         <section className="bg-white rounded-lg border border-gray-200">
           <div className="p-4 border-b border-gray-200">
-            <h2 className="text-lg font-semibold text-gray-900">Currently Parked</h2>
-            <p className="text-sm text-gray-600">Cars currently in the parking lot</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Currently Parked</h2>
+                <p className="text-sm text-gray-600">Cars currently in the parking lot</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="parkedSort" className="text-sm text-gray-600">Sort:</Label>
+                <Select value={parkedSort} onValueChange={(value: 'closest' | 'most_recent') => setParkedSort(value)}>
+                  <SelectTrigger className="w-[140px]">
+                    <div className="flex items-center gap-2">
+                      <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                      <SelectValue />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="closest">Closest First</SelectItem>
+                    <SelectItem value="most_recent">Most Recent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -333,10 +431,10 @@ export default function TodayServerClient({
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {currentlyParked.map((booking) => (
+                {sortedCurrentlyParked.map((booking) => (
                   <BookingRow key={booking.id} booking={booking} type="parked" />
                 ))}
-                {currentlyParked.length === 0 && (
+                {sortedCurrentlyParked.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
                       No cars currently parked
@@ -352,7 +450,7 @@ export default function TodayServerClient({
       {/* Booking Details Modal */}
       {selectedBookingId && (
         <BookingDetailsModal
-          booking={[...arrivals, ...departures, ...currentlyParked].find(b => b.id === selectedBookingId) || null}
+          booking={[...sortedArrivals, ...sortedDepartures, ...sortedCurrentlyParked].find(b => b.id === selectedBookingId) || null}
           open={!!selectedBookingId}
           onClose={() => setSelectedBookingId(null)}
           onBookingUpdated={() => {
