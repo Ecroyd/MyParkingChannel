@@ -25,6 +25,7 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
   const [customEndDate, setCustomEndDate] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortOrder, setSortOrder] = useState<'closest' | 'most_recent'>('closest');
+  const [showFinishedBookings, setShowFinishedBookings] = useState(false);
   const [selectedBookings, setSelectedBookings] = useState<Set<string>>(new Set());
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -86,6 +87,16 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
     );
   };
 
+  const filterFinishedBookings = (bookings: any[], showFinished: boolean) => {
+    if (showFinished) return bookings;
+    
+    const now = new Date();
+    return bookings.filter(booking => {
+      const endDate = new Date(booking.end_at);
+      return endDate >= now;
+    });
+  };
+
   const sortBookings = (bookings: any[], sortOrder: 'closest' | 'most_recent') => {
     const sorted = [...bookings];
     sorted.sort((a, b) => {
@@ -108,9 +119,10 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
     const dateRangeObj = getDateRange();
     const dateFiltered = filterBookingsByDate(bookings, dateRangeObj);
     const searchFiltered = filterBookingsBySearch(dateFiltered, searchTerm);
-    const sorted = sortBookings(searchFiltered, sortOrder);
+    const finishedFiltered = filterFinishedBookings(searchFiltered, showFinishedBookings);
+    const sorted = sortBookings(finishedFiltered, sortOrder);
     setFilteredBookings(sorted);
-  }, [dateRange, customStartDate, customEndDate, searchTerm, sortOrder, bookings]);
+  }, [dateRange, customStartDate, customEndDate, searchTerm, sortOrder, showFinishedBookings, bookings]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -326,14 +338,26 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
           ) : (
             <div className="space-y-4">
               {/* Select All Header */}
-              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                <Checkbox
-                  checked={selectedBookings.size === filteredBookings.length && filteredBookings.length > 0}
-                  onCheckedChange={handleSelectAll}
-                />
-                <span className="text-sm font-medium text-gray-700">
-                  Select All ({filteredBookings.length} bookings)
-                </span>
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <Checkbox
+                    checked={selectedBookings.size === filteredBookings.length && filteredBookings.length > 0}
+                    onCheckedChange={handleSelectAll}
+                  />
+                  <span className="text-sm font-medium text-gray-700">
+                    Select All ({filteredBookings.length} bookings)
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="showFinished"
+                    checked={showFinishedBookings}
+                    onCheckedChange={(checked) => setShowFinishedBookings(checked as boolean)}
+                  />
+                  <label htmlFor="showFinished" className="text-sm font-medium text-gray-700 cursor-pointer">
+                    Show finished bookings
+                  </label>
+                </div>
               </div>
 
               {filteredBookings.map((booking) => (
