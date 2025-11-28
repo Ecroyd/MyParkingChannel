@@ -39,7 +39,7 @@ export const ADMIN_NAV: NavNode[] = [
   },
   { key: "partner-apis", label: "Partner APIs", href: "/admin/partner-apis", section: "Sites & Integrations" },
   { key: "devices", label: "Gate Devices", href: "/admin/devices", section: "Sites & Integrations", feature: "devices" },
-  { key: "anpr", label: "ANPR / Gate Control", href: "/admin/anpr", section: "Sites & Integrations", feature: "devices" },
+  { key: "anpr", label: "ANPR / Gate Control", href: "/admin/anpr", section: "Sites & Integrations" },
 
       // ——— Platform Management (Admin Only) ———
       { key: "applications", label: "Applications", href: "/admin/applications", section: "Platform Management", feature: "platform_admin" },
