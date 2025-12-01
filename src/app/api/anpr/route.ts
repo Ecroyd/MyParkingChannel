@@ -68,20 +68,29 @@ export async function POST(request: Request) {
       result = 'allow'
       reason = 'Valid check-in'
       
-      // Update booking status
+      // Update booking status, timestamps, and gate_status
       await supabase
         .from('bookings')
-        .update({ status: 'checked_in' })
+        .update({ 
+          status: 'checked_in',
+          checked_in_at: eventTime.toISOString(),
+          checked_out_at: null,
+          gate_status: 'arrived'
+        })
         .eq('id', booking.id)
     } else if (booking.status === 'checked_in' && timeToEnd <= 30) {
       // Check-out: within 30 minutes of end time
       result = 'allow'
       reason = 'Valid check-out'
       
-      // Update booking status
+      // Update booking status, timestamps, and gate_status
       await supabase
         .from('bookings')
-        .update({ status: 'checked_out' })
+        .update({ 
+          status: 'checked_out',
+          checked_out_at: eventTime.toISOString(),
+          gate_status: 'departed'
+        })
         .eq('id', booking.id)
     } else if (booking.status === 'checked_in') {
       result = 'allow'

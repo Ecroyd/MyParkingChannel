@@ -67,7 +67,10 @@ export async function POST(req: NextRequest) {
         // Mark booking as checked out
         const query = adminClient
           .from("bookings")
-          .update({ checked_out_at: resolvedAt })
+          .update({ 
+            checked_out_at: resolvedAt,
+            gate_status: 'departed'
+          })
           .eq("id", ex.bookingId);
         // Convert PromiseLike to Promise
         bookingUpdatePromises.push(
@@ -77,7 +80,10 @@ export async function POST(req: NextRequest) {
         // Mark booking as checked in (they showed up late)
         const query = adminClient
           .from("bookings")
-          .update({ checked_in_at: resolvedAt })
+          .update({ 
+            checked_in_at: resolvedAt,
+            gate_status: 'arrived'
+          })
           .eq("id", ex.bookingId);
         // Convert PromiseLike to Promise
         bookingUpdatePromises.push(

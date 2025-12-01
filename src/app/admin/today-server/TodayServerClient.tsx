@@ -7,7 +7,7 @@ import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
 import DateRangeSelector from '@/components/admin/DateRangeSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { getGateStatus, GateStatus } from '@/lib/bookings/gateStatus';
+import { GateStatus } from '@/lib/bookings/gateStatus';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 
@@ -34,6 +34,7 @@ interface Booking {
   payment_status?: string | null;
   checked_in_at: string | null;
   checked_out_at: string | null;
+  gate_status?: string | null;
 }
 
 interface Tenant {
@@ -228,40 +229,32 @@ export default function TodayServerClient({
     const { toast } = useToast();
     const time = type === 'arrival' ? booking.start_at : booking.end_at;
     
-    const initialGateStatus = getGateStatus({
-      checked_in_at: booking.checked_in_at,
-      checked_out_at: booking.checked_out_at,
-      status: booking.status,
-    });
+    // Read gate_status directly from the booking, default to 'reserved' if not set
+    const initialGateStatus = (booking.gate_status as GateStatus) || 'reserved';
 
     const [gateStatus, setGateStatus] = useState<GateStatus>(initialGateStatus);
     const [isPending, startTransition] = useTransition();
-    const lastUpdateRef = useRef<{ checked_in_at: string | null; checked_out_at: string | null } | null>(null);
+    const lastUpdateRef = useRef<{ gate_status: string | null } | null>(null);
 
     // Sync gateStatus with booking prop changes (e.g., after router.refresh())
     // But don't override if we just updated and the data matches our last update
     useEffect(() => {
-      const currentGateStatus = getGateStatus({
-        checked_in_at: booking.checked_in_at,
-        checked_out_at: booking.checked_out_at,
-        status: booking.status,
-      });
+      const currentGateStatus = (booking.gate_status as GateStatus) || 'reserved';
       
       // Only update if the booking data is different from our last update
       // This prevents reverting our change during router.refresh()
       if (lastUpdateRef.current) {
         const isSameAsLastUpdate = 
-          booking.checked_in_at === lastUpdateRef.current.checked_in_at &&
-          booking.checked_out_at === lastUpdateRef.current.checked_out_at;
+          booking.gate_status === lastUpdateRef.current.gate_status;
         
-        if (isSameAsLastUpdate) {
+        if (isSameAsLastUpdate && lastUpdateRef.current.gate_status) {
           // This is likely stale data from router.refresh(), keep our current state
           return;
         }
       }
       
       setGateStatus(currentGateStatus);
-    }, [booking.checked_in_at, booking.checked_out_at, booking.status]);
+    }, [booking.gate_status]);
 
     const handleGateStatusChange = (newStatus: GateStatus) => {
       const prev = gateStatus;
@@ -292,16 +285,13 @@ export default function TodayServerClient({
 
           // Update local state with the response data
           if (responseData.booking) {
-            const updatedGateStatus = getGateStatus({
-              checked_in_at: responseData.booking.checked_in_at,
-              checked_out_at: responseData.booking.checked_out_at,
-              status: responseData.booking.status,
-            });
+            const updatedGateStatus = (responseData.booking.gate_status as GateStatus) || 'reserved';
             setGateStatus(updatedGateStatus);
             
             // Update the booking in the parent arrays directly
             const updatedBooking = {
               ...booking,
+              gate_status: responseData.booking.gate_status,
               checked_in_at: responseData.booking.checked_in_at,
               checked_out_at: responseData.booking.checked_out_at,
               status: responseData.booking.status,
@@ -316,20 +306,11 @@ export default function TodayServerClient({
             
             // Store the last update to prevent reverting during router.refresh()
             lastUpdateRef.current = {
-              checked_in_at: responseData.booking.checked_in_at,
-              checked_out_at: responseData.booking.checked_out_at,
+              gate_status: responseData.booking.gate_status,
             };
           } else {
             setGateStatus(newStatus);
-            // Estimate the timestamps based on the status
-            const now = new Date().toISOString();
-            if (newStatus === 'arrived') {
-              lastUpdateRef.current = { checked_in_at: now, checked_out_at: null };
-            } else if (newStatus === 'departed') {
-              lastUpdateRef.current = { checked_in_at: booking.checked_in_at || now, checked_out_at: now };
-            } else {
-              lastUpdateRef.current = { checked_in_at: null, checked_out_at: null };
-            }
+            lastUpdateRef.current = { gate_status: newStatus };
           }
           
           // Don't refresh immediately - let the local state update handle it

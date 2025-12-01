@@ -98,7 +98,8 @@ export async function POST(req: NextRequest) {
           .from('bookings')
           .update({ 
             checked_in_at: booking.checked_in_at || eventAt.toISOString(),
-            checked_out_at: null // Clear check-out if they're checking in again
+            checked_out_at: null, // Clear check-out if they're checking in again
+            gate_status: 'arrived'
           })
           .eq('id', booking.id);
       } else if (body.direction === 'exit') {
@@ -107,7 +108,8 @@ export async function POST(req: NextRequest) {
           .from('bookings')
           .update({ 
             checked_out_at: eventAt.toISOString(),
-            checked_in_at: booking.checked_in_at || eventAt.toISOString()
+            checked_in_at: booking.checked_in_at || eventAt.toISOString(),
+            gate_status: 'departed'
           })
           .eq('id', booking.id);
       }
