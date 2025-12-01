@@ -199,8 +199,38 @@ export async function POST(req: Request) {
     }
     
     // If we got here, dates parsed successfully
+    // Type guard: ensure both parsed dates are non-null strings
+    if (!startAtParsed || !endAtParsed) {
+      // This shouldn't happen if validation passed, but handle it safely
+      const reason = `startAt/endAt error: parsed dates are null after validation`;
+      const debugRow = {
+        ...r,
+        _debug_dates: {
+          startAtRaw,
+          endAtRaw,
+          startAtParsed,
+          endAtParsed,
+        }
+      };
+      await supabase
+        .from('booking_import_errors')
+        .insert({
+          tenant_id: tenantId,
+          import_run_id: run.id,
+          reason: reason,
+          row_data: debugRow,
+        });
+      dateErrorRows.push({
+        index: rows.indexOf(r) + 1,
+        row: r,
+        reason: reason
+      });
+      continue;
+    }
+    
     try {
-      const { start_utc, end_utc } = { start_utc: startAtParsed, end_utc: endAtParsed };
+      const start_utc: string = startAtParsed;
+      const end_utc: string = endAtParsed;
       const dedupe_key = makeImportDedupeKey({
         source: r.source,
         reference: r.reference,
