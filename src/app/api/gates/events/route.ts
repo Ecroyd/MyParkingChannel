@@ -91,16 +91,24 @@ export async function POST(req: NextRequest) {
       result = 'allow';
       reason = null;
 
-      // Optional: update check-in / check-out timestamps on the booking
+      // Update check-in / check-out timestamps on the booking
       if (body.direction === 'entry') {
+        // Only set checked_in_at if not already set (don't overwrite existing)
         await supabase
           .from('bookings')
-          .update({ checked_in_at: eventAt.toISOString() })
+          .update({ 
+            checked_in_at: booking.checked_in_at || eventAt.toISOString(),
+            checked_out_at: null // Clear check-out if they're checking in again
+          })
           .eq('id', booking.id);
       } else if (body.direction === 'exit') {
+        // Set checked_out_at, and ensure checked_in_at is set if missing
         await supabase
           .from('bookings')
-          .update({ checked_out_at: eventAt.toISOString() })
+          .update({ 
+            checked_out_at: eventAt.toISOString(),
+            checked_in_at: booking.checked_in_at || eventAt.toISOString()
+          })
           .eq('id', booking.id);
       }
     } else {

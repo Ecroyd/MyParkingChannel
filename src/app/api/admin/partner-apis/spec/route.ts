@@ -610,13 +610,10 @@ export async function GET(req: NextRequest) {
         const pdfBuffer = await markdownToPdfBuffer(markdown);
         console.log('PDF generated, buffer size:', pdfBuffer.length);
 
-        // Convert Buffer to ArrayBuffer for Response
-        const arrayBuffer = pdfBuffer.buffer.slice(
-          pdfBuffer.byteOffset,
-          pdfBuffer.byteOffset + pdfBuffer.byteLength
-        );
+        // Convert Buffer to Uint8Array for Response
+        const uint8Array = new Uint8Array(pdfBuffer);
 
-        return new Response(arrayBuffer, {
+        return new Response(uint8Array, {
           status: 200,
           headers: {
             'Content-Type': 'application/pdf',

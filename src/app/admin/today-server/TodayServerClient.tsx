@@ -1,12 +1,15 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { LogIn, LogOut, Car, DollarSign, ArrowUpDown } from 'lucide-react';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
 import DateRangeSelector from '@/components/admin/DateRangeSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { getGateStatus, GateStatus } from '@/lib/bookings/gateStatus';
+import { cn } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
 
 interface Booking {
   id: string;
@@ -29,6 +32,8 @@ interface Booking {
   notes: string | null;
   stripe_payment_intent_id?: string | null;
   payment_status?: string | null;
+  checked_in_at: string | null;
+  checked_out_at: string | null;
 }
 
 interface Tenant {
@@ -220,23 +225,83 @@ export default function TodayServerClient({
   };
 
   const BookingRow = ({ booking, type }: { booking: Booking; type: 'arrival' | 'departure' | 'parked' }) => {
+    const { toast } = useToast();
     const time = type === 'arrival' ? booking.start_at : booking.end_at;
-    const statusColor = {
-      'reserved': 'bg-yellow-100 text-yellow-800',
-      'checked_in': 'bg-green-100 text-green-800',
-      'checked_out': 'bg-gray-100 text-gray-800',
-      'cancelled': 'bg-red-100 text-red-800'
-    }[booking.status] || 'bg-gray-100 text-gray-800';
+    
+    const initialGateStatus = getGateStatus({
+      checked_in_at: booking.checked_in_at,
+      checked_out_at: booking.checked_out_at,
+    });
+
+    const [gateStatus, setGateStatus] = useState<GateStatus>(initialGateStatus);
+    const [isPending, startTransition] = useTransition();
+
+    const handleGateStatusChange = (newStatus: GateStatus) => {
+      const prev = gateStatus;
+      setGateStatus(newStatus);
+
+      startTransition(async () => {
+        try {
+          const res = await fetch(
+            `/api/admin/bookings/${booking.id}/gate-status`,
+            {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ gateStatus: newStatus }),
+            }
+          );
+
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.error || 'Failed to update gate status');
+          }
+
+          toast({
+            title: 'Gate status updated',
+            description: `Booking updated to ${newStatus}`,
+          });
+
+          // Refresh the page data
+          router.refresh();
+        } catch (err: any) {
+          console.error(err);
+          // revert on error
+          setGateStatus(prev);
+          toast({
+            title: 'Error',
+            description: err.message || 'Could not update gate status',
+            variant: 'destructive',
+          });
+        }
+      });
+    };
+
+    const gateStatusColor = {
+      'reserved': 'bg-slate-100 text-slate-700',
+      'arrived': 'bg-green-100 text-green-700',
+      'departed': 'bg-blue-100 text-blue-700'
+    }[gateStatus] || 'bg-gray-100 text-gray-800';
+
+    const gateStatusLabel = {
+      'reserved': 'Reserved',
+      'arrived': 'Arrived',
+      'departed': 'Departed'
+    }[gateStatus] || gateStatus;
 
     return (
       <tr 
-        className="hover:bg-gray-50 cursor-pointer"
-        onClick={() => handleBookingClick(booking)}
+        className="hover:bg-gray-50"
       >
-        <td className="px-4 py-3 text-sm font-medium text-gray-900">
+        <td 
+          className="px-4 py-3 text-sm font-medium text-gray-900 cursor-pointer"
+          onClick={() => handleBookingClick(booking)}
+        >
           {booking.reference}
         </td>
-        <td className="px-4 py-3 text-sm text-gray-900">
+        <td 
+          className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
+          onClick={() => handleBookingClick(booking)}
+        >
           <div className="flex items-center gap-2">
             {booking.customer_name}
             {(booking as any).is_incomplete && (
@@ -246,13 +311,22 @@ export default function TodayServerClient({
             )}
           </div>
         </td>
-        <td className="px-4 py-3 text-sm text-gray-900">
+        <td 
+          className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
+          onClick={() => handleBookingClick(booking)}
+        >
           {booking.plate}
         </td>
-        <td className="px-4 py-3 text-sm text-gray-900">
+        <td 
+          className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
+          onClick={() => handleBookingClick(booking)}
+        >
           {booking.flight_number || '-'}
         </td>
-        <td className="px-4 py-3 text-sm text-gray-900">
+        <td 
+          className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
+          onClick={() => handleBookingClick(booking)}
+        >
           {new Date(time).toLocaleString('en-GB', { 
             timeZone: 'UTC',
             day: '2-digit',
@@ -262,13 +336,33 @@ export default function TodayServerClient({
             minute: '2-digit'
           })}
         </td>
-        <td className="px-4 py-3 text-sm text-gray-900">
+        <td 
+          className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
+          onClick={() => handleBookingClick(booking)}
+        >
           £{booking.money_charged || 0}
         </td>
-        <td className="px-4 py-3">
-          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColor}`}>
-            {booking.status.replace('_', ' ')}
-          </span>
+        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+          <div className="inline-flex items-center gap-2">
+            <span
+              className={cn(
+                'inline-flex items-center rounded-full px-2 py-1 text-xs font-medium',
+                gateStatusColor
+              )}
+            >
+              {gateStatusLabel}
+            </span>
+            <select
+              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
+              value={gateStatus}
+              disabled={isPending}
+              onChange={(e) => handleGateStatusChange(e.target.value as GateStatus)}
+            >
+              <option value="reserved">Reserved</option>
+              <option value="arrived">Arrived</option>
+              <option value="departed">Departed</option>
+            </select>
+          </div>
         </td>
       </tr>
     );
