@@ -1,6 +1,7 @@
 // src/app/admin/dashboard-server/page.tsx
 import { createServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
+import { getTenantDateRange } from '@/lib/timezone';
 import DashboardClient from './DashboardClient';
 
 // Process chart data from bookings
@@ -110,6 +111,10 @@ export default async function DashboardServerPage() {
     );
   }
 
+  // Get today's date range in tenant timezone
+  const tenantTimezone = tenant.timezone || 'Europe/London';
+  const { startOfDayUTC, endOfDayUTC } = getTenantDateRange(tenantTimezone);
+
   // Get bookings data using admin client
   const today = new Date();
   const todayStr = today.toISOString().split('T')[0];
@@ -122,7 +127,7 @@ export default async function DashboardServerPage() {
   chartStartDate.setDate(chartStartDate.getDate() - 14);
   const chartStartStr = chartStartDate.toISOString().split('T')[0];
 
-  const [bookingsResult, recentBookingsResult, totalBookingsResult, chartBookingsResult] = await Promise.all([
+  const [bookingsResult, recentBookingsResult, totalBookingsResult, chartBookingsResult, arrivalsResult, departuresResult] = await Promise.all([
     adminClient
       .from('bookings')
       .select('money_received, status, start_at')
@@ -147,13 +152,35 @@ export default async function DashboardServerPage() {
       .select('start_at, end_at, source')
       .eq('tenant_id', tenant.id)
       .gte('start_at', `${chartStartStr}T00:00:00.000Z`)
+      .order('start_at', { ascending: true }),
+    
+    // Get today's arrivals (bookings starting today)
+    adminClient
+      .from('bookings')
+      .select('id, reference, customer_name, plate, start_at, status, flight_number')
+      .eq('tenant_id', tenant.id)
+      .gte('start_at', startOfDayUTC.toISOString())
+      .lt('start_at', endOfDayUTC.toISOString())
       .order('start_at', { ascending: true })
+      .limit(10),
+    
+    // Get today's departures (bookings ending today)
+    adminClient
+      .from('bookings')
+      .select('id, reference, customer_name, plate, end_at, status, flight_number')
+      .eq('tenant_id', tenant.id)
+      .gte('end_at', startOfDayUTC.toISOString())
+      .lt('end_at', endOfDayUTC.toISOString())
+      .order('end_at', { ascending: true })
+      .limit(10)
   ]);
 
   const bookings = bookingsResult.data || [];
   const recentBookings = recentBookingsResult.data || [];
   const totalBookingsCount = totalBookingsResult.count || 0;
   const chartBookings = chartBookingsResult.data || [];
+  const todayArrivals = arrivalsResult.data || [];
+  const todayDepartures = departuresResult.data || [];
 
   // Process chart data
   const chartData = processChartData(chartBookings, chartStartDate, today);
@@ -180,6 +207,8 @@ export default async function DashboardServerPage() {
       capacityData={capacityData}
       revenueData={revenueData}
       chartData={chartData}
+      todayArrivals={todayArrivals}
+      todayDepartures={todayDepartures}
     />
   );
 }

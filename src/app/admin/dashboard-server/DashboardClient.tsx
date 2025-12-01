@@ -1,13 +1,13 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import DemandCurve from '@/components/charts/DemandCurve';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
 import DateRangeModal from '@/components/admin/DateRangeModal';
 import { useDateRangeModal } from '@/hooks/useDateRangeModal';
 import { Calendar } from 'lucide-react';
 import ExemptionsPanel from '../_components/ExemptionsPanel';
-import FlightsToday from '../_components/FlightsToday';
 
 interface DashboardClientProps {
   user: any;
@@ -29,6 +29,8 @@ interface DashboardClientProps {
     out: number;
     capacity: number;
   }>;
+  todayArrivals: any[];
+  todayDepartures: any[];
 }
 
 export default function DashboardClient({
@@ -39,7 +41,9 @@ export default function DashboardClient({
   totalBookingsCount,
   capacityData,
   revenueData,
-  chartData
+  chartData,
+  todayArrivals,
+  todayDepartures
 }: DashboardClientProps) {
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const { isOpen, currentDateRange, openModal, closeModal, handleDateRangeChange } = useDateRangeModal();
@@ -137,8 +141,110 @@ export default function DashboardClient({
       {/* Exemptions Panel */}
       <ExemptionsPanel />
 
-      {/* Flights Today */}
-      <FlightsToday />
+      {/* Today's Arrivals and Departures */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-medium text-gray-900">Arrivals Today</h3>
+              <p className="text-sm text-gray-500">{todayArrivals.length} bookings</p>
+            </div>
+            <Link href="/admin/today-server" className="text-sm text-blue-600 hover:text-blue-700">
+              View all →
+            </Link>
+          </div>
+          <div className="space-y-2">
+            {todayArrivals.length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-4">No arrivals today</p>
+            ) : (
+              todayArrivals.map((booking) => (
+                <div
+                  key={booking.id}
+                  className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer"
+                  onClick={() => handleBookingClick(booking)}
+                >
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-gray-900">{booking.customer_name}</p>
+                      <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${
+                        booking.status === 'checked_in' ? 'bg-green-100 text-green-800' :
+                        booking.status === 'reserved' ? 'bg-yellow-100 text-yellow-800' :
+                        booking.status === 'checked_out' ? 'bg-gray-100 text-gray-800' :
+                        'bg-red-100 text-red-800'
+                      }`}>
+                        {booking.status.replace('_', ' ')}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 mt-1 text-sm text-gray-600">
+                      <span className="font-mono">{booking.plate}</span>
+                      {booking.flight_number && (
+                        <span>Flight: {booking.flight_number}</span>
+                      )}
+                      <span>
+                        {new Date(booking.start_at).toLocaleTimeString('en-GB', {
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-medium text-gray-900">Departures Today</h3>
+              <p className="text-sm text-gray-500">{todayDepartures.length} bookings</p>
+            </div>
+            <Link href="/admin/today-server" className="text-sm text-blue-600 hover:text-blue-700">
+              View all →
+            </Link>
+          </div>
+          <div className="space-y-2">
+            {todayDepartures.length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-4">No departures today</p>
+            ) : (
+              todayDepartures.map((booking) => (
+                <div
+                  key={booking.id}
+                  className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer"
+                  onClick={() => handleBookingClick(booking)}
+                >
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-gray-900">{booking.customer_name}</p>
+                      <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${
+                        booking.status === 'checked_in' ? 'bg-green-100 text-green-800' :
+                        booking.status === 'reserved' ? 'bg-yellow-100 text-yellow-800' :
+                        booking.status === 'checked_out' ? 'bg-gray-100 text-gray-800' :
+                        'bg-red-100 text-red-800'
+                      }`}>
+                        {booking.status.replace('_', ' ')}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 mt-1 text-sm text-gray-600">
+                      <span className="font-mono">{booking.plate}</span>
+                      {booking.flight_number && (
+                        <span>Flight: {booking.flight_number}</span>
+                      )}
+                      <span>
+                        {new Date(booking.end_at).toLocaleTimeString('en-GB', {
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -193,7 +299,7 @@ export default function DashboardClient({
       {/* Booking Details Modal */}
       {selectedBookingId && (
         <BookingDetailsModal
-          booking={recentBookings.find(b => b.id === selectedBookingId) || null}
+          booking={[...recentBookings, ...todayArrivals, ...todayDepartures].find(b => b.id === selectedBookingId) || null}
           open={!!selectedBookingId}
           onClose={() => setSelectedBookingId(null)}
           onBookingUpdated={() => {
