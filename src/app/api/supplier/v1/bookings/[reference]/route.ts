@@ -23,7 +23,7 @@ type BookingPatchBody = {
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { reference: string } }
+  { params }: { params: Promise<{ reference: string }> }
 ) {
   try {
     const rawKey = req.headers.get('x-api-key');
@@ -41,7 +41,8 @@ export async function GET(
       );
     }
 
-    const reference = decodeURIComponent(params.reference);
+    const { reference: refParam } = await params;
+    const reference = decodeURIComponent(refParam);
     const supabase = createAdminClient();
 
     const { data, error } = await supabase
@@ -112,7 +113,7 @@ export async function GET(
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { reference: string } }
+  { params }: { params: Promise<{ reference: string }> }
 ) {
   try {
     const rawKey = req.headers.get('x-api-key');
@@ -130,7 +131,8 @@ export async function PATCH(
       );
     }
 
-    const reference = decodeURIComponent(params.reference);
+    const { reference: refParam } = await params;
+    const reference = decodeURIComponent(refParam);
     const supabase = createAdminClient();
 
     // Load existing booking

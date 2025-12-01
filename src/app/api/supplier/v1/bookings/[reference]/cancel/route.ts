@@ -8,7 +8,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { reference: string } }
+  { params }: { params: Promise<{ reference: string }> }
 ) {
   try {
     const rawKey = req.headers.get('x-api-key');
@@ -26,7 +26,8 @@ export async function POST(
       );
     }
 
-    const reference = decodeURIComponent(params.reference);
+    const { reference: refParam } = await params;
+    const reference = decodeURIComponent(refParam);
     const supabase = createAdminClient();
 
     const { data: existing, error: existingError } = await supabase
