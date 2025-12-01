@@ -320,7 +320,7 @@ export async function GET(req: NextRequest) {
       try {
         const pdfBuffer = await markdownToPdfBuffer(markdown);
 
-        return new NextResponse(pdfBuffer, {
+        return new NextResponse(new Uint8Array(pdfBuffer), {
           status: 200,
           headers: {
             'Content-Type': 'application/pdf',
