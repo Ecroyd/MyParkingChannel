@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { CalendarDays, Search, Plus, Filter, Trash2, Eye, Edit, ArrowUpDown } from 'lucide-react';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
+import NewBookingModal from '@/components/bookings/NewBookingModal';
 import { toast } from 'sonner';
 
 interface BookingsServerClientProps {
@@ -29,6 +30,7 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
   const [showCancelledBookings, setShowCancelledBookings] = useState(false);
   const [selectedBookings, setSelectedBookings] = useState<Set<string>>(new Set());
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
+  const [newBookingModalOpen, setNewBookingModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const getDateRange = () => {
@@ -215,7 +217,10 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
           <h1 className="text-2xl font-semibold text-gray-900">Bookings</h1>
           <p className="text-gray-600">Manage bookings for {tenant?.name}</p>
         </div>
-        <Button className="bg-blue-600 hover:bg-blue-700">
+        <Button 
+          className="bg-blue-600 hover:bg-blue-700"
+          onClick={() => setNewBookingModalOpen(true)}
+        >
           <Plus className="w-4 h-4 mr-2" />
           New Booking
         </Button>
@@ -470,6 +475,17 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
           }}
         />
       )}
+
+      {/* New Booking Modal */}
+      <NewBookingModal
+        tenantId={tenant.id}
+        open={newBookingModalOpen}
+        onClose={() => setNewBookingModalOpen(false)}
+        onBookingCreated={() => {
+          // Refresh the page to get updated data
+          window.location.reload();
+        }}
+      />
     </div>
   );
 }

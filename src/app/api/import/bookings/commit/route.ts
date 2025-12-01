@@ -86,12 +86,15 @@ export async function POST(req: Request) {
 
   // Process the pre-processed preview data and filter out invalid rows
   const dateErrorRows: any[] = [];
+  const importErrors: Array<{ rowIndex: number; reason: string; rowData: any }> = [];
   
   // Parse dates using Postgres RPC function (handles all formats, converts to UTC)
   const tz = 'Europe/London';
-  const prepared: any[] = [];
+  const prepared: Array<{ booking: any; originalRowIndex: number; originalRow: any }> = [];
   
-  for (const r of rows) {
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const rowIndex = i + 1;
     // Capture raw values
     const startAtRaw = r.start_at;
     const endAtRaw = r.end_at;
@@ -181,7 +184,6 @@ export async function POST(req: Request) {
       };
       
       // Write error to booking_import_errors using supabaseAdmin
-      const rowIndex = rows.indexOf(r) + 1;
       await supabase
         .from('booking_import_errors')
         .insert({
@@ -198,6 +200,7 @@ export async function POST(req: Request) {
         row: r,
         reason: reason
       });
+      importErrors.push({ rowIndex, reason, rowData: debugRow });
       continue; // Skip this row
     }
     
@@ -215,7 +218,6 @@ export async function POST(req: Request) {
           endAtParsed,
         }
       };
-      const rowIndex = rows.indexOf(r) + 1;
       await supabase
         .from('booking_import_errors')
         .insert({
@@ -231,6 +233,7 @@ export async function POST(req: Request) {
         row: r,
         reason: reason
       });
+      importErrors.push({ rowIndex, reason, rowData: debugRow });
       continue;
     }
     
@@ -267,10 +270,105 @@ export async function POST(req: Request) {
         dedupe_key
       };
 
-      prepared.push(mapStagingToBookings(stagingRecord));
-    } catch (error) {
-      console.error(`Error processing row ${r.reference}:`, error);
-      // Skip this row
+      const mappedBooking = mapStagingToBookings(stagingRecord);
+      
+      // Additional validation on the mapped booking
+      const validationErrors: string[] = [];
+      
+      // Validate required fields
+      if (!mappedBooking.reference || (typeof mappedBooking.reference === 'string' && mappedBooking.reference.trim() === '')) {
+        validationErrors.push('missing or empty reference');
+      }
+      if (!mappedBooking.customer_name || (typeof mappedBooking.customer_name === 'string' && mappedBooking.customer_name.trim() === '')) {
+        validationErrors.push('missing or empty customer_name');
+      }
+      
+      // Validate dates one more time on the mapped object
+      if (!mappedBooking.start_at || (typeof mappedBooking.start_at === 'string' && mappedBooking.start_at.trim() === '')) {
+        validationErrors.push(`missing start_at parsed value (raw="${String(startAtRaw ?? "")}")`);
+      } else {
+        const d = new Date(mappedBooking.start_at);
+        if (isNaN(d.getTime())) {
+          validationErrors.push(`start_at parsed to invalid Date: "${mappedBooking.start_at}" (raw="${String(startAtRaw ?? "")}")`);
+        }
+      }
+      
+      if (!mappedBooking.end_at || (typeof mappedBooking.end_at === 'string' && mappedBooking.end_at.trim() === '')) {
+        validationErrors.push(`missing end_at parsed value (raw="${String(endAtRaw ?? "")}")`);
+      } else {
+        const d = new Date(mappedBooking.end_at);
+        if (isNaN(d.getTime())) {
+          validationErrors.push(`end_at parsed to invalid Date: "${mappedBooking.end_at}" (raw="${String(endAtRaw ?? "")}")`);
+        }
+      }
+      
+      if (mappedBooking.start_at && mappedBooking.end_at) {
+        const s = new Date(mappedBooking.start_at);
+        const e = new Date(mappedBooking.end_at);
+        if (!isNaN(s.getTime()) && !isNaN(e.getTime()) && e < s) {
+          validationErrors.push('end_at is before start_at');
+        }
+      }
+      
+      if (validationErrors.length > 0) {
+        const reason = `validation error: ${validationErrors.join('; ')}`;
+        const debugRow = {
+          ...mappedBooking,
+          _debug_dates: {
+            startAtRaw,
+            endAtRaw,
+            startAtParsed: mappedBooking.start_at,
+            endAtParsed: mappedBooking.end_at,
+          },
+        };
+        
+        await supabase
+          .from('booking_import_errors')
+          .insert({
+            tenant_id: tenantId,
+            import_file_id: null,
+            import_run_id: run.id,
+            row_index: rowIndex,
+            reason: reason,
+            row_data: debugRow,
+          });
+        
+        importErrors.push({ rowIndex, reason, rowData: debugRow });
+        continue;
+      }
+      
+      // Store the booking with its original row index for error tracking
+      prepared.push({
+        booking: mappedBooking,
+        originalRowIndex: rowIndex,
+        originalRow: r
+      });
+    } catch (error: any) {
+      const reason = `unexpected import error: ${error?.message ?? String(error)}`;
+      const debugRow = {
+        ...r,
+        _error: error?.stack ?? String(error),
+        _debug_dates: {
+          startAtRaw,
+          endAtRaw,
+          startAtParsed,
+          endAtParsed,
+        },
+      };
+      
+      await supabase
+        .from('booking_import_errors')
+        .insert({
+          tenant_id: tenantId,
+          import_file_id: null,
+          import_run_id: run.id,
+          row_index: rowIndex,
+          reason: reason,
+          row_data: debugRow,
+        });
+      
+      importErrors.push({ rowIndex, reason, rowData: debugRow });
+      console.error(`Error processing row ${rowIndex} (${r.reference}):`, error);
       continue;
     }
   }
@@ -282,74 +380,127 @@ export async function POST(req: Request) {
   }
   
   console.log("📊 Prepared records count:", prepared.length);
-  console.log("📊 Sample prepared record:", prepared[0]);
-  console.log("📊 Tenant ID in sample:", prepared[0]?.tenant_id);
-  console.log("📊 Source in sample:", prepared[0]?.source);
-  console.log("📊 Start_at in sample:", prepared[0]?.start_at);
-  console.log("📊 End_at in sample:", prepared[0]?.end_at);
+  console.log("📊 Sample prepared record:", prepared[0]?.booking);
+  console.log("📊 Tenant ID in sample:", prepared[0]?.booking?.tenant_id);
+  console.log("📊 Source in sample:", prepared[0]?.booking?.source);
+  console.log("📊 Start_at in sample:", prepared[0]?.booking?.start_at);
+  console.log("📊 End_at in sample:", prepared[0]?.booking?.end_at);
 
   let inserted = 0, updated = 0, skipped = 0, errors = 0;
   const serverErrors: string[] = [];
 
-  for (const chunk of chunked(prepared, 500)) {
-    // probe existing keys first so "skipped" is accurate
-    const keys = chunk.map(c => c.dedupe_key);
-    const { data: existing, error: probeErr } = await supabase
-      .from("bookings")
-      .select("dedupe_key")
-      .eq("tenant_id", tenantId)
-      .in("dedupe_key", keys);
-
-    if (probeErr) {
-      errors += chunk.length;
-      serverErrors.push(`probe: ${probeErr.message}`);
-      continue;
-    }
-
-    const existingSet = new Set((existing ?? []).map(e => e.dedupe_key));
-    const newRows = chunk.filter(c => !existingSet.has(c.dedupe_key));
-    const oldRows = chunk.filter(c => existingSet.has(c.dedupe_key));
-
-    if (overwriteDuplicates) {
-      console.log("🔄 Upserting chunk with", chunk.length, "records");
-      console.log("🔄 Sample chunk record:", chunk[0]);
-      console.log("🔄 Sample tenant_id:", chunk[0]?.tenant_id);
-      console.log("🔄 Sample source:", chunk[0]?.source);
-      
-      const { error: upErr } = await supabase
+  // Process each prepared booking individually to catch per-row errors
+  for (const item of prepared) {
+    const { booking, originalRowIndex, originalRow } = item;
+    
+    try {
+      // Check if booking already exists
+      const { data: existing, error: probeErr } = await supabase
         .from("bookings")
-        .upsert(chunk, { onConflict: "tenant_id,dedupe_key" });
-      if (upErr) {
-        console.error("❌ Upsert error:", upErr);
-        console.error("❌ Upsert error details:", upErr.details);
-        console.error("❌ Upsert error hint:", upErr.hint);
-        errors += chunk.length;
-        serverErrors.push(`upsert: ${upErr.message}`);
+        .select("id, dedupe_key")
+        .eq("tenant_id", tenantId)
+        .eq("dedupe_key", booking.dedupe_key)
+        .maybeSingle();
+
+      if (probeErr) {
+        const reason = `DB probe error: ${probeErr.message ?? probeErr.toString()}`;
+        await supabase
+          .from('booking_import_errors')
+          .insert({
+            tenant_id: tenantId,
+            import_file_id: null,
+            import_run_id: run.id,
+            row_index: originalRowIndex,
+            reason: reason,
+            row_data: booking,
+          });
+        importErrors.push({ rowIndex: originalRowIndex, reason, rowData: booking });
+        errors++;
         continue;
       }
-      inserted += newRows.length;
-      updated  += oldRows.length;
-    } else {
-      if (newRows.length) {
-        console.log("📥 Inserting", newRows.length, "new records");
-        console.log("📥 Sample new record:", newRows[0]);
-        console.log("📥 Sample tenant_id:", newRows[0]?.tenant_id);
-        console.log("📥 Sample source:", newRows[0]?.source);
-        
-        const { error: insErr, count } = await supabase
-          .from("bookings")
-          .insert(newRows, { count: "exact" });
-        if (insErr) {
-          console.error("❌ Insert error:", insErr);
-          console.error("❌ Insert error details:", insErr.details);
-          console.error("❌ Insert error hint:", insErr.hint);
-          errors += newRows.length;
-          serverErrors.push(`insert: ${insErr.message}`);
+
+      if (existing) {
+        // Booking already exists
+        if (overwriteDuplicates) {
+          // Update existing booking
+          const { error: updateErr } = await supabase
+            .from("bookings")
+            .update(booking)
+            .eq("id", existing.id)
+            .eq("tenant_id", tenantId);
+          
+          if (updateErr) {
+            const reason = `DB update error: ${updateErr.message ?? updateErr.toString()}`;
+            await supabase
+              .from('booking_import_errors')
+              .insert({
+                tenant_id: tenantId,
+                import_file_id: null,
+                import_run_id: run.id,
+                row_index: originalRowIndex,
+                reason: reason,
+                row_data: booking,
+              });
+            importErrors.push({ rowIndex: originalRowIndex, reason, rowData: booking });
+            errors++;
+          } else {
+            updated++;
+          }
         } else {
-          inserted += count ?? newRows.length;
+          // Skip duplicate
+          skipped++;
+        }
+      } else {
+        // Insert new booking
+        const { error: insErr } = await supabase
+          .from("bookings")
+          .insert(booking);
+        
+        if (insErr) {
+          const reason = `DB insert error: ${insErr.message ?? insErr.toString()}`;
+          const debugRow = {
+            ...booking,
+            _error_details: {
+              code: insErr.code,
+              details: insErr.details,
+              hint: insErr.hint,
+            },
+          };
+          await supabase
+            .from('booking_import_errors')
+            .insert({
+              tenant_id: tenantId,
+              import_file_id: null,
+              import_run_id: run.id,
+              row_index: originalRowIndex,
+              reason: reason,
+              row_data: debugRow,
+            });
+          importErrors.push({ rowIndex: originalRowIndex, reason, rowData: debugRow });
+          errors++;
+        } else {
+          inserted++;
         }
       }
-      skipped += oldRows.length;
+    } catch (err: any) {
+      const reason = `unexpected DB operation error: ${err?.message ?? String(err)}`;
+      const debugRow = {
+        ...booking,
+        _error: err?.stack ?? String(err),
+      };
+      await supabase
+        .from('booking_import_errors')
+        .insert({
+          tenant_id: tenantId,
+          import_file_id: null,
+          import_run_id: run.id,
+          row_index: originalRowIndex,
+          reason: reason,
+          row_data: debugRow,
+        });
+      importErrors.push({ rowIndex: originalRowIndex, reason, rowData: debugRow });
+      errors++;
+      console.error(`Error processing booking for row ${originalRowIndex} (${booking.reference}):`, err);
     }
   }
 
@@ -365,7 +516,8 @@ export async function POST(req: Request) {
     skipped, 
     errors,
     serverErrors,
-    invalidRows: dateErrorRows.length > 0 ? dateErrorRows : undefined
+    invalidRows: dateErrorRows.length > 0 ? dateErrorRows : undefined,
+    importErrors: importErrors.length > 0 ? importErrors : undefined
   };
   const status = errors ? 207 /* multi-status */ : 200;
   return NextResponse.json(result, { status });
