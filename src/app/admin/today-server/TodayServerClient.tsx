@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useTransition } from 'react';
+import React, { useState, useEffect, useMemo, useTransition, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { LogIn, LogOut, Car, DollarSign, ArrowUpDown } from 'lucide-react';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
@@ -235,6 +235,31 @@ export default function TodayServerClient({
 
     const [gateStatus, setGateStatus] = useState<GateStatus>(initialGateStatus);
     const [isPending, startTransition] = useTransition();
+    const lastUpdateRef = useRef<{ checked_in_at: string | null; checked_out_at: string | null } | null>(null);
+
+    // Sync gateStatus with booking prop changes (e.g., after router.refresh())
+    // But don't override if we just updated and the data matches our last update
+    useEffect(() => {
+      const currentGateStatus = getGateStatus({
+        checked_in_at: booking.checked_in_at,
+        checked_out_at: booking.checked_out_at,
+      });
+      
+      // Only update if the booking data is different from our last update
+      // This prevents reverting our change during router.refresh()
+      if (lastUpdateRef.current) {
+        const isSameAsLastUpdate = 
+          booking.checked_in_at === lastUpdateRef.current.checked_in_at &&
+          booking.checked_out_at === lastUpdateRef.current.checked_out_at;
+        
+        if (isSameAsLastUpdate) {
+          // This is likely stale data from router.refresh(), keep our current state
+          return;
+        }
+      }
+      
+      setGateStatus(currentGateStatus);
+    }, [booking.checked_in_at, booking.checked_out_at]);
 
     const handleGateStatusChange = (newStatus: GateStatus) => {
       const prev = gateStatus;
@@ -256,17 +281,51 @@ export default function TodayServerClient({
             throw new Error(body.error || 'Failed to update gate status');
           }
 
+          const responseData = await res.json();
+          
           toast({
             title: 'Gate status updated',
             description: `Booking updated to ${newStatus}`,
           });
 
-          // Refresh the page data
+          // Update local state with the response data
+          if (responseData.booking) {
+            const updatedGateStatus = getGateStatus({
+              checked_in_at: responseData.booking.checked_in_at,
+              checked_out_at: responseData.booking.checked_out_at,
+            });
+            setGateStatus(updatedGateStatus);
+            
+            // Store the last update to prevent reverting during router.refresh()
+            lastUpdateRef.current = {
+              checked_in_at: responseData.booking.checked_in_at,
+              checked_out_at: responseData.booking.checked_out_at,
+            };
+          } else {
+            setGateStatus(newStatus);
+            // Estimate the timestamps based on the status
+            const now = new Date().toISOString();
+            if (newStatus === 'arrived') {
+              lastUpdateRef.current = { checked_in_at: now, checked_out_at: null };
+            } else if (newStatus === 'departed') {
+              lastUpdateRef.current = { checked_in_at: booking.checked_in_at || now, checked_out_at: now };
+            } else {
+              lastUpdateRef.current = { checked_in_at: null, checked_out_at: null };
+            }
+          }
+          
+          // Refresh the page data to get updated booking info
           router.refresh();
+          
+          // Clear the ref after refresh completes (allow normal syncing again)
+          setTimeout(() => {
+            lastUpdateRef.current = null;
+          }, 1000);
         } catch (err: any) {
           console.error(err);
           // revert on error
           setGateStatus(prev);
+          lastUpdateRef.current = null;
           toast({
             title: 'Error',
             description: err.message || 'Could not update gate status',

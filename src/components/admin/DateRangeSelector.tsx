@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ChevronDownIcon } from 'lucide-react';
 
 interface DateRangeSelectorProps {
@@ -13,6 +13,13 @@ export default function DateRangeSelector({ onDateRangeChange }: DateRangeSelect
   const [customEndDate, setCustomEndDate] = useState('');
   const [showCustom, setShowCustom] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+
+  // Call onDateRangeChange on mount with initial "today" range
+  useEffect(() => {
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    onDateRangeChange({ from: todayStr, to: todayStr });
+  }, []); // Empty dependency array - only run on mount
 
   const handleRangeChange = (range: string) => {
     setSelectedRange(range);
