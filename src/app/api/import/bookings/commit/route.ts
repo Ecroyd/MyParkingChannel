@@ -101,10 +101,10 @@ export async function POST(req: Request) {
     
     // Check for missing raw values
     if (!startAtRaw || (typeof startAtRaw === 'string' && startAtRaw.trim() === '')) {
-      errors.push('missing raw startAt value');
+      errors.push('missing raw start_at value');
     }
     if (!endAtRaw || (typeof endAtRaw === 'string' && endAtRaw.trim() === '')) {
-      errors.push('missing raw endAt value');
+      errors.push('missing raw end_at value');
     }
     
     // Attempt to parse dates if we have raw values
@@ -122,32 +122,32 @@ export async function POST(req: Request) {
           });
         
         if (parseErr) {
-          errors.push(`could not parse startAt="${startAtRaw}"`);
-          errors.push(`could not parse endAt="${endAtRaw}"`);
+          errors.push(`could not parse start_at="${startAtRaw}"`);
+          errors.push(`could not parse end_at="${endAtRaw}"`);
         } else if (!parsed || parsed.length === 0) {
-          errors.push(`could not parse startAt="${startAtRaw}"`);
-          errors.push(`could not parse endAt="${endAtRaw}"`);
+          errors.push(`could not parse start_at="${startAtRaw}"`);
+          errors.push(`could not parse end_at="${endAtRaw}"`);
         } else {
           startAtParsed = parsed[0].start_utc || null;
           endAtParsed = parsed[0].end_utc || null;
           
           if (!startAtParsed) {
-            errors.push(`could not parse startAt="${startAtRaw}"`);
+            errors.push(`could not parse start_at="${startAtRaw}"`);
           } else {
             // Check if parsed date is invalid
             const startDate = new Date(startAtParsed);
             if (isNaN(startDate.getTime())) {
-              errors.push('startAt parsed to invalid date');
+              errors.push(`start_at parsed to invalid date: ${startAtParsed}`);
             }
           }
           
           if (!endAtParsed) {
-            errors.push(`could not parse endAt="${endAtRaw}"`);
+            errors.push(`could not parse end_at="${endAtRaw}"`);
           } else {
             // Check if parsed date is invalid
             const endDate = new Date(endAtParsed);
             if (isNaN(endDate.getTime())) {
-              errors.push('endAt parsed to invalid date');
+              errors.push(`end_at parsed to invalid date: ${endAtParsed}`);
             }
           }
           
@@ -156,19 +156,19 @@ export async function POST(req: Request) {
             const startDate = new Date(startAtParsed);
             const endDate = new Date(endAtParsed);
             if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime()) && endDate < startDate) {
-              errors.push('endAt is before startAt');
+              errors.push('end_at is before start_at');
             }
           }
         }
       } catch (err) {
-        errors.push(`could not parse startAt="${startAtRaw}"`);
-        errors.push(`could not parse endAt="${endAtRaw}"`);
+        errors.push(`could not parse start_at="${startAtRaw}"`);
+        errors.push(`could not parse end_at="${endAtRaw}"`);
       }
     }
     
     // If there are any errors, write to booking_import_errors and skip this row
     if (errors.length > 0) {
-      const reason = 'startAt/endAt error: ' + errors.join('; ');
+      const reason = `startAt/endAt error: ${errors.join('; ')}`;
       
       const debugRow = {
         ...r,
@@ -181,17 +181,20 @@ export async function POST(req: Request) {
       };
       
       // Write error to booking_import_errors using supabaseAdmin
+      const rowIndex = rows.indexOf(r) + 1;
       await supabase
         .from('booking_import_errors')
         .insert({
           tenant_id: tenantId,
+          import_file_id: null, // We use import_run_id instead
           import_run_id: run.id,
+          row_index: rowIndex,
           reason: reason,
           row_data: debugRow,
         });
       
       dateErrorRows.push({
-        index: rows.indexOf(r) + 1,
+        index: rowIndex,
         row: r,
         reason: reason
       });
@@ -212,16 +215,19 @@ export async function POST(req: Request) {
           endAtParsed,
         }
       };
+      const rowIndex = rows.indexOf(r) + 1;
       await supabase
         .from('booking_import_errors')
         .insert({
           tenant_id: tenantId,
+          import_file_id: null, // We use import_run_id instead
           import_run_id: run.id,
+          row_index: rowIndex,
           reason: reason,
           row_data: debugRow,
         });
       dateErrorRows.push({
-        index: rows.indexOf(r) + 1,
+        index: rowIndex,
         row: r,
         reason: reason
       });
