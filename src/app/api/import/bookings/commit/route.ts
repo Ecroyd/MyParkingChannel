@@ -127,8 +127,11 @@ export async function POST(req: Request) {
   // Process rows and insert bookings directly
   const errors: Array<{ rowIndex: number; reason: string; rowData: any }> = [];
   let successCount = 0;
+  let skippedCount = 0;
   const tz = 'Europe/London';
   const importFileId = null; // We use import_run_id instead
+
+  console.log(`[IMPORT] Starting to process ${rows.length} rows for tenant ${tenantId}`);
 
   for (let i = 0; i < rows.length; i++) {
     const raw = rows[i];
@@ -253,7 +256,9 @@ export async function POST(req: Request) {
           },
         };
 
+        console.log(`[IMPORT] Row ${rowIndex} failed date validation: ${reason}`);
         errors.push({ rowIndex, reason, rowData: debugRow });
+        console.log(`[IMPORT] Added error to errors array. Total errors: ${errors.length}`);
 
         await logImportError({
           tenantId,
@@ -278,7 +283,9 @@ export async function POST(req: Request) {
 
       if (probeErr) {
         const reason = `DB probe error: ${probeErr.message ?? probeErr.toString()}`;
+        console.log(`[IMPORT] Row ${rowIndex} failed DB probe: ${reason}`);
         errors.push({ rowIndex, reason, rowData: mappedRow });
+        console.log(`[IMPORT] Added error to errors array. Total errors: ${errors.length}`);
 
         await logImportError({
           tenantId,
@@ -304,7 +311,9 @@ export async function POST(req: Request) {
           
           if (updateErr) {
             const reason = `DB update error: ${updateErr.message ?? updateErr.toString()}`;
+            console.log(`[IMPORT] Row ${rowIndex} failed DB update: ${reason}`);
             errors.push({ rowIndex, reason, rowData: mappedRow });
+            console.log(`[IMPORT] Added error to errors array. Total errors: ${errors.length}`);
 
             await logImportError({
               tenantId,
@@ -316,10 +325,14 @@ export async function POST(req: Request) {
             });
 
             continue;
+          } else {
+            console.log(`[IMPORT] Row ${rowIndex} successfully updated existing booking`);
+            successCount++;
           }
         } else {
           // Skip duplicate - this is success, not an error
-          successCount++;
+          console.log(`[IMPORT] Row ${rowIndex} skipped (duplicate, overwriteDuplicates=false)`);
+          skippedCount++;
           continue;
         }
       } else {
@@ -330,7 +343,9 @@ export async function POST(req: Request) {
 
         if (insertError) {
           const reason = `DB insert error: ${insertError.message ?? insertError.toString()}`;
+          console.log(`[IMPORT] Row ${rowIndex} failed DB insert: ${reason}`);
           errors.push({ rowIndex, reason, rowData: mappedRow });
+          console.log(`[IMPORT] Added error to errors array. Total errors: ${errors.length}`);
 
           await logImportError({
             tenantId,
@@ -342,16 +357,18 @@ export async function POST(req: Request) {
           });
 
           continue;
+        } else {
+          console.log(`[IMPORT] Row ${rowIndex} successfully inserted new booking`);
+          successCount++;
         }
       }
-
-      // success for this row
-      successCount++;
     } catch (err: any) {
       const reason = `unexpected import error: ${
         err?.message ?? String(err)
       }`;
+      console.log(`[IMPORT] Row ${rowIndex} threw unexpected error: ${reason}`);
       errors.push({ rowIndex, reason, rowData: raw });
+      console.log(`[IMPORT] Added error to errors array. Total errors: ${errors.length}`);
 
       await logImportError({
         tenantId,
@@ -364,17 +381,24 @@ export async function POST(req: Request) {
     }
   }
 
+  console.log(`[IMPORT] Processing complete. Success: ${successCount}, Skipped: ${skippedCount}, Errors: ${errors.length}, Total rows: ${rows.length}`);
+
   await supabaseAdmin().from("import_runs")
-    .update({ inserted_count: successCount, skipped_duplicates: 0, error_count: errors.length })
+    .update({ inserted_count: successCount, skipped_duplicates: skippedCount, error_count: errors.length })
     .eq("id", run.id);
 
-  return NextResponse.json({
+  const result = {
     success: errors.length === 0,
     successCount,
+    skippedCount,
     errorCount: errors.length,
     errors,
     runId: run.id,
-  });
+  };
+
+  console.log(`[IMPORT] Final result:`, JSON.stringify(result, null, 2));
+
+  return NextResponse.json(result);
 }
 
 function* chunked<T>(arr: T[], size = 1000) {

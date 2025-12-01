@@ -228,9 +228,13 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
     }
     
     // Success! Clear all data and reset to upload ready state
+    const successCount = j.successCount ?? 0;
+    const skippedCount = j.skippedCount ?? 0;
+    const errorCount = j.errorCount ?? 0;
+    
     const msg = overwrite
-      ? `✅ Import successful!\nInserted: ${j.inserted}, Updated: ${j.updated}, Errors: ${j.errors}`
-      : `✅ Import successful!\nInserted: ${j.inserted}, Skipped (dupes): ${j.skipped}, Errors: ${j.errors}`;
+      ? `✅ Import complete!\n\nSuccess: ${successCount}\nSkipped: ${skippedCount}\nErrors: ${errorCount}`
+      : `✅ Import complete!\n\nSuccess: ${successCount}\nSkipped (duplicates): ${skippedCount}\nErrors: ${errorCount}`;
     
     alert(msg);
     
