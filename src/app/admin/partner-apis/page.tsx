@@ -198,6 +198,39 @@ export default function PartnerApisPage() {
     setTimeout(() => setCopiedKeyId(null), 2000);
   }
 
+  async function handleDownloadSpec(keyId: string, format: 'md' | 'pdf') {
+    try {
+      const url = `/api/admin/partner-apis/spec?keyId=${keyId}&format=${format}`;
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: { message: 'Download failed' } }));
+        toast({
+          title: "Error",
+          description: error.error?.message || 'Failed to download spec',
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = response.headers.get('Content-Disposition')?.split('filename=')[1]?.replace(/"/g, '') || `spec.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(downloadUrl);
+      document.body.removeChild(a);
+    } catch (err: any) {
+      toast({
+        title: "Error",
+        description: err.message || 'Failed to download spec',
+        variant: "destructive",
+      });
+    }
+  }
+
   function formatDate(dateString: string | null) {
     if (!dateString) return "Never";
     return new Date(dateString).toLocaleString();
@@ -281,26 +314,16 @@ export default function PartnerApisPage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            asChild
+                            onClick={() => handleDownloadSpec(key.id, 'md')}
                           >
-                            <a
-                              href={`/api/admin/partner-apis/spec?keyId=${key.id}&format=md`}
-                              download
-                            >
-                              .md
-                            </a>
+                            .md
                           </Button>
                           <Button
                             variant="outline"
                             size="sm"
-                            asChild
+                            onClick={() => handleDownloadSpec(key.id, 'pdf')}
                           >
-                            <a
-                              href={`/api/admin/partner-apis/spec?keyId=${key.id}&format=pdf`}
-                              download
-                            >
-                              PDF
-                            </a>
+                            PDF
                           </Button>
                         </div>
                         <Button

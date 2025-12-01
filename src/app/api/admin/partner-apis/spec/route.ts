@@ -302,9 +302,10 @@ export async function GET(req: NextRequest) {
 
     const adminClient = createAdminClient();
 
+    // Get the partner key and verify user has access to its tenant
     const { data, error } = await adminClient
       .from('partner_api_keys')
-      .select('id, name, scopes')
+      .select('id, name, scopes, tenant_id')
       .eq('id', keyId)
       .single();
 
@@ -312,6 +313,21 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(
         { error: { code: 'NOT_FOUND', message: 'Partner key not found' } },
         { status: 404 }
+      );
+    }
+
+    // Verify user has access to this tenant
+    const { data: userTenant } = await adminClient
+      .from('user_tenants')
+      .select('tenant_id')
+      .eq('user_id', user.id)
+      .eq('tenant_id', data.tenant_id)
+      .maybeSingle();
+
+    if (!userTenant) {
+      return NextResponse.json(
+        { error: { code: 'FORBIDDEN', message: 'Access denied to this partner key' } },
+        { status: 403 }
       );
     }
 
@@ -329,22 +345,27 @@ export async function GET(req: NextRequest) {
 
     if (format === 'pdf') {
       try {
+        console.log('Generating PDF for partner:', data.name);
         const pdfBuffer = await markdownToPdfBuffer(markdown);
+        console.log('PDF generated, buffer size:', pdfBuffer.length);
 
-        return new NextResponse(new Uint8Array(pdfBuffer), {
+        // Return Buffer directly - NextResponse accepts Buffer
+        return new NextResponse(pdfBuffer as any, {
           status: 200,
           headers: {
             'Content-Type': 'application/pdf',
             'Content-Disposition': `attachment; filename="${baseFilename}.pdf"`,
+            'Content-Length': pdfBuffer.length.toString(),
           },
         });
-      } catch (err) {
+      } catch (err: any) {
         console.error('Failed to generate PDF spec', err);
+        console.error('Error details:', err?.message, err?.stack);
         return NextResponse.json(
           {
             error: {
               code: 'INTERNAL_ERROR',
-              message: 'Failed to generate PDF spec',
+              message: `Failed to generate PDF spec: ${err?.message || 'Unknown error'}`,
             },
           },
           { status: 500 }
