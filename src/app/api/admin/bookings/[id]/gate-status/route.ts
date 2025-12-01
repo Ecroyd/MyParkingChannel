@@ -53,14 +53,16 @@ export async function PATCH(
     let updates: {
       checked_in_at?: string | null;
       checked_out_at?: string | null;
+      status?: string;
     } = {};
 
     switch (gateStatus) {
       case 'reserved':
-        // Reset both timestamps
+        // Reset both timestamps and set status to reserved
         updates = {
           checked_in_at: null,
           checked_out_at: null,
+          status: 'reserved',
         };
         break;
       case 'arrived':
@@ -68,6 +70,7 @@ export async function PATCH(
           // Set check-in time (can override existing)
           checked_in_at: now,
           checked_out_at: null,
+          status: 'checked_in',
         };
         break;
       case 'departed':
@@ -76,6 +79,7 @@ export async function PATCH(
           checked_out_at: now,
           // Only set checked_in_at if it's currently null
           checked_in_at: currentBooking?.checked_in_at || now,
+          status: 'checked_out',
         };
         break;
     }

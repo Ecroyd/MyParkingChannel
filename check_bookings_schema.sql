@@ -67,6 +67,20 @@ WHERE
     event_object_schema = 'public'
     AND event_object_table = 'bookings';
 
+-- Check if there are any triggers that update checked_in_at or checked_out_at based on status
+SELECT 
+    t.trigger_name,
+    t.event_manipulation,
+    pg_get_triggerdef(t.oid) AS trigger_definition
+FROM 
+    pg_trigger t
+    JOIN pg_class c ON t.tgrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+WHERE 
+    n.nspname = 'public'
+    AND c.relname = 'bookings'
+    AND t.tgname NOT LIKE 'RI_%'; -- Exclude foreign key triggers
+
 -- Sample query to see actual data structure
 SELECT 
     id,
