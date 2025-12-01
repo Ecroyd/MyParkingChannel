@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireUser } from '@/lib/auth/requireUser';
+import PDFDocument from 'pdfkit';
 
 function buildSpecMarkdown(opts: {
   baseUrl: string;
@@ -242,6 +243,36 @@ function buildSpecMarkdown(opts: {
   return lines.join('\n');
 }
 
+async function markdownToPdfBuffer(markdown: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({
+      margin: 50,
+    });
+
+    const chunks: Buffer[] = [];
+
+    doc.on('data', (chunk) => {
+      chunks.push(chunk as Buffer);
+    });
+
+    doc.on('end', () => {
+      resolve(Buffer.concat(chunks));
+    });
+
+    doc.on('error', (err) => {
+      reject(err);
+    });
+
+    // Very simple: write markdown as plain text line-by-line.
+    const lines = markdown.split('\n');
+    lines.forEach((line) => {
+      doc.text(line, { paragraphGap: 4 });
+    });
+
+    doc.end();
+  });
+}
+
 export async function GET(req: NextRequest) {
   try {
     // Require authenticated user
@@ -249,6 +280,7 @@ export async function GET(req: NextRequest) {
     
     const { searchParams } = req.nextUrl;
     const keyId = searchParams.get('keyId');
+    const format = searchParams.get('format') ?? 'md';
 
     if (!keyId) {
       return NextResponse.json(
@@ -280,15 +312,41 @@ export async function GET(req: NextRequest) {
       scopes: data.scopes ?? [],
     });
 
-    const filename = `parking-channel-supplier-api-${data.name
+    const baseFilename = `parking-channel-supplier-api-${data.name
       .toLowerCase()
-      .replace(/\s+/g, '-')}.md`;
+      .replace(/\s+/g, '-')}`;
 
+    if (format === 'pdf') {
+      try {
+        const pdfBuffer = await markdownToPdfBuffer(markdown);
+
+        return new NextResponse(pdfBuffer, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `attachment; filename="${baseFilename}.pdf"`,
+          },
+        });
+      } catch (err) {
+        console.error('Failed to generate PDF spec', err);
+        return NextResponse.json(
+          {
+            error: {
+              code: 'INTERNAL_ERROR',
+              message: 'Failed to generate PDF spec',
+            },
+          },
+          { status: 500 }
+        );
+      }
+    }
+
+    // Default: markdown
     return new NextResponse(markdown, {
       status: 200,
       headers: {
         'Content-Type': 'text/markdown; charset=utf-8',
-        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Disposition': `attachment; filename="${baseFilename}.md"`,
       },
     });
   } catch (err: any) {

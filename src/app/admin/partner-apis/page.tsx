@@ -276,19 +276,33 @@ export default function PartnerApisPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex gap-2 justify-end">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          asChild
-                        >
-                          <a
-                            href={`/api/admin/partner-apis/spec?keyId=${key.id}`}
-                            download
+                        <div className="inline-flex items-center gap-1">
+                          <span className="text-[11px] text-slate-500">Download:</span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            asChild
                           >
-                            <Download className="mr-1 h-3 w-3" />
-                            Spec
-                          </a>
-                        </Button>
+                            <a
+                              href={`/api/admin/partner-apis/spec?keyId=${key.id}&format=md`}
+                              download
+                            >
+                              .md
+                            </a>
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            asChild
+                          >
+                            <a
+                              href={`/api/admin/partner-apis/spec?keyId=${key.id}&format=pdf`}
+                              download
+                            >
+                              PDF
+                            </a>
+                          </Button>
+                        </div>
                         <Button
                           variant="outline"
                           size="sm"
