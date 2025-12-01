@@ -53,6 +53,47 @@ function keyOf(s:any) {
   ].join("|");
 }
 
+async function logImportError(params: {
+  tenantId: string;
+  importFileId?: string | null;
+  importRunId?: string | null;
+  rowIndex: number;
+  reason: string;
+  rowData: any;
+}) {
+  const { tenantId, importFileId, importRunId, rowIndex, reason, rowData } = params;
+
+  console.error(
+    '[IMPORT] Row failed',
+    JSON.stringify({ tenantId, rowIndex, reason }, null, 2)
+  );
+
+  try {
+    const { error } = await supabaseAdmin()
+      .from('booking_import_errors')
+      .insert({
+        tenant_id: tenantId,
+        import_file_id: importFileId ?? null,
+        import_run_id: importRunId ?? null,
+        row_index: rowIndex,
+        reason,
+        row_data: rowData,
+      });
+
+    if (error) {
+      console.error(
+        '[IMPORT] Failed to log import error to booking_import_errors',
+        error
+      );
+    }
+  } catch (err) {
+    console.error(
+      '[IMPORT] Exception while logging import error to booking_import_errors',
+      err
+    );
+  }
+}
+
 export async function POST(req: Request) {
   const { tenantId, rows, profileName, overwriteDuplicates, sourceMapping } = await req.json();
   
@@ -67,11 +108,10 @@ export async function POST(req: Request) {
     console.error("❌ Missing required fields:", { tenantId, rowsIsArray: Array.isArray(rows) });
     return NextResponse.json({ error: "tenantId and rows required" }, { status: 400 });
   }
-  const supabase = supabaseAdmin();
 
   // Create run
   console.log("📝 Creating import run with tenant_id:", tenantId);
-  const { data: run, error: runErr } = await supabase
+  const { data: run, error: runErr } = await supabaseAdmin()
     .from("import_runs")
     .insert({ tenant_id: tenantId, profile_name: profileName || null })
     .select("id")
@@ -84,338 +124,171 @@ export async function POST(req: Request) {
   
   console.log("✅ Created run:", run.id);
 
-  // Process the pre-processed preview data and filter out invalid rows
-  const dateErrorRows: any[] = [];
-  const importErrors: Array<{ rowIndex: number; reason: string; rowData: any }> = [];
-  
-  // Parse dates using Postgres RPC function (handles all formats, converts to UTC)
+  // Process rows and insert bookings directly
+  const errors: Array<{ rowIndex: number; reason: string; rowData: any }> = [];
+  let successCount = 0;
   const tz = 'Europe/London';
-  const prepared: Array<{ booking: any; originalRowIndex: number; originalRow: any }> = [];
-  
+  const importFileId = null; // We use import_run_id instead
+
   for (let i = 0; i < rows.length; i++) {
-    const r = rows[i];
+    const raw = rows[i];
     const rowIndex = i + 1;
-    // Capture raw values
-    const startAtRaw = r.start_at;
-    const endAtRaw = r.end_at;
-    
-    // Build list of specific errors
-    const errors: string[] = [];
-    
-    // Check for missing raw values
-    if (!startAtRaw || (typeof startAtRaw === 'string' && startAtRaw.trim() === '')) {
-      errors.push('missing raw start_at value');
-    }
-    if (!endAtRaw || (typeof endAtRaw === 'string' && endAtRaw.trim() === '')) {
-      errors.push('missing raw end_at value');
-    }
-    
-    // Attempt to parse dates if we have raw values
-    let startAtParsed: string | null = null;
-    let endAtParsed: string | null = null;
-    
-    if (startAtRaw && (typeof startAtRaw !== 'string' || startAtRaw.trim() !== '') &&
-        endAtRaw && (typeof endAtRaw !== 'string' || endAtRaw.trim() !== '')) {
-      try {
-        const { data: parsed, error: parseErr } = await supabase
-          .rpc('normalise_booking_times', {
-            p_start: startAtRaw,
-            p_end: endAtRaw,
-            p_tz: tz
-          });
-        
-        if (parseErr) {
-          errors.push(`could not parse start_at="${startAtRaw}"`);
-          errors.push(`could not parse end_at="${endAtRaw}"`);
-        } else if (!parsed || parsed.length === 0) {
-          errors.push(`could not parse start_at="${startAtRaw}"`);
-          errors.push(`could not parse end_at="${endAtRaw}"`);
-        } else {
-          startAtParsed = parsed[0].start_utc || null;
-          endAtParsed = parsed[0].end_utc || null;
-          
-          if (!startAtParsed) {
-            errors.push(`could not parse start_at="${startAtRaw}"`);
-          } else {
-            // Check if parsed date is invalid
-            const startDate = new Date(startAtParsed);
-            if (isNaN(startDate.getTime())) {
-              errors.push(`start_at parsed to invalid date: ${startAtParsed}`);
-            }
-          }
-          
-          if (!endAtParsed) {
-            errors.push(`could not parse end_at="${endAtRaw}"`);
-          } else {
-            // Check if parsed date is invalid
-            const endDate = new Date(endAtParsed);
-            if (isNaN(endDate.getTime())) {
-              errors.push(`end_at parsed to invalid date: ${endAtParsed}`);
-            }
-          }
-          
-          // If we have both parsed dates, check if end is before start
-          if (startAtParsed && endAtParsed) {
-            const startDate = new Date(startAtParsed);
-            const endDate = new Date(endAtParsed);
-            if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime()) && endDate < startDate) {
-              errors.push('end_at is before start_at');
-            }
-          }
-        }
-      } catch (err) {
-        errors.push(`could not parse start_at="${startAtRaw}"`);
-        errors.push(`could not parse end_at="${endAtRaw}"`);
-      }
-    }
-    
-    // If there are any errors, write to booking_import_errors and skip this row
-    if (errors.length > 0) {
-      const reason = `startAt/endAt error: ${errors.join('; ')}`;
-      
-      const debugRow = {
-        ...r,
-        _debug_dates: {
-          startAtRaw,
-          endAtRaw,
-          startAtParsed,
-          endAtParsed,
-        }
-      };
-      
-      // Write error to booking_import_errors using supabaseAdmin
-      await supabase
-        .from('booking_import_errors')
-        .insert({
-          tenant_id: tenantId,
-          import_file_id: null, // We use import_run_id instead
-          import_run_id: run.id,
-          row_index: rowIndex,
-          reason: reason,
-          row_data: debugRow,
-        });
-      
-      dateErrorRows.push({
-        index: rowIndex,
-        row: r,
-        reason: reason
-      });
-      importErrors.push({ rowIndex, reason, rowData: debugRow });
-      continue; // Skip this row
-    }
-    
-    // If we got here, dates parsed successfully
-    // Type guard: ensure both parsed dates are non-null strings
-    if (!startAtParsed || !endAtParsed) {
-      // This shouldn't happen if validation passed, but handle it safely
-      const reason = `startAt/endAt error: parsed dates are null after validation`;
-      const debugRow = {
-        ...r,
-        _debug_dates: {
-          startAtRaw,
-          endAtRaw,
-          startAtParsed,
-          endAtParsed,
-        }
-      };
-      await supabase
-        .from('booking_import_errors')
-        .insert({
-          tenant_id: tenantId,
-          import_file_id: null, // We use import_run_id instead
-          import_run_id: run.id,
-          row_index: rowIndex,
-          reason: reason,
-          row_data: debugRow,
-        });
-      dateErrorRows.push({
-        index: rowIndex,
-        row: r,
-        reason: reason
-      });
-      importErrors.push({ rowIndex, reason, rowData: debugRow });
-      continue;
-    }
-    
+
     try {
-      const start_utc: string = startAtParsed;
-      const end_utc: string = endAtParsed;
+      // 1) Map row according to existing logic
+      const startAtRaw = raw.start_at;
+      const endAtRaw = raw.end_at;
+      
+      // Parse dates using Postgres RPC function
+      let startAtParsed: string | null = null;
+      let endAtParsed: string | null = null;
+      
+      if (startAtRaw && (typeof startAtRaw !== 'string' || startAtRaw.trim() !== '') &&
+          endAtRaw && (typeof endAtRaw !== 'string' || endAtRaw.trim() !== '')) {
+        try {
+          const { data: parsed, error: parseErr } = await supabaseAdmin()
+            .rpc('normalise_booking_times', {
+              p_start: startAtRaw,
+              p_end: endAtRaw,
+              p_tz: tz
+            });
+          
+          if (!parseErr && parsed && parsed.length > 0) {
+            startAtParsed = parsed[0].start_utc || null;
+            endAtParsed = parsed[0].end_utc || null;
+          }
+        } catch (err) {
+          // Will be caught in date validation below
+        }
+      }
+      
       const dedupe_key = makeImportDedupeKey({
-        source: r.source,
-        reference: r.reference,
-        vehicle_reg: r.vehicle_reg,
-        start_utc: start_utc
+        source: raw.source,
+        reference: raw.reference,
+        vehicle_reg: raw.vehicle_reg,
+        start_utc: startAtParsed || ''
       });
       
       const stagingRecord = {
         tenant_id: tenantId,
         source: sourceMapping || 'other',
-        reference: r.reference,
-        customer_name: r.customer_name,
-        customer_lastname: r.customer_lastname,
-        customer_title: r.customer_title,
-        customer_firstname: r.customer_firstname,
-        start_at: start_utc, // Already UTC from Postgres
-        end_at: end_utc,     // Already UTC from Postgres
-        vehicle_reg: r.vehicle_reg,
-        vehicle_colour: r.vehicle_colour,
-        vehicle_make: r.vehicle_make,
-        vehicle_model: r.vehicle_model,
-        flight_number: r.flight_number,
-        phone: r.phone,
-        status: r.status,
-        price: r.price,
-        money_received: r.money_received,
-        notes: r.notes,
+        reference: raw.reference,
+        customer_name: raw.customer_name,
+        customer_lastname: raw.customer_lastname,
+        customer_title: raw.customer_title,
+        customer_firstname: raw.customer_firstname,
+        start_at: startAtParsed || '',
+        end_at: endAtParsed || '',
+        vehicle_reg: raw.vehicle_reg,
+        vehicle_colour: raw.vehicle_colour,
+        vehicle_make: raw.vehicle_make,
+        vehicle_model: raw.vehicle_model,
+        flight_number: raw.flight_number,
+        phone: raw.phone,
+        status: raw.status,
+        price: raw.price,
+        money_received: raw.money_received,
+        notes: raw.notes,
         dedupe_key
       };
 
-      const mappedBooking = mapStagingToBookings(stagingRecord);
-      
-      // Additional validation on the mapped booking
-      const validationErrors: string[] = [];
-      
-      // Validate required fields
-      if (!mappedBooking.reference || (typeof mappedBooking.reference === 'string' && mappedBooking.reference.trim() === '')) {
-        validationErrors.push('missing or empty reference');
+      const mappedRow = mapStagingToBookings(stagingRecord);
+
+      // 2) Perform date validation and build detailed dateErrors[] if needed
+      const startAtVal = (mappedRow as any).start_at;
+      const endAtVal = (mappedRow as any).end_at;
+
+      const dateErrors: string[] = [];
+
+      if (!startAtVal) {
+        dateErrors.push(
+          `missing start_at parsed value (raw="${String(startAtRaw ?? '')}")`
+        );
       }
-      if (!mappedBooking.customer_name || (typeof mappedBooking.customer_name === 'string' && mappedBooking.customer_name.trim() === '')) {
-        validationErrors.push('missing or empty customer_name');
+      if (!endAtVal) {
+        dateErrors.push(
+          `missing end_at parsed value (raw="${String(endAtRaw ?? '')}")`
+        );
       }
-      
-      // Validate dates one more time on the mapped object
-      if (!mappedBooking.start_at || (typeof mappedBooking.start_at === 'string' && mappedBooking.start_at.trim() === '')) {
-        validationErrors.push(`missing start_at parsed value (raw="${String(startAtRaw ?? "")}")`);
-      } else {
-        const d = new Date(mappedBooking.start_at);
+
+      if (startAtVal) {
+        const d = new Date(startAtVal);
         if (isNaN(d.getTime())) {
-          validationErrors.push(`start_at parsed to invalid Date: "${mappedBooking.start_at}" (raw="${String(startAtRaw ?? "")}")`);
+          dateErrors.push(
+            `start_at parsed to invalid Date: "${startAtVal}" (raw="${String(
+              startAtRaw ?? ''
+            )}")`
+          );
         }
       }
-      
-      if (!mappedBooking.end_at || (typeof mappedBooking.end_at === 'string' && mappedBooking.end_at.trim() === '')) {
-        validationErrors.push(`missing end_at parsed value (raw="${String(endAtRaw ?? "")}")`);
-      } else {
-        const d = new Date(mappedBooking.end_at);
+
+      if (endAtVal) {
+        const d = new Date(endAtVal);
         if (isNaN(d.getTime())) {
-          validationErrors.push(`end_at parsed to invalid Date: "${mappedBooking.end_at}" (raw="${String(endAtRaw ?? "")}")`);
+          dateErrors.push(
+            `end_at parsed to invalid Date: "${endAtVal}" (raw="${String(
+              endAtRaw ?? ''
+            )}")`
+          );
         }
       }
-      
-      if (mappedBooking.start_at && mappedBooking.end_at) {
-        const s = new Date(mappedBooking.start_at);
-        const e = new Date(mappedBooking.end_at);
+
+      if (startAtVal && endAtVal) {
+        const s = new Date(startAtVal);
+        const e = new Date(endAtVal);
         if (!isNaN(s.getTime()) && !isNaN(e.getTime()) && e < s) {
-          validationErrors.push('end_at is before start_at');
+          dateErrors.push('end_at is before start_at');
         }
       }
-      
-      if (validationErrors.length > 0) {
-        const reason = `validation error: ${validationErrors.join('; ')}`;
+
+      if (dateErrors.length > 0) {
+        const reason = `startAt/endAt error: ${dateErrors.join('; ')}`;
         const debugRow = {
-          ...mappedBooking,
+          ...mappedRow,
           _debug_dates: {
             startAtRaw,
             endAtRaw,
-            startAtParsed: mappedBooking.start_at,
-            endAtParsed: mappedBooking.end_at,
+            startAtParsed: startAtVal,
+            endAtParsed: endAtVal,
           },
         };
-        
-        await supabase
-          .from('booking_import_errors')
-          .insert({
-            tenant_id: tenantId,
-            import_file_id: null,
-            import_run_id: run.id,
-            row_index: rowIndex,
-            reason: reason,
-            row_data: debugRow,
-          });
-        
-        importErrors.push({ rowIndex, reason, rowData: debugRow });
+
+        errors.push({ rowIndex, reason, rowData: debugRow });
+
+        await logImportError({
+          tenantId,
+          importFileId,
+          importRunId: run.id,
+          rowIndex,
+          reason,
+          rowData: debugRow,
+        });
+
         continue;
       }
-      
-      // Store the booking with its original row index for error tracking
-      prepared.push({
-        booking: mappedBooking,
-        originalRowIndex: rowIndex,
-        originalRow: r
-      });
-    } catch (error: any) {
-      const reason = `unexpected import error: ${error?.message ?? String(error)}`;
-      const debugRow = {
-        ...r,
-        _error: error?.stack ?? String(error),
-        _debug_dates: {
-          startAtRaw,
-          endAtRaw,
-          startAtParsed,
-          endAtParsed,
-        },
-      };
-      
-      await supabase
-        .from('booking_import_errors')
-        .insert({
-          tenant_id: tenantId,
-          import_file_id: null,
-          import_run_id: run.id,
-          row_index: rowIndex,
-          reason: reason,
-          row_data: debugRow,
-        });
-      
-      importErrors.push({ rowIndex, reason, rowData: debugRow });
-      console.error(`Error processing row ${rowIndex} (${r.reference}):`, error);
-      continue;
-    }
-  }
-  
-  console.log(`📊 Valid rows: ${prepared.length}, Date error rows: ${dateErrorRows.length}`);
-  
-  if (dateErrorRows.length > 0) {
-    console.log("❌ Date error rows found:", dateErrorRows);
-  }
-  
-  console.log("📊 Prepared records count:", prepared.length);
-  console.log("📊 Sample prepared record:", prepared[0]?.booking);
-  console.log("📊 Tenant ID in sample:", prepared[0]?.booking?.tenant_id);
-  console.log("📊 Source in sample:", prepared[0]?.booking?.source);
-  console.log("📊 Start_at in sample:", prepared[0]?.booking?.start_at);
-  console.log("📊 End_at in sample:", prepared[0]?.booking?.end_at);
 
-  let inserted = 0, updated = 0, skipped = 0, errors = 0;
-  const serverErrors: string[] = [];
-
-  // Process each prepared booking individually to catch per-row errors
-  for (const item of prepared) {
-    const { booking, originalRowIndex, originalRow } = item;
-    
-    try {
+      // 3) Attempt DB insert/upsert for the booking
       // Check if booking already exists
-      const { data: existing, error: probeErr } = await supabase
+      const { data: existing, error: probeErr } = await supabaseAdmin()
         .from("bookings")
         .select("id, dedupe_key")
         .eq("tenant_id", tenantId)
-        .eq("dedupe_key", booking.dedupe_key)
+        .eq("dedupe_key", mappedRow.dedupe_key)
         .maybeSingle();
 
       if (probeErr) {
         const reason = `DB probe error: ${probeErr.message ?? probeErr.toString()}`;
-        await supabase
-          .from('booking_import_errors')
-          .insert({
-            tenant_id: tenantId,
-            import_file_id: null,
-            import_run_id: run.id,
-            row_index: originalRowIndex,
-            reason: reason,
-            row_data: booking,
-          });
-        importErrors.push({ rowIndex: originalRowIndex, reason, rowData: booking });
-        errors++;
+        errors.push({ rowIndex, reason, rowData: mappedRow });
+
+        await logImportError({
+          tenantId,
+          importFileId,
+          importRunId: run.id,
+          rowIndex,
+          reason,
+          rowData: mappedRow,
+        });
+
         continue;
       }
 
@@ -423,104 +296,85 @@ export async function POST(req: Request) {
         // Booking already exists
         if (overwriteDuplicates) {
           // Update existing booking
-          const { error: updateErr } = await supabase
+          const { error: updateErr } = await supabaseAdmin()
             .from("bookings")
-            .update(booking)
+            .update(mappedRow)
             .eq("id", existing.id)
             .eq("tenant_id", tenantId);
           
           if (updateErr) {
             const reason = `DB update error: ${updateErr.message ?? updateErr.toString()}`;
-            await supabase
-              .from('booking_import_errors')
-              .insert({
-                tenant_id: tenantId,
-                import_file_id: null,
-                import_run_id: run.id,
-                row_index: originalRowIndex,
-                reason: reason,
-                row_data: booking,
-              });
-            importErrors.push({ rowIndex: originalRowIndex, reason, rowData: booking });
-            errors++;
-          } else {
-            updated++;
+            errors.push({ rowIndex, reason, rowData: mappedRow });
+
+            await logImportError({
+              tenantId,
+              importFileId,
+              importRunId: run.id,
+              rowIndex,
+              reason,
+              rowData: mappedRow,
+            });
+
+            continue;
           }
         } else {
-          // Skip duplicate
-          skipped++;
+          // Skip duplicate - this is success, not an error
+          successCount++;
+          continue;
         }
       } else {
         // Insert new booking
-        const { error: insErr } = await supabase
-          .from("bookings")
-          .insert(booking);
-        
-        if (insErr) {
-          const reason = `DB insert error: ${insErr.message ?? insErr.toString()}`;
-          const debugRow = {
-            ...booking,
-            _error_details: {
-              code: insErr.code,
-              details: insErr.details,
-              hint: insErr.hint,
-            },
-          };
-          await supabase
-            .from('booking_import_errors')
-            .insert({
-              tenant_id: tenantId,
-              import_file_id: null,
-              import_run_id: run.id,
-              row_index: originalRowIndex,
-              reason: reason,
-              row_data: debugRow,
-            });
-          importErrors.push({ rowIndex: originalRowIndex, reason, rowData: debugRow });
-          errors++;
-        } else {
-          inserted++;
+        const { error: insertError } = await supabaseAdmin()
+          .from('bookings')
+          .insert(mappedRow);
+
+        if (insertError) {
+          const reason = `DB insert error: ${insertError.message ?? insertError.toString()}`;
+          errors.push({ rowIndex, reason, rowData: mappedRow });
+
+          await logImportError({
+            tenantId,
+            importFileId,
+            importRunId: run.id,
+            rowIndex,
+            reason,
+            rowData: mappedRow,
+          });
+
+          continue;
         }
       }
+
+      // success for this row
+      successCount++;
     } catch (err: any) {
-      const reason = `unexpected DB operation error: ${err?.message ?? String(err)}`;
-      const debugRow = {
-        ...booking,
-        _error: err?.stack ?? String(err),
-      };
-      await supabase
-        .from('booking_import_errors')
-        .insert({
-          tenant_id: tenantId,
-          import_file_id: null,
-          import_run_id: run.id,
-          row_index: originalRowIndex,
-          reason: reason,
-          row_data: debugRow,
-        });
-      importErrors.push({ rowIndex: originalRowIndex, reason, rowData: debugRow });
-      errors++;
-      console.error(`Error processing booking for row ${originalRowIndex} (${booking.reference}):`, err);
+      const reason = `unexpected import error: ${
+        err?.message ?? String(err)
+      }`;
+      errors.push({ rowIndex, reason, rowData: raw });
+
+      await logImportError({
+        tenantId,
+        importFileId,
+        importRunId: run.id,
+        rowIndex,
+        reason,
+        rowData: raw,
+      });
     }
   }
 
-  await supabase.from("import_runs")
-    .update({ inserted_count: inserted, skipped_duplicates: skipped, error_count: errors })
+  await supabaseAdmin().from("import_runs")
+    .update({ inserted_count: successCount, skipped_duplicates: 0, error_count: errors.length })
     .eq("id", run.id);
 
-  const result = { 
-    ok: errors === 0, 
-    runId: run.id, 
-    inserted, 
-    updated, 
-    skipped, 
+  return NextResponse.json({
+    success: errors.length === 0,
+    successCount,
+    errorCount: errors.length,
     errors,
-    serverErrors,
-    invalidRows: dateErrorRows.length > 0 ? dateErrorRows : undefined,
-    importErrors: importErrors.length > 0 ? importErrors : undefined
-  };
-  const status = errors ? 207 /* multi-status */ : 200;
-  return NextResponse.json(result, { status });
+    runId: run.id,
+  });
 }
 
 function* chunked<T>(arr: T[], size = 1000) {
