@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
 
     const { data: booking, error: bookingError } = await supabase
       .from('bookings')
-      .select('id, start_at, end_at, status')
+      .select('id, start_at, end_at, status, checked_in_at, checked_out_at')
       .eq('tenant_id', tenantId)
       .ilike('plate', plateNormalised)
       .lte('start_at', to)
