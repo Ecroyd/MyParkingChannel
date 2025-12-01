@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { makeDedupeKey, checkDuplicateBooking } from '@/lib/bookings/dedupe';
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,20 +15,29 @@ export async function POST(req: NextRequest) {
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // Check if booking already exists
-    const { data: existingBooking } = await admin
-      .from('bookings')
-      .select('id, reference, customer_name, status')
-      .eq('tenant_id', tenantId)
-      .eq('reference', reference)
-      .single();
+    // Normalize plate
+    const normalizedPlate = plate ? plate.toUpperCase().replace(/\s+/g, '') : null;
 
-    if (existingBooking) {
-      return NextResponse.json({ 
-        success: true, 
-        booking: existingBooking,
-        message: 'Booking already exists'
-      });
+    // Generate dedupe key and check for duplicates
+    const dedupeKey = makeDedupeKey({
+      reference: reference,
+      plate: normalizedPlate,
+      customer_email: customerEmail,
+      start_at: startAt,
+      end_at: endAt
+    });
+
+    // Check for duplicate booking
+    if (dedupeKey) {
+      const existing = await checkDuplicateBooking(admin, tenantId, dedupeKey);
+      if (existing) {
+        return NextResponse.json({ 
+          success: true, 
+          booking: { id: existing.id, reference: existing.reference },
+          message: 'Booking already exists',
+          duplicate: true
+        });
+      }
     }
 
     // Create the booking
@@ -36,7 +46,7 @@ export async function POST(req: NextRequest) {
       customer_name: customerName,
       customer_email: customerEmail,
       customer_phone: customerPhone || null,
-      plate: plate,
+      plate: normalizedPlate,
       flight_number: flightNumber || null,
       start_at: startAt,
       end_at: endAt,
@@ -44,9 +54,9 @@ export async function POST(req: NextRequest) {
       source: 'other',
       money_received: amount || 0,
       money_charged: amount || 0,
-      reference: reference
+      reference: reference,
+      dedupe_key: dedupeKey
     };
-
 
     const { data: booking, error } = await admin
       .from('bookings')
@@ -54,7 +64,22 @@ export async function POST(req: NextRequest) {
       .select('id, reference')
       .single();
 
+    // Handle potential duplicate key error gracefully
     if (error) {
+      // If it's a unique constraint violation, try to fetch the existing booking
+      if (error.code === '23505' || error.message?.includes('duplicate') || error.message?.includes('unique')) {
+        if (dedupeKey) {
+          const existing = await checkDuplicateBooking(admin, tenantId, dedupeKey);
+          if (existing) {
+            return NextResponse.json({ 
+              success: true, 
+              booking: { id: existing.id, reference: existing.reference },
+              message: 'Booking already exists',
+              duplicate: true
+            });
+          }
+        }
+      }
       console.error('Failed to create booking:', error);
       return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
     }

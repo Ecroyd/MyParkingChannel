@@ -9,6 +9,7 @@ import {
   BookingCreateRequest,
   BookingCreateResponse,
 } from '@/lib/supplier/types';
+import { makeDedupeKey, checkDuplicateBooking } from '@/lib/bookings/dedupe';
 
 function parseBody(body: any): BookingCreateRequest {
   return body as BookingCreateRequest;
@@ -74,18 +75,17 @@ export async function POST(req: NextRequest) {
 
     const supabase = createAdminClient();
 
+    // Generate dedupe key using shared utility
+    const dedupeKey = makeDedupeKey({
+      external_reference: externalRef || null,
+      partner: externalRef ? partnerNameLower : null
+    });
+
     // Idempotency: if external_reference exists for this partner+tenant, return existing booking
     // Using dedupe_key pattern: partner:external_ref
-    if (externalRef) {
-      const dedupeKey = `${partnerNameLower}:${externalRef}`;
-      const { data: existing, error: existingError } = await supabase
-        .from('bookings')
-        .select('id, reference, status, created_at')
-        .eq('tenant_id', auth.tenantId)
-        .eq('dedupe_key', dedupeKey)
-        .maybeSingle();
-
-      if (!existingError && existing) {
+    if (dedupeKey) {
+      const existing = await checkDuplicateBooking(supabase, auth.tenantId, dedupeKey);
+      if (existing) {
         const resp: BookingCreateResponse = {
           reference: existing.reference,
           status: existing.status === 'reserved' ? 'confirmed' : (existing.status as any),
@@ -97,7 +97,6 @@ export async function POST(req: NextRequest) {
     }
 
     const reference = externalRef || generateInternalReference();
-    const dedupeKey = externalRef ? `${partnerNameLower}:${externalRef}` : null;
 
     const customerName = `${body.customer.first_name} ${body.customer.last_name}`.trim();
     const flightNumber = body.flight?.departure_number || body.flight?.arrival_number || null;
@@ -133,6 +132,22 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (error) {
+      // If it's a unique constraint violation, try to fetch the existing booking
+      if (error.code === '23505' || error.message?.includes('duplicate') || error.message?.includes('unique')) {
+        if (dedupeKey) {
+          const existing = await checkDuplicateBooking(supabase, auth.tenantId, dedupeKey);
+          if (existing) {
+            const resp: BookingCreateResponse = {
+              reference: existing.reference,
+              status: existing.status === 'reserved' ? 'confirmed' : (existing.status as any),
+              source: partnerNameLower,
+              created_at: existing.created_at,
+            };
+            return NextResponse.json(resp, { status: 200 });
+          }
+        }
+      }
+      
       console.error('Bookings insert error', error);
       return NextResponse.json(
         {

@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { evaluateBookingRules } from '@/lib/booking-rules/evaluation'
 import { BookingRule } from '@/lib/validation/booking-rules'
+import { makeDedupeKey, checkDuplicateBooking } from '@/lib/bookings/dedupe'
 
 // Helper function to treat input dates as UK timezone
 function parseAsUKTimezone(dateString: string): Date {
@@ -156,6 +157,34 @@ export async function POST(req: NextRequest) {
   const surchargeAmount = ruleEvaluation.surchargeAmount
   const totalAmount = baseAmount + surchargeAmount
 
+  // Normalize plate
+  const normalizedPlate = plate ? plate.toUpperCase().replace(/\s+/g, '') : null
+
+  // Generate dedupe key to check for duplicates
+  const dedupeKey = makeDedupeKey({
+    plate: normalizedPlate,
+    customer_email: customer_email,
+    start_at: s.toISOString(),
+    end_at: e.toISOString()
+  })
+
+  // Check for duplicate booking
+  if (dedupeKey) {
+    const existing = await checkDuplicateBooking(admin, tenant_id, dedupeKey)
+    if (existing) {
+      // Return existing booking instead of creating duplicate
+      return NextResponse.json({
+        ok: true,
+        booking: { id: existing.id, reference: existing.reference },
+        surchargeApplied: surchargeAmount > 0,
+        surchargeAmount,
+        totalAmount,
+        duplicate: true,
+        existing: true
+      })
+    }
+  }
+
   // Generate a unique reference for the booking
   const generateReference = () => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -171,7 +200,7 @@ export async function POST(req: NextRequest) {
     customer_name,
     customer_email,
     customer_phone: customer_phone || null,
-    plate,
+    plate: normalizedPlate,
     flight_number: flight_number || null, // Convert undefined to null
     start_at: s.toISOString(),
     end_at: e.toISOString(),
@@ -179,11 +208,31 @@ export async function POST(req: NextRequest) {
     source: 'other', // Use 'other' instead of 'website' since 'website' is not in the enum
     money_received: 0,
     money_charged: totalAmount,
-    reference: generateReference() // Generate a unique reference
+    reference: generateReference(), // Generate a unique reference
+    dedupe_key: dedupeKey
   }
 
     const { data, error } = await admin.from('bookings').insert(insert).select('id').single()
+    
+    // Handle potential duplicate key error gracefully
     if (error) {
+      // If it's a unique constraint violation, try to fetch the existing booking
+      if (error.code === '23505' || error.message?.includes('duplicate') || error.message?.includes('unique')) {
+        if (dedupeKey) {
+          const existing = await checkDuplicateBooking(admin, tenant_id, dedupeKey)
+          if (existing) {
+            return NextResponse.json({
+              ok: true,
+              booking: { id: existing.id, reference: existing.reference },
+              surchargeApplied: surchargeAmount > 0,
+              surchargeAmount,
+              totalAmount,
+              duplicate: true,
+              existing: true
+            })
+          }
+        }
+      }
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
     

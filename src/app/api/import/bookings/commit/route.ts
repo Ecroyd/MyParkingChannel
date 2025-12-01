@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import crypto from "crypto";
+import { makeImportDedupeKey } from "@/lib/bookings/dedupe";
 import { mapStagingToBookings } from "@/lib/imports/mapToBookings";
 
 type InRow = {
@@ -133,7 +133,12 @@ export async function POST(req: Request) {
       }
 
       const { start_utc, end_utc } = parsed[0];
-      const dedupe_key = crypto.createHash("sha256").update(`${r.source.toLowerCase()}|${r.reference.toUpperCase()}|${r.vehicle_reg.toUpperCase()}|${start_utc}`).digest("hex");
+      const dedupe_key = makeImportDedupeKey({
+        source: r.source,
+        reference: r.reference,
+        vehicle_reg: r.vehicle_reg,
+        start_utc: start_utc
+      });
       
       const stagingRecord = {
         tenant_id: tenantId,
