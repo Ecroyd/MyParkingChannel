@@ -85,54 +85,122 @@ export async function POST(req: Request) {
   console.log("✅ Created run:", run.id);
 
   // Process the pre-processed preview data and filter out invalid rows
-  const validRows: any[] = [];
-  const invalidRows: any[] = [];
+  const dateErrorRows: any[] = [];
   
-  rows.forEach((r, index) => {
-    // Check if row has valid timestamps
-    const hasValidStart = r.start_at && r.start_at.trim() !== '';
-    const hasValidEnd = r.end_at && r.end_at.trim() !== '';
-    
-    if (!hasValidStart || !hasValidEnd) {
-      invalidRows.push({
-        index: index + 1,
-        row: r,
-        reason: !hasValidStart && !hasValidEnd ? 'Missing start and end dates' : 
-                !hasValidStart ? 'Missing start date' : 'Missing end date'
-      });
-      return; // Skip this row
-    }
-    
-    validRows.push(r);
-  });
-
-  console.log(`📊 Valid rows: ${validRows.length}, Invalid rows: ${invalidRows.length}`);
-  
-  if (invalidRows.length > 0) {
-    console.log("❌ Invalid rows found:", invalidRows);
-  }
-
   // Parse dates using Postgres RPC function (handles all formats, converts to UTC)
   const tz = 'Europe/London';
   const prepared: any[] = [];
   
-  for (const r of validRows) {
-    try {
-      // Use RPC function to parse and normalize to UTC in the database
-      const { data: parsed, error: parseErr } = await supabase
-        .rpc('normalise_booking_times', {
-          p_start: r.start_at,
-          p_end: r.end_at,
-          p_tz: tz
-        });
-
-      if (parseErr || !parsed || parsed.length === 0 || !parsed[0].start_utc || !parsed[0].end_utc) {
-        console.error(`Failed to parse dates for row ${r.reference}:`, parseErr);
-        // Skip this row or use fallback
-        continue;
+  for (const r of rows) {
+    // Capture raw values
+    const startAtRaw = r.start_at;
+    const endAtRaw = r.end_at;
+    
+    // Build list of specific errors
+    const errors: string[] = [];
+    
+    // Check for missing raw values
+    if (!startAtRaw || (typeof startAtRaw === 'string' && startAtRaw.trim() === '')) {
+      errors.push('missing raw startAt value');
+    }
+    if (!endAtRaw || (typeof endAtRaw === 'string' && endAtRaw.trim() === '')) {
+      errors.push('missing raw endAt value');
+    }
+    
+    // Attempt to parse dates if we have raw values
+    let startAtParsed: string | null = null;
+    let endAtParsed: string | null = null;
+    
+    if (startAtRaw && (typeof startAtRaw !== 'string' || startAtRaw.trim() !== '') &&
+        endAtRaw && (typeof endAtRaw !== 'string' || endAtRaw.trim() !== '')) {
+      try {
+        const { data: parsed, error: parseErr } = await supabase
+          .rpc('normalise_booking_times', {
+            p_start: startAtRaw,
+            p_end: endAtRaw,
+            p_tz: tz
+          });
+        
+        if (parseErr) {
+          errors.push(`could not parse startAt="${startAtRaw}"`);
+          errors.push(`could not parse endAt="${endAtRaw}"`);
+        } else if (!parsed || parsed.length === 0) {
+          errors.push(`could not parse startAt="${startAtRaw}"`);
+          errors.push(`could not parse endAt="${endAtRaw}"`);
+        } else {
+          startAtParsed = parsed[0].start_utc || null;
+          endAtParsed = parsed[0].end_utc || null;
+          
+          if (!startAtParsed) {
+            errors.push(`could not parse startAt="${startAtRaw}"`);
+          } else {
+            // Check if parsed date is invalid
+            const startDate = new Date(startAtParsed);
+            if (isNaN(startDate.getTime())) {
+              errors.push('startAt parsed to invalid date');
+            }
+          }
+          
+          if (!endAtParsed) {
+            errors.push(`could not parse endAt="${endAtRaw}"`);
+          } else {
+            // Check if parsed date is invalid
+            const endDate = new Date(endAtParsed);
+            if (isNaN(endDate.getTime())) {
+              errors.push('endAt parsed to invalid date');
+            }
+          }
+          
+          // If we have both parsed dates, check if end is before start
+          if (startAtParsed && endAtParsed) {
+            const startDate = new Date(startAtParsed);
+            const endDate = new Date(endAtParsed);
+            if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime()) && endDate < startDate) {
+              errors.push('endAt is before startAt');
+            }
+          }
+        }
+      } catch (err) {
+        errors.push(`could not parse startAt="${startAtRaw}"`);
+        errors.push(`could not parse endAt="${endAtRaw}"`);
       }
-
-      const { start_utc, end_utc } = parsed[0];
+    }
+    
+    // If there are any errors, write to booking_import_errors and skip this row
+    if (errors.length > 0) {
+      const reason = 'startAt/endAt error: ' + errors.join('; ');
+      
+      const debugRow = {
+        ...r,
+        _debug_dates: {
+          startAtRaw,
+          endAtRaw,
+          startAtParsed,
+          endAtParsed,
+        }
+      };
+      
+      // Write error to booking_import_errors using supabaseAdmin
+      await supabase
+        .from('booking_import_errors')
+        .insert({
+          tenant_id: tenantId,
+          import_run_id: run.id,
+          reason: reason,
+          row_data: debugRow,
+        });
+      
+      dateErrorRows.push({
+        index: rows.indexOf(r) + 1,
+        row: r,
+        reason: reason
+      });
+      continue; // Skip this row
+    }
+    
+    // If we got here, dates parsed successfully
+    try {
+      const { start_utc, end_utc } = { start_utc: startAtParsed, end_utc: endAtParsed };
       const dedupe_key = makeImportDedupeKey({
         source: r.source,
         reference: r.reference,
@@ -169,6 +237,12 @@ export async function POST(req: Request) {
       // Skip this row
       continue;
     }
+  }
+  
+  console.log(`📊 Valid rows: ${prepared.length}, Date error rows: ${dateErrorRows.length}`);
+  
+  if (dateErrorRows.length > 0) {
+    console.log("❌ Date error rows found:", dateErrorRows);
   }
   
   console.log("📊 Prepared records count:", prepared.length);
@@ -255,7 +329,7 @@ export async function POST(req: Request) {
     skipped, 
     errors,
     serverErrors,
-    invalidRows: invalidRows.length > 0 ? invalidRows : undefined
+    invalidRows: dateErrorRows.length > 0 ? dateErrorRows : undefined
   };
   const status = errors ? 207 /* multi-status */ : 200;
   return NextResponse.json(result, { status });
