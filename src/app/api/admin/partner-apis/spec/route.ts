@@ -1,8 +1,11 @@
 // app/api/admin/partner-apis/spec/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { requireUser } from '@/lib/auth/requireUser';
+import { getServerSupabase } from '@/lib/supabase/server';
 import PDFDocument from 'pdfkit';
+
+// Ensure this runs in Node.js runtime (required for pdfkit)
+export const runtime = 'nodejs';
 
 function buildSpecMarkdown(opts: {
   baseUrl: string;
@@ -275,8 +278,16 @@ async function markdownToPdfBuffer(markdown: string): Promise<Buffer> {
 
 export async function GET(req: NextRequest) {
   try {
-    // Require authenticated user
-    await requireUser();
+    // Check authentication (don't redirect for file downloads)
+    const supabase = await getServerSupabase();
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    
+    if (userError || !user) {
+      return NextResponse.json(
+        { error: { code: 'UNAUTHORIZED', message: 'Authentication required' } },
+        { status: 401 }
+      );
+    }
     
     const { searchParams } = req.nextUrl;
     const keyId = searchParams.get('keyId');
