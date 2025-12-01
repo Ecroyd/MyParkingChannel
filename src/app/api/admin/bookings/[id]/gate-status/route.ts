@@ -6,7 +6,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { z } from 'zod';
 
 const bodySchema = z.object({
-  gateStatus: z.enum(['reserved', 'arrived', 'departed']),
+  gateStatus: z.enum(['reserved', 'arrived', 'departed', 'cancelled']),
 });
 
 export async function PATCH(
@@ -80,6 +80,14 @@ export async function PATCH(
           // Only set checked_in_at if it's currently null
           checked_in_at: currentBooking?.checked_in_at || now,
           status: 'checked_out',
+        };
+        break;
+      case 'cancelled':
+        // Reset both timestamps and set status to cancelled
+        updates = {
+          checked_in_at: null,
+          checked_out_at: null,
+          status: 'cancelled',
         };
         break;
     }

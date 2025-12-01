@@ -231,6 +231,7 @@ export default function TodayServerClient({
     const initialGateStatus = getGateStatus({
       checked_in_at: booking.checked_in_at,
       checked_out_at: booking.checked_out_at,
+      status: booking.status,
     });
 
     const [gateStatus, setGateStatus] = useState<GateStatus>(initialGateStatus);
@@ -243,6 +244,7 @@ export default function TodayServerClient({
       const currentGateStatus = getGateStatus({
         checked_in_at: booking.checked_in_at,
         checked_out_at: booking.checked_out_at,
+        status: booking.status,
       });
       
       // Only update if the booking data is different from our last update
@@ -259,7 +261,7 @@ export default function TodayServerClient({
       }
       
       setGateStatus(currentGateStatus);
-    }, [booking.checked_in_at, booking.checked_out_at]);
+    }, [booking.checked_in_at, booking.checked_out_at, booking.status]);
 
     const handleGateStatusChange = (newStatus: GateStatus) => {
       const prev = gateStatus;
@@ -293,8 +295,24 @@ export default function TodayServerClient({
             const updatedGateStatus = getGateStatus({
               checked_in_at: responseData.booking.checked_in_at,
               checked_out_at: responseData.booking.checked_out_at,
+              status: responseData.booking.status,
             });
             setGateStatus(updatedGateStatus);
+            
+            // Update the booking in the parent arrays directly
+            const updatedBooking = {
+              ...booking,
+              checked_in_at: responseData.booking.checked_in_at,
+              checked_out_at: responseData.booking.checked_out_at,
+              status: responseData.booking.status,
+            };
+            
+            // Update arrivals array
+            setArrivals(prev => prev.map(b => b.id === booking.id ? updatedBooking : b));
+            // Update departures array
+            setDepartures(prev => prev.map(b => b.id === booking.id ? updatedBooking : b));
+            // Update currentlyParked array
+            setCurrentlyParked(prev => prev.map(b => b.id === booking.id ? updatedBooking : b));
             
             // Store the last update to prevent reverting during router.refresh()
             lastUpdateRef.current = {
@@ -314,13 +332,15 @@ export default function TodayServerClient({
             }
           }
           
-          // Refresh the page data to get updated booking info
-          router.refresh();
-          
-          // Clear the ref after refresh completes (allow normal syncing again)
+          // Don't refresh immediately - let the local state update handle it
+          // Only refresh after a delay to sync with server
           setTimeout(() => {
-            lastUpdateRef.current = null;
-          }, 1000);
+            router.refresh();
+            // Clear the ref after refresh completes (allow normal syncing again)
+            setTimeout(() => {
+              lastUpdateRef.current = null;
+            }, 500);
+          }, 500);
         } catch (err: any) {
           console.error(err);
           // revert on error
@@ -338,13 +358,15 @@ export default function TodayServerClient({
     const gateStatusColor = {
       'reserved': 'bg-slate-100 text-slate-700',
       'arrived': 'bg-green-100 text-green-700',
-      'departed': 'bg-blue-100 text-blue-700'
+      'departed': 'bg-blue-100 text-blue-700',
+      'cancelled': 'bg-red-100 text-red-700'
     }[gateStatus] || 'bg-gray-100 text-gray-800';
 
     const gateStatusLabel = {
       'reserved': 'Reserved',
       'arrived': 'Arrived',
-      'departed': 'Departed'
+      'departed': 'Departed',
+      'cancelled': 'Cancelled'
     }[gateStatus] || gateStatus;
 
     return (
@@ -420,6 +442,7 @@ export default function TodayServerClient({
               <option value="reserved">Reserved</option>
               <option value="arrived">Arrived</option>
               <option value="departed">Departed</option>
+              <option value="cancelled">Cancelled</option>
             </select>
           </div>
         </td>

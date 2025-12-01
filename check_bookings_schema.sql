@@ -69,8 +69,18 @@ WHERE
 
 -- Check if there are any triggers that update checked_in_at or checked_out_at based on status
 SELECT 
-    t.trigger_name,
-    t.event_manipulation,
+    t.tgname AS trigger_name,
+    CASE 
+        WHEN t.tgtype::integer & 2 = 2 THEN 'BEFORE'
+        WHEN t.tgtype::integer & 64 = 64 THEN 'INSTEAD OF'
+        ELSE 'AFTER'
+    END AS trigger_timing,
+    CASE 
+        WHEN t.tgtype::integer & 4 = 4 THEN 'INSERT'
+        WHEN t.tgtype::integer & 8 = 8 THEN 'DELETE'
+        WHEN t.tgtype::integer & 16 = 16 THEN 'UPDATE'
+        ELSE 'UNKNOWN'
+    END AS trigger_event,
     pg_get_triggerdef(t.oid) AS trigger_definition
 FROM 
     pg_trigger t
@@ -95,4 +105,44 @@ SELECT
 FROM 
     bookings
 LIMIT 5;
+
+-- WHERE THE GATE STATUS COMES FROM:
+-- The gate status dropdown reads from the 'bookings' table, specifically:
+-- - Column: 'checked_in_at' (timestamptz, nullable)
+-- - Column: 'checked_out_at' (timestamptz, nullable)
+-- 
+-- The status is CALCULATED (not read from the 'status' column) using this logic:
+-- - If checked_out_at IS NOT NULL → gate status = 'departed'
+-- - Else if checked_in_at IS NOT NULL → gate status = 'arrived'  
+-- - Else → gate status = 'reserved'
+--
+-- The 'status' column in the bookings table is separate and can be:
+-- 'reserved', 'checked_in', 'checked_out', 'cancelled'
+--
+-- When you manually change the gate status dropdown:
+-- 1. It updates checked_in_at and checked_out_at timestamps
+-- 2. It also updates the 'status' column for consistency
+-- 3. The display is recalculated from the timestamps
+
+-- Check a specific booking to see the relationship
+SELECT 
+    id,
+    reference,
+    status AS booking_status_column,
+    checked_in_at,
+    checked_out_at,
+    CASE 
+        WHEN checked_out_at IS NOT NULL THEN 'departed'
+        WHEN checked_in_at IS NOT NULL THEN 'arrived'
+        ELSE 'reserved'
+    END AS calculated_gate_status,
+    start_at,
+    end_at
+FROM 
+    bookings
+WHERE 
+    status = 'reserved'  -- or 'checked_in' or 'checked_out'
+ORDER BY 
+    created_at DESC
+LIMIT 10;
 
