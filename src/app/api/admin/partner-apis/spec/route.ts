@@ -219,6 +219,243 @@ function buildSpecMarkdown(opts: {
     );
     lines.push('```');
     lines.push('');
+
+    // GET /bookings/{reference}
+    lines.push('---');
+    lines.push('');
+    lines.push('## GET /bookings/{reference}');
+    lines.push('');
+    lines.push(
+      'Retrieves details of a specific booking by its reference. Only bookings for your tenant are accessible.'
+    );
+    lines.push('');
+    lines.push('**Request:**');
+    lines.push('');
+    lines.push('```http');
+    lines.push('GET /api/supplier/v1/bookings/MPC-2026-000123 HTTP/1.1');
+    lines.push(`Host: ${new URL(baseUrl).host}`);
+    lines.push('X-API-Key: <your-api-key>');
+    lines.push('```');
+    lines.push('');
+    lines.push('**Response 200:**');
+    lines.push('');
+    lines.push('```json');
+    lines.push(
+      JSON.stringify(
+        {
+          reference: 'MPC-2026-000123',
+          status: 'confirmed',
+          start_at: '2026-01-10T08:00:00Z',
+          end_at: '2026-01-15T18:00:00Z',
+          customer: {
+            name: 'James Ecroyd',
+            email: 'james@example.com',
+            phone: '+447700900123',
+          },
+          vehicle: {
+            plate: 'AB12CDE',
+            make: 'Audi',
+            model: 'Q5',
+            colour: 'Black',
+          },
+          flight_number: 'BA123',
+          notes: 'Source: CAVU',
+          checked_in_at: null,
+          checked_out_at: null,
+          created_at: '2026-01-01T12:00:00Z',
+        },
+        null,
+        2
+      )
+    );
+    lines.push('```');
+    lines.push('');
+
+    // PATCH /bookings/{reference}
+    lines.push('---');
+    lines.push('');
+    lines.push('## PATCH /bookings/{reference}');
+    lines.push('');
+    lines.push(
+      'Amends an existing booking. You can update dates, customer details, vehicle details, flight number, and notes.'
+    );
+    lines.push('');
+    lines.push('**Important constraints:**');
+    lines.push('');
+    lines.push('- Bookings that have already checked in (`checked_in_at` is not null) cannot be amended.');
+    lines.push('- Bookings with status `cancelled` or `no_show` cannot be amended.');
+    lines.push('- When changing dates, the new dates must have available capacity (availability is recalculated excluding this booking).');
+    lines.push('- Only the following fields can be updated: `start_at`, `end_at`, `customer_name`, `customer_email`, `customer_phone`, `plate`, `car_make`, `car_model`, `car_color`, `flight_number`, `notes`.');
+    lines.push('');
+    lines.push('**Request:**');
+    lines.push('');
+    lines.push('```http');
+    lines.push('PATCH /api/supplier/v1/bookings/MPC-2026-000123 HTTP/1.1');
+    lines.push(`Host: ${new URL(baseUrl).host}`);
+    lines.push('Content-Type: application/json');
+    lines.push('X-API-Key: <your-api-key>');
+    lines.push('```');
+    lines.push('');
+    lines.push('```json');
+    lines.push(
+      JSON.stringify(
+        {
+          start_at: '2026-01-11T08:00:00Z',
+          end_at: '2026-01-16T18:00:00Z',
+          customer_email: 'james.newemail@example.com',
+          plate: 'XY99ABC',
+          flight_number: 'BA456',
+        },
+        null,
+        2
+      )
+    );
+    lines.push('```');
+    lines.push('');
+    lines.push('**Response 200:**');
+    lines.push('');
+    lines.push('```json');
+    lines.push(
+      JSON.stringify(
+        {
+          reference: 'MPC-2026-000123',
+          status: 'confirmed',
+          start_at: '2026-01-11T08:00:00Z',
+          end_at: '2026-01-16T18:00:00Z',
+          customer: {
+            name: 'James Ecroyd',
+            email: 'james.newemail@example.com',
+            phone: '+447700900123',
+          },
+          vehicle: {
+            plate: 'XY99ABC',
+            make: 'Audi',
+            model: 'Q5',
+            colour: 'Black',
+          },
+          flight_number: 'BA456',
+          notes: 'Source: CAVU',
+          checked_in_at: null,
+          checked_out_at: null,
+        },
+        null,
+        2
+      )
+    );
+    lines.push('```');
+    lines.push('');
+    lines.push('**Error 409 BOOKING_IN_PROGRESS:**');
+    lines.push('');
+    lines.push('Returned when attempting to amend a booking that has already checked in.');
+    lines.push('');
+    lines.push('```json');
+    lines.push(
+      JSON.stringify(
+        {
+          error: {
+            code: 'BOOKING_IN_PROGRESS',
+            message: 'Booking has already checked in and can no longer be amended.',
+          },
+        },
+        null,
+        2
+      )
+    );
+    lines.push('```');
+    lines.push('');
+    lines.push('**Error 409 NO_AVAILABILITY:**');
+    lines.push('');
+    lines.push('Returned when attempting to change dates but the new dates are not available.');
+    lines.push('');
+    lines.push('```json');
+    lines.push(
+      JSON.stringify(
+        {
+          error: {
+            code: 'NO_AVAILABILITY',
+            message: 'The requested new dates are not available for this booking.',
+          },
+        },
+        null,
+        2
+      )
+    );
+    lines.push('```');
+    lines.push('');
+
+    // POST /bookings/{reference}/cancel
+    lines.push('---');
+    lines.push('');
+    lines.push('## POST /bookings/{reference}/cancel');
+    lines.push('');
+    lines.push(
+      'Cancels an existing booking. The booking status is set to `cancelled` and a cancellation note is added.'
+    );
+    lines.push('');
+    lines.push('**Important constraints:**');
+    lines.push('');
+    lines.push('- Bookings that have already checked in (`checked_in_at` is not null) cannot be cancelled.');
+    lines.push('- If the booking is already cancelled, the request is idempotent and returns the current state.');
+    lines.push('');
+    lines.push('**Request:**');
+    lines.push('');
+    lines.push('```http');
+    lines.push('POST /api/supplier/v1/bookings/MPC-2026-000123/cancel HTTP/1.1');
+    lines.push(`Host: ${new URL(baseUrl).host}`);
+    lines.push('X-API-Key: <your-api-key>');
+    lines.push('```');
+    lines.push('');
+    lines.push('**Response 200:**');
+    lines.push('');
+    lines.push('```json');
+    lines.push(
+      JSON.stringify(
+        {
+          reference: 'MPC-2026-000123',
+          status: 'cancelled',
+          start_at: '2026-01-10T08:00:00Z',
+          end_at: '2026-01-15T18:00:00Z',
+          customer: {
+            name: 'James Ecroyd',
+            email: 'james@example.com',
+            phone: '+447700900123',
+          },
+          vehicle: {
+            plate: 'AB12CDE',
+            make: 'Audi',
+            model: 'Q5',
+            colour: 'Black',
+          },
+          flight_number: 'BA123',
+          notes: 'Source: CAVU\nCancelled via supplier API (CAVU)',
+          checked_in_at: null,
+          checked_out_at: null,
+        },
+        null,
+        2
+      )
+    );
+    lines.push('```');
+    lines.push('');
+    lines.push('**Error 409 BOOKING_IN_PROGRESS:**');
+    lines.push('');
+    lines.push('Returned when attempting to cancel a booking that has already checked in.');
+    lines.push('');
+    lines.push('```json');
+    lines.push(
+      JSON.stringify(
+        {
+          error: {
+            code: 'BOOKING_IN_PROGRESS',
+            message: 'Booking has already checked in and can no longer be cancelled.',
+          },
+        },
+        null,
+        2
+      )
+    );
+    lines.push('```');
+    lines.push('');
   }
 
   lines.push('---');
@@ -248,31 +485,46 @@ function buildSpecMarkdown(opts: {
 
 async function markdownToPdfBuffer(markdown: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({
-      margin: 50,
-    });
+    try {
+      const doc = new PDFDocument({
+        margin: 50,
+        size: 'A4',
+      });
 
-    const chunks: Buffer[] = [];
+      const chunks: Buffer[] = [];
 
-    doc.on('data', (chunk) => {
-      chunks.push(chunk as Buffer);
-    });
+      doc.on('data', (chunk) => {
+        chunks.push(chunk as Buffer);
+      });
 
-    doc.on('end', () => {
-      resolve(Buffer.concat(chunks));
-    });
+      doc.on('end', () => {
+        try {
+          const buffer = Buffer.concat(chunks);
+          resolve(buffer);
+        } catch (err) {
+          reject(err);
+        }
+      });
 
-    doc.on('error', (err) => {
+      doc.on('error', (err) => {
+        reject(err);
+      });
+
+      // Very simple: write markdown as plain text line-by-line.
+      const lines = markdown.split('\n');
+      lines.forEach((line) => {
+        try {
+          doc.text(line || ' ', { paragraphGap: 4 });
+        } catch (err) {
+          // Skip problematic lines
+          console.warn('Error adding line to PDF:', err);
+        }
+      });
+
+      doc.end();
+    } catch (err) {
       reject(err);
-    });
-
-    // Very simple: write markdown as plain text line-by-line.
-    const lines = markdown.split('\n');
-    lines.forEach((line) => {
-      doc.text(line, { paragraphGap: 4 });
-    });
-
-    doc.end();
+    }
   });
 }
 
@@ -283,6 +535,7 @@ export async function GET(req: NextRequest) {
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     
     if (userError || !user) {
+      console.error('Spec route: Auth error', userError);
       return NextResponse.json(
         { error: { code: 'UNAUTHORIZED', message: 'Authentication required' } },
         { status: 401 }
@@ -292,6 +545,8 @@ export async function GET(req: NextRequest) {
     const { searchParams } = req.nextUrl;
     const keyId = searchParams.get('keyId');
     const format = searchParams.get('format') ?? 'md';
+    
+    console.log('Spec route: keyId=', keyId, 'format=', format);
 
     if (!keyId) {
       return NextResponse.json(
@@ -310,11 +565,14 @@ export async function GET(req: NextRequest) {
       .single();
 
     if (error || !data) {
+      console.error('Spec route: Partner key not found', error);
       return NextResponse.json(
         { error: { code: 'NOT_FOUND', message: 'Partner key not found' } },
         { status: 404 }
       );
     }
+    
+    console.log('Spec route: Found partner key', data.name);
 
     // Verify user has access to this tenant
     const { data: userTenant } = await adminClient
@@ -325,11 +583,14 @@ export async function GET(req: NextRequest) {
       .maybeSingle();
 
     if (!userTenant) {
+      console.error('Spec route: User does not have access to tenant', data.tenant_id);
       return NextResponse.json(
         { error: { code: 'FORBIDDEN', message: 'Access denied to this partner key' } },
         { status: 403 }
       );
     }
+    
+    console.log('Spec route: User has access, generating spec');
 
     const baseUrl = `${req.nextUrl.origin}/api/supplier/v1`;
 
@@ -349,8 +610,13 @@ export async function GET(req: NextRequest) {
         const pdfBuffer = await markdownToPdfBuffer(markdown);
         console.log('PDF generated, buffer size:', pdfBuffer.length);
 
-        // Return Buffer directly - NextResponse accepts Buffer
-        return new NextResponse(pdfBuffer as any, {
+        // Convert Buffer to ArrayBuffer for Response
+        const arrayBuffer = pdfBuffer.buffer.slice(
+          pdfBuffer.byteOffset,
+          pdfBuffer.byteOffset + pdfBuffer.byteLength
+        );
+
+        return new Response(arrayBuffer, {
           status: 200,
           headers: {
             'Content-Type': 'application/pdf',
@@ -382,9 +648,17 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (err: any) {
-    console.error('Spec generation error', err);
+    console.error('Spec generation error:', err);
+    console.error('Error stack:', err?.stack);
+    console.error('Error message:', err?.message);
     return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: 'Failed to generate spec' } },
+      { 
+        error: { 
+          code: 'INTERNAL_ERROR', 
+          message: `Failed to generate spec: ${err?.message || 'Unknown error'}`,
+          details: process.env.NODE_ENV === 'development' ? err?.stack : undefined
+        } 
+      },
       { status: 500 }
     );
   }

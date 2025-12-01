@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -361,7 +363,11 @@ export default function FlightsToday() {
 
       {/* Flights Today Lists */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <FlightCard title="Arrivals Today" subtitle="Booked passengers per flight">
+        <FlightCard 
+          title="Arrivals Today" 
+          subtitle="Booked passengers per flight"
+          href="/admin/today-server"
+        >
           {loading ? (
             <Skeleton />
           ) : (
@@ -371,6 +377,7 @@ export default function FlightsToday() {
         <FlightCard
           title="Departures Today"
           subtitle="Booked passengers per flight"
+          href="/admin/today-server"
         >
           {loading ? (
             <Skeleton />
@@ -467,15 +474,25 @@ function FlightCard({
   title,
   subtitle,
   children,
+  href,
 }: {
   title: string;
   subtitle?: string;
   children: React.ReactNode;
+  href?: string;
 }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg font-semibold">{title}</CardTitle>
+        {href ? (
+          <Link href={href}>
+            <CardTitle className="text-lg font-semibold hover:text-blue-600 hover:underline cursor-pointer transition-colors">
+              {title}
+            </CardTitle>
+          </Link>
+        ) : (
+          <CardTitle className="text-lg font-semibold">{title}</CardTitle>
+        )}
         {subtitle && (
           <p className="text-xs text-gray-500 mt-1">{subtitle}</p>
         )}

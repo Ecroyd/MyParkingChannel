@@ -26,6 +26,7 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
   const [searchTerm, setSearchTerm] = useState('');
   const [sortOrder, setSortOrder] = useState<'closest' | 'most_recent'>('closest');
   const [showFinishedBookings, setShowFinishedBookings] = useState(false);
+  const [showCancelledBookings, setShowCancelledBookings] = useState(false);
   const [selectedBookings, setSelectedBookings] = useState<Set<string>>(new Set());
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -97,6 +98,12 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
     });
   };
 
+  const filterCancelledBookings = (bookings: any[], showCancelled: boolean) => {
+    if (showCancelled) return bookings;
+    
+    return bookings.filter(booking => booking.status !== 'cancelled');
+  };
+
   const sortBookings = (bookings: any[], sortOrder: 'closest' | 'most_recent') => {
     const sorted = [...bookings];
     sorted.sort((a, b) => {
@@ -120,9 +127,10 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
     const dateFiltered = filterBookingsByDate(bookings, dateRangeObj);
     const searchFiltered = filterBookingsBySearch(dateFiltered, searchTerm);
     const finishedFiltered = filterFinishedBookings(searchFiltered, showFinishedBookings);
-    const sorted = sortBookings(finishedFiltered, sortOrder);
+    const cancelledFiltered = filterCancelledBookings(finishedFiltered, showCancelledBookings);
+    const sorted = sortBookings(cancelledFiltered, sortOrder);
     setFilteredBookings(sorted);
-  }, [dateRange, customStartDate, customEndDate, searchTerm, sortOrder, showFinishedBookings, bookings]);
+  }, [dateRange, customStartDate, customEndDate, searchTerm, sortOrder, showFinishedBookings, showCancelledBookings, bookings]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -348,15 +356,27 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
                     Select All ({filteredBookings.length} bookings)
                   </span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="showFinished"
-                    checked={showFinishedBookings}
-                    onCheckedChange={(checked) => setShowFinishedBookings(checked as boolean)}
-                  />
-                  <label htmlFor="showFinished" className="text-sm font-medium text-gray-700 cursor-pointer">
-                    Show finished bookings
-                  </label>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="showFinished"
+                      checked={showFinishedBookings}
+                      onCheckedChange={(checked) => setShowFinishedBookings(checked as boolean)}
+                    />
+                    <label htmlFor="showFinished" className="text-sm font-medium text-gray-700 cursor-pointer">
+                      Show finished bookings
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="showCancelled"
+                      checked={showCancelledBookings}
+                      onCheckedChange={(checked) => setShowCancelledBookings(checked as boolean)}
+                    />
+                    <label htmlFor="showCancelled" className="text-sm font-medium text-gray-700 cursor-pointer">
+                      Show cancelled bookings
+                    </label>
+                  </div>
                 </div>
               </div>
 

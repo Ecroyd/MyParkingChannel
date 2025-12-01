@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { LogIn, LogOut, Car, DollarSign, ArrowUpDown } from 'lucide-react';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
@@ -141,6 +141,47 @@ export default function TodayServerClient({
   const sortedCurrentlyParked = useMemo(() => {
     return sortBookings(currentlyParked, parkedSort, 'start_at');
   }, [currentlyParked, parkedSort]);
+
+  // Group bookings by date
+  const groupBookingsByDate = (bookings: Booking[], dateField: 'start_at' | 'end_at') => {
+    const grouped: Record<string, Booking[]> = {};
+    
+    bookings.forEach(booking => {
+      const date = new Date(booking[dateField]);
+      const dateKey = date.toISOString().split('T')[0]; // YYYY-MM-DD
+      
+      if (!grouped[dateKey]) {
+        grouped[dateKey] = [];
+      }
+      grouped[dateKey].push(booking);
+    });
+    
+    // Sort dates
+    const sortedDates = Object.keys(grouped).sort();
+    
+    return sortedDates.map(date => ({
+      date,
+      bookings: grouped[date],
+      displayDate: new Date(date).toLocaleDateString('en-GB', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      })
+    }));
+  };
+
+  const groupedArrivals = useMemo(() => {
+    return groupBookingsByDate(sortedArrivals, 'start_at');
+  }, [sortedArrivals]);
+
+  const groupedDepartures = useMemo(() => {
+    return groupBookingsByDate(sortedDepartures, 'end_at');
+  }, [sortedDepartures]);
+
+  const groupedCurrentlyParked = useMemo(() => {
+    return groupBookingsByDate(sortedCurrentlyParked, 'start_at');
+  }, [sortedCurrentlyParked]);
 
   const StatCard = ({ label, value, delta, variant, rightSlot }: {
     label: string;
@@ -329,15 +370,34 @@ export default function TodayServerClient({
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {sortedArrivals.map((booking) => (
-                  <BookingRow key={booking.id} booking={booking} type="arrival" />
-                ))}
-                {sortedArrivals.length === 0 && (
+                {groupedArrivals.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
                       No arrivals in this period
                     </td>
                   </tr>
+                ) : (
+                  groupedArrivals.map((group, groupIndex) => (
+                    <React.Fragment key={group.date}>
+                      {/* Date Header */}
+                      <tr className="bg-gray-100 border-t-2 border-gray-300">
+                        <td colSpan={7} className="px-4 py-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-semibold text-gray-700">
+                              {group.displayDate}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              {group.bookings.length} {group.bookings.length === 1 ? 'arrival' : 'arrivals'}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                      {/* Bookings for this date */}
+                      {group.bookings.map((booking) => (
+                        <BookingRow key={booking.id} booking={booking} type="arrival" />
+                      ))}
+                    </React.Fragment>
+                  ))
                 )}
               </tbody>
             </table>
@@ -383,15 +443,34 @@ export default function TodayServerClient({
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {sortedDepartures.map((booking) => (
-                  <BookingRow key={booking.id} booking={booking} type="departure" />
-                ))}
-                {sortedDepartures.length === 0 && (
+                {groupedDepartures.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
                       No departures in this period
                     </td>
                   </tr>
+                ) : (
+                  groupedDepartures.map((group, groupIndex) => (
+                    <React.Fragment key={group.date}>
+                      {/* Date Header */}
+                      <tr className="bg-gray-100 border-t-2 border-gray-300">
+                        <td colSpan={7} className="px-4 py-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-semibold text-gray-700">
+                              {group.displayDate}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              {group.bookings.length} {group.bookings.length === 1 ? 'departure' : 'departures'}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                      {/* Bookings for this date */}
+                      {group.bookings.map((booking) => (
+                        <BookingRow key={booking.id} booking={booking} type="departure" />
+                      ))}
+                    </React.Fragment>
+                  ))
                 )}
               </tbody>
             </table>
@@ -437,15 +516,34 @@ export default function TodayServerClient({
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {sortedCurrentlyParked.map((booking) => (
-                  <BookingRow key={booking.id} booking={booking} type="parked" />
-                ))}
-                {sortedCurrentlyParked.length === 0 && (
+                {groupedCurrentlyParked.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
                       No cars currently parked
                     </td>
                   </tr>
+                ) : (
+                  groupedCurrentlyParked.map((group, groupIndex) => (
+                    <React.Fragment key={group.date}>
+                      {/* Date Header */}
+                      <tr className="bg-gray-100 border-t-2 border-gray-300">
+                        <td colSpan={7} className="px-4 py-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-semibold text-gray-700">
+                              {group.displayDate}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              {group.bookings.length} {group.bookings.length === 1 ? 'vehicle' : 'vehicles'}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                      {/* Bookings for this date */}
+                      {group.bookings.map((booking) => (
+                        <BookingRow key={booking.id} booking={booking} type="parked" />
+                      ))}
+                    </React.Fragment>
+                  ))
                 )}
               </tbody>
             </table>
@@ -456,7 +554,7 @@ export default function TodayServerClient({
       {/* Booking Details Modal */}
       {selectedBookingId && (
         <BookingDetailsModal
-          booking={[...sortedArrivals, ...sortedDepartures, ...sortedCurrentlyParked].find(b => b.id === selectedBookingId) || null}
+          booking={[...arrivals, ...departures, ...currentlyParked].find(b => b.id === selectedBookingId) || null}
           open={!!selectedBookingId}
           onClose={() => setSelectedBookingId(null)}
           onBookingUpdated={() => {

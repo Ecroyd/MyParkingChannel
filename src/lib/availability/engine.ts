@@ -11,6 +11,7 @@ export type AvailabilityEngineInput = {
   endAt: string;   // ISO
   currency?: string;
   channel?: AvailabilityChannel; // 'direct' (default) | 'partner'
+  excludeReference?: string; // Skip this booking when counting usage (for amendments)
   // productId?: string; // accepted in API but not used for capacity yet
 };
 
@@ -83,6 +84,7 @@ export async function calculateAvailability(
     endAt,
     currency: inputCurrency,
     channel = 'direct',
+    excludeReference,
   } = input;
 
   const currency = inputCurrency ?? 'GBP';
@@ -148,13 +150,20 @@ export async function calculateAvailability(
   });
 
   // 2) Load all overlapping bookings for tenant across the period
-  const { data: bookings, error: bookingsError } = await supabase
+  let bookingsQuery = supabase
     .from('bookings')
-    .select('start_at, end_at, status')
+    .select('reference, start_at, end_at, status')
     .eq('tenant_id', tenantId)
     .in('status', ['reserved', 'confirmed', 'checked_in'])
     .lt('start_at', endAt)
     .gt('end_at', startAt);
+
+  // Exclude the specified booking reference (for date change amendments)
+  if (excludeReference) {
+    bookingsQuery = bookingsQuery.neq('reference', excludeReference);
+  }
+
+  const { data: bookings, error: bookingsError } = await bookingsQuery;
 
   if (bookingsError) {
     console.error('Availability engine: bookings error', bookingsError);
