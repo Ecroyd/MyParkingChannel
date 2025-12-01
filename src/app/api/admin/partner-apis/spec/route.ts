@@ -300,9 +300,9 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const supabase = createAdminClient();
+    const adminClient = createAdminClient();
 
-    const { data, error } = await supabase
+    const { data, error } = await adminClient
       .from('partner_api_keys')
       .select('id, name, scopes')
       .eq('id', keyId)
