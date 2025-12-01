@@ -300,9 +300,12 @@ export async function POST(req: Request) {
       }
 
       if (existing) {
-        // Booking already exists
+        // Booking already exists - this is a duplicate
+        console.log(`[IMPORT] Row ${rowIndex} - Duplicate booking found (dedupe_key: ${mappedRow.dedupe_key}, existing_id: ${existing.id})`);
+        
         if (overwriteDuplicates) {
           // Update existing booking
+          console.log(`[IMPORT] Row ${rowIndex} - Overwriting duplicate (overwriteDuplicates=true)`);
           const { error: updateErr } = await supabaseAdmin()
             .from("bookings")
             .update(mappedRow)
@@ -326,13 +329,14 @@ export async function POST(req: Request) {
 
             continue;
           } else {
-            console.log(`[IMPORT] Row ${rowIndex} successfully updated existing booking`);
+            console.log(`[IMPORT] Row ${rowIndex} successfully updated existing booking (duplicate overwritten)`);
             successCount++;
           }
         } else {
           // Skip duplicate - this is success, not an error
-          console.log(`[IMPORT] Row ${rowIndex} skipped (duplicate, overwriteDuplicates=false)`);
+          console.log(`[IMPORT] Row ${rowIndex} skipped (duplicate found, overwriteDuplicates=false) - NOT an error`);
           skippedCount++;
+          console.log(`[IMPORT] Skipped count now: ${skippedCount}, Success count: ${successCount}, Errors: ${errors.length}`);
           continue;
         }
       } else {
@@ -381,7 +385,10 @@ export async function POST(req: Request) {
     }
   }
 
-  console.log(`[IMPORT] Processing complete. Success: ${successCount}, Skipped: ${skippedCount}, Errors: ${errors.length}, Total rows: ${rows.length}`);
+  console.log(`[IMPORT] Processing complete. Total rows: ${rows.length}, Success: ${successCount}, Skipped (duplicates): ${skippedCount}, Errors: ${errors.length}`);
+  if (skippedCount > 0) {
+    console.log(`[IMPORT] ⚠️ ${skippedCount} duplicate(s) were skipped (not overwritten)`);
+  }
 
   await supabaseAdmin().from("import_runs")
     .update({ inserted_count: successCount, skipped_duplicates: skippedCount, error_count: errors.length })

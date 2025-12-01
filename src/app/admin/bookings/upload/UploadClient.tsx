@@ -232,9 +232,26 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
     const skippedCount = j.skippedCount ?? 0;
     const errorCount = j.errorCount ?? 0;
     
-    const msg = overwrite
-      ? `✅ Import complete!\n\nSuccess: ${successCount}\nSkipped: ${skippedCount}\nErrors: ${errorCount}`
-      : `✅ Import complete!\n\nSuccess: ${successCount}\nSkipped (duplicates): ${skippedCount}\nErrors: ${errorCount}`;
+    let msg = `✅ Import complete!\n\n`;
+    msg += `Successfully imported: ${successCount}\n`;
+    
+    if (skippedCount > 0) {
+      if (overwrite) {
+        msg += `Skipped: ${skippedCount}\n`;
+      } else {
+        msg += `⚠️ Skipped (duplicates found): ${skippedCount}\n`;
+        msg += `   These bookings already exist and were not overwritten.\n`;
+      }
+    }
+    
+    if (errorCount > 0) {
+      msg += `❌ Errors: ${errorCount}\n`;
+      msg += `   Check the import errors page for details.`;
+    }
+    
+    if (skippedCount === 0 && errorCount === 0) {
+      msg += `\nAll rows imported successfully!`;
+    }
     
     alert(msg);
     
