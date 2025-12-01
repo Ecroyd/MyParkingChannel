@@ -96,14 +96,21 @@ function buildSpecMarkdown(opts: {
     lines.push('## GET /availability');
     lines.push('');
     lines.push(
-      'Returns pricing and availability for a given product and date range.'
+      'Returns pricing and availability for a given date range. Capacity is calculated per tenant, accounting for existing bookings and channel-specific reservations.'
     );
+    lines.push('');
+    lines.push('**Query Parameters:**');
+    lines.push('');
+    lines.push('- `start_at` (required): ISO 8601 datetime string for arrival');
+    lines.push('- `end_at` (required): ISO 8601 datetime string for departure');
+    lines.push('- `product_id` (optional): Product identifier (defaults to `tenant_pool`)');
+    lines.push('- `currency` (optional): Currency code (defaults to `GBP`)');
     lines.push('');
     lines.push('**Request:**');
     lines.push('');
     lines.push('```http');
     lines.push(
-      'GET /api/supplier/v1/availability?product_id=prod_123&start_at=2026-01-10T08:00:00Z&end_at=2026-01-15T18:00:00Z&currency=GBP&passengers=2 HTTP/1.1'
+      'GET /api/supplier/v1/availability?product_id=tenant_pool&start_at=2026-01-10T08:00:00Z&end_at=2026-01-15T18:00:00Z&currency=GBP HTTP/1.1'
     );
     lines.push(`Host: ${new URL(baseUrl).host}`);
     lines.push('X-API-Key: <your-api-key>');
@@ -115,7 +122,7 @@ function buildSpecMarkdown(opts: {
     lines.push(
       JSON.stringify(
         {
-          product_id: 'prod_123',
+          product_id: 'tenant_pool',
           start_at: '2026-01-10T08:00:00Z',
           end_at: '2026-01-15T18:00:00Z',
           currency: 'GBP',
@@ -124,22 +131,10 @@ function buildSpecMarkdown(opts: {
           pricing: {
             rate_plan: 'standard',
             days: 5,
-            base_price: 59.99,
-            surcharges: [
-              {
-                code: 'LATE_RETURN',
-                description: 'Late return fee',
-                amount: 5.0,
-              },
-            ],
-            discounts: [
-              {
-                code: 'ONLINE10',
-                description: 'Online booking discount',
-                amount: -3.0,
-              },
-            ],
-            total_price: 61.99,
+            base_price: 50.0,
+            surcharges: [],
+            discounts: [],
+            total_price: 50.0,
           },
         },
         null,
