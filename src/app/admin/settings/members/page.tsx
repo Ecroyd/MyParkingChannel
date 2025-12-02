@@ -18,7 +18,7 @@ export default async function MembersPage() {
   const adminClient = await createAdminClient();
 
   // Fetch current members
-  const { data: members, error: membersError } = await adminClient
+  const { data: membersRaw, error: membersError } = await adminClient
     .from('user_tenants')
     .select(`
       user_id,
@@ -33,6 +33,15 @@ export default async function MembersPage() {
     .eq('tenant_id', ctx.tenantId)
     .order('created_at', { ascending: true });
 
+  // Transform members: Supabase returns users as an array even for one-to-one relationships
+  const members = membersRaw?.map((m: any) => ({
+    user_id: m.user_id,
+    role: m.role,
+    is_default: m.is_default,
+    created_at: m.created_at,
+    users: Array.isArray(m.users) && m.users.length > 0 ? m.users[0] : null,
+  })) || [];
+
   // Fetch pending invitations
   const { data: invitations, error: invitationsError } = await adminClient
     .from('tenant_invitations')
@@ -43,11 +52,11 @@ export default async function MembersPage() {
     .order('created_at', { ascending: false });
 
   // Check how many owners exist
-  const ownerCount = members?.filter((m: any) => m.role === 'owner').length || 0;
+  const ownerCount = members.filter((m) => m.role === 'owner').length;
 
   return (
     <MembersClient
-      members={members || []}
+      members={members}
       invitations={invitations || []}
       currentUserId={ctx.userId}
       currentUserRole={ctx.role}
