@@ -82,24 +82,23 @@ export async function getPriceForStay(opts: {
     ? byAll 
     : byNull;
 
-  if (activeSet.length === 0) {
-    return null;
-  }
-
   // Sort by priority (lower number = higher priority)
-  activeSet.sort((a, b) => (a.priority || 100) - (b.priority || 100));
+  if (activeSet.length > 0) {
+    activeSet.sort((a, b) => (a.priority || 100) - (b.priority || 100));
 
-  // Get the first matching rule's tier value
-  const rule = activeSet[0];
-  // price_tiers is returned as an array from Supabase join, get first element
-  const tier = Array.isArray(rule.price_tiers) 
-    ? rule.price_tiers[0] 
-    : rule.price_tiers;
-  if (!tier || !tier.value) {
-    return null;
+    // Get the first matching rule's tier value
+    const rule = activeSet[0];
+    // price_tiers is returned as an array from Supabase join, get first element
+    const tier = Array.isArray(rule.price_tiers) 
+      ? rule.price_tiers[0] 
+      : rule.price_tiers;
+    if (tier && tier.value) {
+      return parseFloat(tier.value.toString());
+    }
   }
 
-  return parseFloat(tier.value.toString());
+  // If no pricing found in any channel, return null (caller should fallback to tenant_pricing)
+  return null;
 }
 
 /**
@@ -173,20 +172,20 @@ export async function getExtraDayPrice(opts: {
     ? byAll 
     : byNull;
 
-  if (activeSet.length === 0) {
-    return null;
+  // Sort by priority (lower number = higher priority)
+  if (activeSet.length > 0) {
+    activeSet.sort((a, b) => (a.priority || 100) - (b.priority || 100));
+    const rule = activeSet[0];
+    // price_tiers is returned as an array from Supabase join, get first element
+    const tier = Array.isArray(rule.price_tiers) 
+      ? rule.price_tiers[0] 
+      : rule.price_tiers;
+    if (tier && tier.value) {
+      return parseFloat(tier.value.toString());
+    }
   }
 
-  activeSet.sort((a, b) => (a.priority || 100) - (b.priority || 100));
-  const rule = activeSet[0];
-  // price_tiers is returned as an array from Supabase join, get first element
-  const tier = Array.isArray(rule.price_tiers) 
-    ? rule.price_tiers[0] 
-    : rule.price_tiers;
-  if (!tier || !tier.value) {
-    return null;
-  }
-
-  return parseFloat(tier.value.toString());
+  // If no pricing found in any channel, return null (caller should fallback to tenant_pricing)
+  return null;
 }
 

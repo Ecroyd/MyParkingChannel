@@ -196,8 +196,30 @@ export async function PUT(req: NextRequest) {
     // Normalize channel: empty string means null (all channels)
     const channel = channelRaw && channelRaw !== '' ? channelRaw : null;
     
-    // If channel is null (all channels), we'll save to all individual channels
-    const channelsToSave = channel ? [channel] : ['direct', 'agent', 'web', 'default'];
+    // If channel is null (all channels), fetch all active channels for this tenant
+    let channelsToSave: string[];
+    if (channel) {
+      channelsToSave = [channel];
+    } else {
+      // Fetch all active channels for this tenant
+      const { data: allChannels, error: channelsError } = await adminSupabase
+        .from('tenant_channels')
+        .select('code')
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true)
+        .order('sort_order', { ascending: true });
+
+      if (channelsError) {
+        console.error('Error fetching channels:', channelsError);
+        // Fallback to default channels if fetch fails
+        channelsToSave = ['direct', 'agent', 'web', 'all'];
+      } else {
+        // Extract channel codes, excluding 'all' itself (we don't want to save to 'all' channel)
+        channelsToSave = (allChannels || [])
+          .map((ch: any) => ch.code)
+          .filter((code: string) => code !== 'all'); // Don't save to 'all' channel, save to all individual channels
+      }
+    }
 
     // Get season info for code generation
     const { data: season, error: seasonError } = await adminSupabase
@@ -214,200 +236,227 @@ export async function PUT(req: NextRequest) {
     const seasonCode = season.code;
     const ratePlanCode = ratePlanId || 'default';
 
-    // Process each row - save to all channels if "all channels" was selected
+    // Batch upsert all tiers first
+    const tiersToUpsert: Array<{
+      tenant_id: string;
+      code: string;
+      label: string;
+      type: string;
+      value: number;
+      is_active: boolean;
+      sort_order: number;
+    }> = [];
+
+    // Collect all tier data
     for (const row of rows || []) {
       if (row.days === undefined || row.price === null) continue;
 
       const days = row.days;
       const price = row.price;
 
-      // Save to each channel
       for (const channelToSave of channelsToSave) {
-        const channelCode = channelToSave;
-        
-        // Generate deterministic tier code
-        const tierCode = `los_${seasonCode}_${ratePlanCode}_${channelCode}_${days}`;
-        const tierLabel = `LOS ${days} days – ${season.name} – ${channelCode}`;
+        const tierCode = `los_${seasonCode}_${ratePlanCode}_${channelToSave}_${days}`;
+        const tierLabel = `LOS ${days} days – ${season.name} – ${channelToSave}`;
 
-        // Check if tier exists
-        const { data: existingTier } = await adminSupabase
-          .from('price_tiers')
-          .select('id')
-          .eq('tenant_id', tenantId)
-          .eq('code', tierCode)
-          .maybeSingle();
+        tiersToUpsert.push({
+          tenant_id: tenantId,
+          code: tierCode,
+          label: tierLabel,
+          type: 'multiplier',
+          value: price,
+          is_active: true,
+          sort_order: days,
+        });
+      }
+    }
 
-        let tierId: string;
-        
-        if (existingTier) {
-          // Update existing tier
-          const { data: updatedTier, error: updateError } = await adminSupabase
-            .from('price_tiers')
-            .update({
-              label: tierLabel,
-              value: price,
-              is_active: true,
-              sort_order: days,
-            })
-            .eq('id', existingTier.id)
-            .select()
-            .single();
+    // Batch upsert all tiers at once
+    if (tiersToUpsert.length > 0) {
+      const { data: upsertedTiers, error: tiersError } = await adminSupabase
+        .from('price_tiers')
+        .upsert(tiersToUpsert, {
+          onConflict: 'tenant_id,code',
+          ignoreDuplicates: false,
+        })
+        .select('id, code');
 
-          if (updateError) {
-            console.error('Error updating tier:', updateError);
-            continue;
-          }
-          tierId = updatedTier.id;
-        } else {
-          // Insert new tier
-          const { data: newTier, error: insertError } = await adminSupabase
-            .from('price_tiers')
-            .insert({
-              tenant_id: tenantId,
-              code: tierCode,
-              label: tierLabel,
-              type: 'multiplier',
-              value: price,
-              is_active: true,
-              sort_order: days,
-            })
-            .select()
-            .single();
+      if (tiersError) {
+        console.error('Error upserting tiers:', tiersError);
+        return NextResponse.json({ error: 'Failed to save pricing tiers' }, { status: 500 });
+      }
 
-          if (insertError) {
-            console.error('Error inserting tier:', insertError);
-            continue;
-          }
-          tierId = newTier.id;
+      // Create a map of tier code to tier ID for quick lookup
+      const tierMap = new Map<string, string>();
+      if (upsertedTiers) {
+        for (const tier of upsertedTiers) {
+          tierMap.set(tier.code, tier.id);
         }
+      }
 
-        // Check if pricing rule exists
-        const { data: existingRule } = await adminSupabase
+      // If some tiers already existed, fetch their IDs
+      if (tierMap.size < tiersToUpsert.length) {
+        const codesToFetch = tiersToUpsert
+          .map(t => t.code)
+          .filter(code => !tierMap.has(code));
+        
+        if (codesToFetch.length > 0) {
+          const { data: existingTiers } = await adminSupabase
+            .from('price_tiers')
+            .select('id, code')
+            .eq('tenant_id', tenantId)
+            .in('code', codesToFetch);
+
+          if (existingTiers) {
+            for (const tier of existingTiers) {
+              tierMap.set(tier.code, tier.id);
+            }
+          }
+        }
+      }
+
+      // Batch upsert all pricing rules
+      const rulesToUpsert: Array<{
+        tenant_id: string;
+        rate_plan_id: string | null;
+        season_id: string;
+        tier_id: string;
+        channel: string;
+        min_stay: number;
+        max_stay: number;
+        priority: number;
+        is_active: boolean;
+      }> = [];
+
+      for (const row of rows || []) {
+        if (row.days === undefined || row.price === null) continue;
+
+        const days = row.days;
+
+        for (const channelToSave of channelsToSave) {
+          const tierCode = `los_${seasonCode}_${ratePlanCode}_${channelToSave}_${days}`;
+          const tierId = tierMap.get(tierCode);
+
+          if (!tierId) {
+            console.error(`Tier ID not found for code: ${tierCode}`);
+            continue;
+          }
+
+          rulesToUpsert.push({
+            tenant_id: tenantId,
+            rate_plan_id: ratePlanId || null,
+            season_id: seasonId,
+            tier_id: tierId,
+            channel: channelToSave,
+            min_stay: days,
+            max_stay: days,
+            priority: 100,
+            is_active: true,
+          });
+        }
+      }
+
+      // Batch upsert all rules at once
+      if (rulesToUpsert.length > 0) {
+        const { error: rulesError } = await adminSupabase
           .from('pricing_rules')
-          .select('id')
-          .eq('tenant_id', tenantId)
-          .eq('season_id', seasonId)
-          .eq('rate_plan_id', ratePlanId || null)
-          .eq('channel', channelToSave)
-          .eq('min_stay', days)
-          .eq('max_stay', days)
-          .maybeSingle();
+          .upsert(rulesToUpsert, {
+            onConflict: 'tenant_id,season_id,rate_plan_id,channel,min_stay,max_stay',
+            ignoreDuplicates: false,
+          });
 
-        if (existingRule) {
-          // Update existing rule
-          await adminSupabase
-            .from('pricing_rules')
-            .update({
-              tier_id: tierId,
-              priority: 100,
-              is_active: true,
-            })
-            .eq('id', existingRule.id);
-        } else {
-          // Insert new rule
-          await adminSupabase
-            .from('pricing_rules')
-            .insert({
-              tenant_id: tenantId,
-              rate_plan_id: ratePlanId || null,
-              season_id: seasonId,
-              tier_id: tierId,
-              channel: channelToSave,
-              min_stay: days,
-              max_stay: days,
-              priority: 100,
-              is_active: true,
-            });
+        if (rulesError) {
+          console.error('Error upserting pricing rules:', rulesError);
+          return NextResponse.json({ error: 'Failed to save pricing rules' }, { status: 500 });
         }
       }
     }
 
-    // Handle extra day price - save to all channels if "all channels" was selected
+    // Handle extra day price - batch upsert for all channels
     if (extraDayPrice !== null && extraDayPrice !== undefined) {
+      const extraTiersToUpsert: Array<{
+        tenant_id: string;
+        code: string;
+        label: string;
+        type: string;
+        value: number;
+        is_active: boolean;
+        sort_order: number;
+      }> = [];
+
       for (const channelToSave of channelsToSave) {
-        const channelCode = channelToSave;
-        const extraTierCode = `los_extra_${seasonCode}_${ratePlanCode}_${channelCode}_after_${maxDays || 30}`;
-        const extraTierLabel = `Extra day after ${maxDays || 30} days – ${season.name} – ${channelCode}`;
+        const extraTierCode = `los_extra_${seasonCode}_${ratePlanCode}_${channelToSave}_after_${maxDays || 30}`;
+        const extraTierLabel = `Extra day after ${maxDays || 30} days – ${season.name} – ${channelToSave}`;
 
-        // Check if extra tier exists
-        const { data: existingExtraTier } = await adminSupabase
+        extraTiersToUpsert.push({
+          tenant_id: tenantId,
+          code: extraTierCode,
+          label: extraTierLabel,
+          type: 'multiplier',
+          value: extraDayPrice,
+          is_active: true,
+          sort_order: 9999,
+        });
+      }
+
+      // Batch upsert extra tiers
+      if (extraTiersToUpsert.length > 0) {
+        const { data: upsertedExtraTiers, error: extraTiersError } = await adminSupabase
           .from('price_tiers')
-          .select('id')
-          .eq('tenant_id', tenantId)
-          .eq('code', extraTierCode)
-          .maybeSingle();
+          .upsert(extraTiersToUpsert, {
+            onConflict: 'tenant_id,code',
+            ignoreDuplicates: false,
+          })
+          .select('id, code');
 
-        let extraTierId: string;
-        
-        if (existingExtraTier) {
-          // Update existing tier
-          const { data: updatedTier, error: updateError } = await adminSupabase
-            .from('price_tiers')
-            .update({
-              label: extraTierLabel,
-              value: extraDayPrice,
-              is_active: true,
-            })
-            .eq('id', existingExtraTier.id)
-            .select()
-            .single();
-
-          if (updateError) {
-            console.error('Error updating extra tier:', updateError);
-            continue;
+        if (extraTiersError) {
+          console.error('Error upserting extra tiers:', extraTiersError);
+        } else if (upsertedExtraTiers) {
+          // Create map of extra tier codes to IDs
+          const extraTierMap = new Map<string, string>();
+          for (const tier of upsertedExtraTiers) {
+            extraTierMap.set(tier.code, tier.id);
           }
-          extraTierId = updatedTier.id;
-        } else {
-          // Insert new tier
-          const { data: newTier, error: insertError } = await adminSupabase
-            .from('price_tiers')
-            .insert({
-              tenant_id: tenantId,
-              code: extraTierCode,
-              label: extraTierLabel,
-              type: 'multiplier',
-              value: extraDayPrice,
-              is_active: true,
-              sort_order: 9999,
-            })
-            .select()
-            .single();
 
-          if (insertError) {
-            console.error('Error inserting extra tier:', insertError);
-            continue;
+          // If some tiers already existed, fetch their IDs
+          if (extraTierMap.size < extraTiersToUpsert.length) {
+            const codesToFetch = extraTiersToUpsert
+              .map(t => t.code)
+              .filter(code => !extraTierMap.has(code));
+            
+            if (codesToFetch.length > 0) {
+              const { data: existingExtraTiers } = await adminSupabase
+                .from('price_tiers')
+                .select('id, code')
+                .eq('tenant_id', tenantId)
+                .in('code', codesToFetch);
+
+              if (existingExtraTiers) {
+                for (const tier of existingExtraTiers) {
+                  extraTierMap.set(tier.code, tier.id);
+                }
+              }
+            }
           }
-          extraTierId = newTier.id;
-        }
 
-        if (extraTierId) {
-          // Check if extra day rule exists
-          const { data: existingExtraRule } = await adminSupabase
-            .from('pricing_rules')
-            .select('id')
-            .eq('tenant_id', tenantId)
-            .eq('season_id', seasonId)
-            .eq('rate_plan_id', ratePlanId || null)
-            .eq('channel', channelToSave)
-            .eq('min_stay', (maxDays || 30) + 1)
-            .is('max_stay', null)
-            .maybeSingle();
+          // Build rules for extra day pricing
+          const extraRulesToUpsert: Array<{
+            tenant_id: string;
+            rate_plan_id: string | null;
+            season_id: string;
+            tier_id: string;
+            channel: string;
+            min_stay: number;
+            max_stay: null;
+            priority: number;
+            is_active: boolean;
+          }> = [];
 
-          if (existingExtraRule) {
-            // Update existing rule
-            await adminSupabase
-              .from('pricing_rules')
-              .update({
-                tier_id: extraTierId,
-                priority: 100,
-                is_active: true,
-              })
-              .eq('id', existingExtraRule.id);
-          } else {
-            // Insert new rule
-            await adminSupabase
-              .from('pricing_rules')
-              .insert({
+          for (const channelToSave of channelsToSave) {
+            const extraTierCode = `los_extra_${seasonCode}_${ratePlanCode}_${channelToSave}_after_${maxDays || 30}`;
+            const extraTierId = extraTierMap.get(extraTierCode);
+
+            if (extraTierId) {
+              extraRulesToUpsert.push({
                 tenant_id: tenantId,
                 rate_plan_id: ratePlanId || null,
                 season_id: seasonId,
@@ -418,22 +467,31 @@ export async function PUT(req: NextRequest) {
                 priority: 100,
                 is_active: true,
               });
+            }
+          }
+
+          // Batch upsert extra rules
+          if (extraRulesToUpsert.length > 0) {
+            await adminSupabase
+              .from('pricing_rules')
+              .upsert(extraRulesToUpsert, {
+                onConflict: 'tenant_id,season_id,rate_plan_id,channel,min_stay,max_stay',
+                ignoreDuplicates: false,
+              });
           }
         }
       }
     } else {
-      // Delete existing extra day rules for all channels if extraDayPrice is null
-      for (const channelToSave of channelsToSave) {
-        await adminSupabase
-          .from('pricing_rules')
-          .delete()
-          .eq('tenant_id', tenantId)
-          .eq('season_id', seasonId)
-          .eq('rate_plan_id', ratePlanId || null)
-          .eq('channel', channelToSave)
-          .gt('min_stay', maxDays || 30)
-          .is('max_stay', null);
-      }
+      // Delete existing extra day rules if extraDayPrice is null (batch delete)
+      await adminSupabase
+        .from('pricing_rules')
+        .delete()
+        .eq('tenant_id', tenantId)
+        .eq('season_id', seasonId)
+        .is('rate_plan_id', ratePlanId || null)
+        .in('channel', channelsToSave)
+        .gt('min_stay', maxDays || 30)
+        .is('max_stay', null);
     }
 
     // Return updated matrix for the selected channel (or first channel if "all" was selected)

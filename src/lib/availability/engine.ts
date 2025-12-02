@@ -296,13 +296,19 @@ export async function calculateAvailability(
     }
   }
 
-  // Try to get LOS pricing for this channel
+  // Try to get LOS pricing for this channel with fallback chain:
+  // 1. Try specific channel (e.g., 'cavu')
+  // 2. Fallback to 'agent' channel
+  // 3. Fallback to 'all' channel
+  // 4. Final fallback to tenant_pricing (never free)
   let base_price = 0;
   let currencyFromPricing = currency;
   
   try {
     const { getPriceForStay } = await import('@/lib/pricing/channel');
-    const losPrice = await getPriceForStay({
+    
+    // Try specific channel first
+    let losPrice = await getPriceForStay({
       tenantId,
       seasonId,
       ratePlanId: null,
@@ -310,10 +316,32 @@ export async function calculateAvailability(
       days,
     });
 
-    if (losPrice !== null) {
+    // If not found and not already 'agent', try 'agent' channel
+    if (losPrice === null && effectiveChannelCode !== 'agent') {
+      losPrice = await getPriceForStay({
+        tenantId,
+        seasonId,
+        ratePlanId: null,
+        channelCode: 'agent',
+        days,
+      });
+    }
+
+    // If still not found, try 'all' channel
+    if (losPrice === null && effectiveChannelCode !== 'all') {
+      losPrice = await getPriceForStay({
+        tenantId,
+        seasonId,
+        ratePlanId: null,
+        channelCode: 'all',
+        days,
+      });
+    }
+
+    if (losPrice !== null && losPrice > 0) {
       base_price = losPrice;
     } else {
-      // Fallback to tenant_pricing
+      // Final fallback to tenant_pricing (ensures pricing is never free)
       const { data: pricing } = await supabase
         .from('tenant_pricing')
         .select('daily_rate, currency')
@@ -326,7 +354,7 @@ export async function calculateAvailability(
     }
   } catch (error) {
     console.error('Error getting channel-specific pricing, falling back to tenant_pricing:', error);
-    // Fallback to tenant_pricing
+    // Fallback to tenant_pricing (ensures pricing is never free)
     const { data: pricing } = await supabase
       .from('tenant_pricing')
       .select('daily_rate, currency')
@@ -336,6 +364,16 @@ export async function calculateAvailability(
     const basePricePerDay: number = Number(pricing?.daily_rate ?? 10);
     base_price = basePricePerDay * days;
     currencyFromPricing = pricing?.currency || currency;
+  }
+
+  // Ensure pricing is never zero/free
+  if (base_price <= 0) {
+    base_price = 10 * days; // Minimum £10 per day fallback
+  }
+
+  // Ensure pricing is never zero/free (final safety check)
+  if (base_price <= 0) {
+    base_price = 10 * days; // Minimum £10 per day fallback
   }
 
   const surcharges: { code: string; description?: string; amount: number }[] = [];
