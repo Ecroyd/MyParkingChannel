@@ -91,7 +91,10 @@ export async function getPriceForStay(opts: {
 
   // Get the first matching rule's tier value
   const rule = activeSet[0];
-  const tier = rule.price_tiers;
+  // price_tiers is returned as an array from Supabase join, get first element
+  const tier = Array.isArray(rule.price_tiers) 
+    ? rule.price_tiers[0] 
+    : rule.price_tiers;
   if (!tier || !tier.value) {
     return null;
   }
@@ -176,7 +179,10 @@ export async function getExtraDayPrice(opts: {
 
   activeSet.sort((a, b) => (a.priority || 100) - (b.priority || 100));
   const rule = activeSet[0];
-  const tier = rule.price_tiers;
+  // price_tiers is returned as an array from Supabase join, get first element
+  const tier = Array.isArray(rule.price_tiers) 
+    ? rule.price_tiers[0] 
+    : rule.price_tiers;
   if (!tier || !tier.value) {
     return null;
   }
