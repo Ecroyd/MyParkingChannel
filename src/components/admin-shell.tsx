@@ -8,6 +8,7 @@ import { Menu, X } from 'lucide-react';
 import Sidebar from '@/components/admin/Sidebar';
 import MobileSidebar from '@/components/admin/MobileSidebar';
 import InstallPWAButton from '@/components/InstallPWAButton';
+import type { UserRole } from '@/lib/auth/permissions';
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -24,6 +25,7 @@ export default function AdminShell({ children }: AdminShellProps) {
   const [tenant, setTenant] = useState<any>(null);
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [userRole, setUserRole] = useState<UserRole>('user');
   const router = useRouter();
 
   const loadTenantData = async () => {
@@ -61,6 +63,11 @@ export default function AdminShell({ children }: AdminShellProps) {
 
       if (!tenantError && userTenant?.tenants) {
         const tenant = Array.isArray(userTenant.tenants) ? userTenant.tenants[0] : userTenant.tenants;
+        
+        // Set user role
+        if (userTenant.role) {
+          setUserRole(userTenant.role as UserRole);
+        }
         
         // Get logo from tenant_public_profile
         const { data: profile, error: profileError } = await supabase
@@ -136,7 +143,7 @@ export default function AdminShell({ children }: AdminShellProps) {
   return (
     <div className="flex h-screen bg-[#f9fafb] text-gray-900">
       {/* Desktop Sidebar */}
-      <Sidebar features={isPlatformAdmin ? ['platform_admin'] : []} />
+      <Sidebar features={isPlatformAdmin ? ['platform_admin'] : []} userRole={userRole} />
       
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden bg-glass-gradient">
@@ -211,7 +218,7 @@ export default function AdminShell({ children }: AdminShellProps) {
                 
                 {/* Mobile Navigation Content */}
                 <div className="flex-1 overflow-y-auto p-4">
-                  <MobileSidebar features={isPlatformAdmin ? ['platform_admin'] : []} />
+                  <MobileSidebar features={isPlatformAdmin ? ['platform_admin'] : []} userRole={userRole} />
                 </div>
               </div>
             </div>
