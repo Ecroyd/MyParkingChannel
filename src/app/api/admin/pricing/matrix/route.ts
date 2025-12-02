@@ -92,7 +92,10 @@ export async function GET(req: NextRequest) {
 
     // Process rules to build day-to-price mapping
     for (const rule of rules || []) {
-      const tier = rule.price_tiers;
+      // price_tiers is returned as an array from Supabase join, get first element
+      const tier = Array.isArray(rule.price_tiers) 
+        ? rule.price_tiers[0] 
+        : rule.price_tiers;
       if (!tier || !tier.value) continue;
 
       const minStay = rule.min_stay;
@@ -114,7 +117,10 @@ export async function GET(req: NextRequest) {
 
     // Now check for extra day rules
     for (const rule of rules || []) {
-      const tier = rule.price_tiers;
+      // price_tiers is returned as an array from Supabase join, get first element
+      const tier = Array.isArray(rule.price_tiers) 
+        ? rule.price_tiers[0] 
+        : rule.price_tiers;
       if (!tier || !tier.value) continue;
 
       const minStay = rule.min_stay;

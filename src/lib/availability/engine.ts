@@ -301,7 +301,7 @@ export async function calculateAvailability(
   let currencyFromPricing = currency;
   
   try {
-    const { getPriceForStay } = await import('./pricing/channel');
+    const { getPriceForStay } = await import('@/lib/pricing/channel');
     const losPrice = await getPriceForStay({
       tenantId,
       seasonId,
