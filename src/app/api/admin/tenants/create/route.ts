@@ -1,6 +1,7 @@
 // src/app/api/admin/tenants/create/route.ts
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
+import { seedDefaultChannels } from '@/lib/channels/seed';
 
 export async function POST(req: Request) {
   try {
@@ -107,6 +108,15 @@ export async function POST(req: Request) {
       email: ownerEmail,
       is_active: true,
     });
+
+    // 7. Seed default channels
+    try {
+      await seedDefaultChannels(sb, tenantId);
+      console.log('✅ Tenant Creation: Successfully seeded default channels');
+    } catch (channelErr) {
+      console.error('⚠️ Tenant Creation: Failed to seed channels (non-fatal):', channelErr);
+      // Don't fail tenant creation if channel seeding fails
+    }
 
     return NextResponse.json({ tenantId, ownerUserId }, { status: 200 });
   } catch (err: any) {

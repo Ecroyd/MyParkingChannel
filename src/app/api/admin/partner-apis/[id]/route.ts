@@ -36,6 +36,26 @@ export async function PATCH(
       updates.scopes = body.scopes;
     }
 
+    if (body.channel_id !== undefined) {
+      // Validate channel_id belongs to tenant if provided
+      if (body.channel_id) {
+        const { data: channel, error: channelError } = await supabase
+          .from("tenant_channels")
+          .select("id")
+          .eq("id", body.channel_id)
+          .eq("tenant_id", userTenant.tenant_id)
+          .single();
+
+        if (channelError || !channel) {
+          return NextResponse.json(
+            { error: "Invalid channel_id or channel does not belong to tenant" },
+            { status: 400 }
+          );
+        }
+      }
+      updates.channel_id = body.channel_id || null;
+    }
+
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: "No valid updates provided" }, { status: 400 });
     }
@@ -46,7 +66,20 @@ export async function PATCH(
       .update(updates)
       .eq("id", resolvedParams.id)
       .eq("tenant_id", userTenant.tenant_id)
-      .select("id, name, scopes, is_active, last_used_at, created_at")
+      .select(`
+        id,
+        name,
+        scopes,
+        is_active,
+        last_used_at,
+        created_at,
+        channel_id,
+        tenant_channels (
+          id,
+          code,
+          name
+        )
+      `)
       .single();
 
     if (updateError) {

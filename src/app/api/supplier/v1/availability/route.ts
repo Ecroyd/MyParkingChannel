@@ -48,6 +48,7 @@ export async function GET(req: NextRequest) {
       endAt: end_at,
       currency,
       channel: 'partner',
+      channelCode: auth.channelCode, // Use channel from API key
     });
 
     // keep product_id from request in response for consistency

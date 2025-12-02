@@ -7,6 +7,7 @@ export type SupplierAuthContext = {
   tenantId: string;
   partnerName: string;
   scopes: string[]; // ['products', 'availability', 'bookings']
+  channelCode: string; // Channel code from tenant_channels (e.g. 'cavu', 'holiday_extras')
 };
 
 export class SupplierAuthError extends Error {
@@ -36,7 +37,18 @@ export async function authenticateSupplierApi(
 
   const { data, error } = await supabase
     .from('partner_api_keys')
-    .select('id, tenant_id, name, scopes, is_active')
+    .select(`
+      id,
+      tenant_id,
+      name,
+      scopes,
+      is_active,
+      channel_id,
+      tenant_channels (
+        code,
+        is_active
+      )
+    `)
     .eq('api_key_hash', api_key_hash)
     .single();
 
@@ -46,6 +58,18 @@ export async function authenticateSupplierApi(
 
   if (!data.is_active) {
     throw new SupplierAuthError(403, 'FORBIDDEN', 'API key is disabled');
+  }
+
+  // Get channel code from linked channel
+  // Default to 'agent' if no channel is set (agent requests default to agent channel)
+  let channelCode = 'agent';
+  if (data.channel_id && data.tenant_channels) {
+    const channel = Array.isArray(data.tenant_channels)
+      ? data.tenant_channels[0]
+      : data.tenant_channels;
+    if (channel && channel.is_active) {
+      channelCode = channel.code;
+    }
   }
 
   // Update last_used_at (fire and forget)
@@ -59,6 +83,7 @@ export async function authenticateSupplierApi(
     tenantId: data.tenant_id,
     partnerName: data.name,
     scopes: data.scopes ?? [],
+    channelCode,
   };
 }
 

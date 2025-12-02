@@ -10,7 +10,8 @@ export type AvailabilityEngineInput = {
   startAt: string; // ISO
   endAt: string;   // ISO
   currency?: string;
-  channel?: AvailabilityChannel; // 'direct' (default) | 'partner'
+  channel?: AvailabilityChannel | string; // 'direct' (default) | 'partner' | channel code (e.g. 'cavu', 'holiday_extras')
+  channelCode?: string; // Explicit channel code from tenant_channels (takes precedence over channel)
   excludeReference?: string; // Skip this booking when counting usage (for amendments)
   // productId?: string; // accepted in API but not used for capacity yet
 };
@@ -84,8 +85,13 @@ export async function calculateAvailability(
     endAt,
     currency: inputCurrency,
     channel = 'direct',
+    channelCode,
     excludeReference,
   } = input;
+
+  // Use explicit channelCode if provided, otherwise derive from channel
+  // Partner requests default to 'agent' channel if no specific channel is set
+  const effectiveChannelCode = channelCode || (channel === 'partner' ? 'agent' : channel);
 
   const currency = inputCurrency ?? 'GBP';
   const supabase = createAdminClient();
@@ -261,16 +267,77 @@ export async function calculateAvailability(
     availability_status = 'sold_out';
   }
 
-  // Get pricing from tenant_pricing
-  const { data: pricing, error: pricingError } = await supabase
-    .from('tenant_pricing')
-    .select('daily_rate, currency')
-    .eq('tenant_id', tenantId)
-    .maybeSingle();
+  // Try to get channel-specific pricing using LOS matrix
+  // First, try to find season for the stay dates
+  let seasonId: string | null = null;
+  const firstDate = stayDates[0];
 
-  // Default pricing if tenant_pricing not found
-  const basePricePerDay: number = Number(pricing?.daily_rate ?? 10);
-  const base_price = basePricePerDay * days;
+  // Find season that covers these dates
+  const { data: seasonRanges } = await supabase
+    .from('season_ranges')
+    .select('season_id, range')
+    .eq('tenant_id', tenantId)
+    .limit(100); // Get all ranges for tenant
+
+  if (seasonRanges && seasonRanges.length > 0) {
+    // Check if any season range covers our dates
+    for (const sr of seasonRanges) {
+      const rangeStr = sr.range as string;
+      // Parse daterange format [start,end)
+      const match = rangeStr.match(/^[\[\(]([^,]+),([^,\)]+)[\)\]]$/);
+      if (match) {
+        const rangeStart = match[1];
+        const rangeEnd = match[2];
+        if (firstDate >= rangeStart && firstDate < rangeEnd) {
+          seasonId = sr.season_id;
+          break;
+        }
+      }
+    }
+  }
+
+  // Try to get LOS pricing for this channel
+  let base_price = 0;
+  let currencyFromPricing = currency;
+  
+  try {
+    const { getPriceForStay } = await import('./pricing/channel');
+    const losPrice = await getPriceForStay({
+      tenantId,
+      seasonId,
+      ratePlanId: null,
+      channelCode: effectiveChannelCode,
+      days,
+    });
+
+    if (losPrice !== null) {
+      base_price = losPrice;
+    } else {
+      // Fallback to tenant_pricing
+      const { data: pricing } = await supabase
+        .from('tenant_pricing')
+        .select('daily_rate, currency')
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
+
+      const basePricePerDay: number = Number(pricing?.daily_rate ?? 10);
+      base_price = basePricePerDay * days;
+      currencyFromPricing = pricing?.currency || currency;
+    }
+  } catch (error) {
+    console.error('Error getting channel-specific pricing, falling back to tenant_pricing:', error);
+    // Fallback to tenant_pricing
+    const { data: pricing } = await supabase
+      .from('tenant_pricing')
+      .select('daily_rate, currency')
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    const basePricePerDay: number = Number(pricing?.daily_rate ?? 10);
+    base_price = basePricePerDay * days;
+    currencyFromPricing = pricing?.currency || currency;
+  }
+
   const surcharges: { code: string; description?: string; amount: number }[] = [];
   const discounts: { code: string; description?: string; amount: number }[] = [];
   const total_price = base_price;
@@ -279,7 +346,7 @@ export async function calculateAvailability(
     product_id: 'tenant_pool', // placeholder; capacity is per-tenant for now
     start_at: startAt,
     end_at: endAt,
-    currency: pricing?.currency || currency,
+    currency: currencyFromPricing,
     availability_status,
     remaining_capacity: overallRemaining,
     pricing: {

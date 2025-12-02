@@ -19,6 +19,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { SupplierApiDocs } from "@/components/admin/SupplierApiDocs";
 
 type PartnerApiKey = {
@@ -28,6 +35,12 @@ type PartnerApiKey = {
   is_active: boolean;
   last_used_at: string | null;
   created_at: string;
+  channel_id?: string | null;
+  tenant_channels?: {
+    id: string;
+    code: string;
+    name: string;
+  } | null;
 };
 
 export default function PartnerApisPage() {
@@ -38,6 +51,9 @@ export default function PartnerApisPage() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
   const [selectedScopes, setSelectedScopes] = useState<string[]>([]);
+  const [selectedChannelId, setSelectedChannelId] = useState<string>("");
+  const [partnerCode, setPartnerCode] = useState<string>(""); // e.g. "cavu", "holiday_extras"
+  const [channels, setChannels] = useState<Array<{ id: string; code: string; name: string }>>([]);
   const [newRawKey, setNewRawKey] = useState<string | null>(null);
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
 
@@ -46,8 +62,21 @@ export default function PartnerApisPage() {
   useEffect(() => {
     if (tenantId) {
       loadKeys();
+      loadChannels();
     }
   }, [tenantId]);
+
+  async function loadChannels() {
+    try {
+      const res = await fetch("/api/admin/channels");
+      const json = await res.json();
+      if (json.channels) {
+        setChannels(json.channels.filter((ch: any) => ch.is_active));
+      }
+    } catch (err) {
+      console.error("Error loading channels:", err);
+    }
+  }
 
   async function loadKeys() {
     if (!tenantId) return;
@@ -90,9 +119,11 @@ export default function PartnerApisPage() {
       const res = await fetch("/api/admin/partner-apis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+          body: JSON.stringify({
           name: newKeyName,
           scopes: selectedScopes,
+          channel_id: selectedChannelId || null,
+          partner_code: partnerCode || null, // Auto-create channel if provided
         }),
       });
 
@@ -102,6 +133,8 @@ export default function PartnerApisPage() {
         setKeys([json.key, ...keys]);
         setNewKeyName("");
         setSelectedScopes([]);
+        setSelectedChannelId("");
+        setPartnerCode("");
         toast({
           title: "Success",
           description: "API key created successfully. Copy it now - you won't see it again!",
@@ -276,6 +309,7 @@ export default function PartnerApisPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
+                  <TableHead>Channel</TableHead>
                   <TableHead>Scopes</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Last Used</TableHead>
@@ -287,6 +321,15 @@ export default function PartnerApisPage() {
                 {keys.map((key) => (
                   <TableRow key={key.id}>
                     <TableCell className="font-medium">{key.name}</TableCell>
+                    <TableCell>
+                      {key.tenant_channels ? (
+                        <Badge variant="outline">
+                          {key.tenant_channels.name} ({key.tenant_channels.code})
+                        </Badge>
+                      ) : (
+                        <span className="text-sm text-gray-400">Default</span>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <div className="flex gap-1 flex-wrap">
                         {key.scopes.map((scope) => (
@@ -403,6 +446,40 @@ export default function PartnerApisPage() {
                   onChange={(e) => setNewKeyName(e.target.value)}
                   placeholder="e.g. CAVU, Holiday Extras"
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="partner_code">Partner Code (Optional)</Label>
+                <Input
+                  id="partner_code"
+                  value={partnerCode}
+                  onChange={(e) => setPartnerCode(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'))}
+                  placeholder="e.g. cavu, holiday_extras"
+                />
+                <p className="text-xs text-gray-500">
+                  Enter a partner code to automatically create a channel for this partner. 
+                  This allows you to set individual pricing for each partner (e.g., CAVU can have different prices than Holiday Extras).
+                  If left empty, you can manually select a channel below.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="channel">Channel (Optional)</Label>
+                <Select value={selectedChannelId || undefined} onValueChange={(value) => setSelectedChannelId(value || "")}>
+                  <SelectTrigger id="channel">
+                    <SelectValue placeholder="No channel (defaults to 'agent')" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {channels.map((ch) => (
+                      <SelectItem key={ch.id} value={ch.id}>
+                        {ch.name} ({ch.code})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-500">
+                  {partnerCode 
+                    ? `A channel will be auto-created from partner code "${partnerCode}" if no channel is selected.`
+                    : 'Select a channel to use channel-specific pricing for this API key. If not set, defaults to "agent" channel.'}
+                </p>
               </div>
               <div className="space-y-2">
                 <Label>Scopes</Label>
