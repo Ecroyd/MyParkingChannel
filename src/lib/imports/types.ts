@@ -47,4 +47,5 @@ export type CanonicalBooking = {
   price: number | null;
   money_received: number | null;
   notes: string;
+  _rawRow?: any[]; // Store original raw row array for Holiday Extras phone finder
 };
