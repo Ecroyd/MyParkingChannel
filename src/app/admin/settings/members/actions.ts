@@ -194,6 +194,8 @@ export async function removeMember(userId: string): Promise<ActionResult> {
     return { success: false, error: 'Only owners can remove members' };
   }
 
+  const adminClient = await createAdminClient();
+
   // Prevent removing yourself if you're the only owner
   if (userId === ctx.userId) {
     const { data: otherOwners } = await adminClient
@@ -207,8 +209,6 @@ export async function removeMember(userId: string): Promise<ActionResult> {
       return { success: false, error: 'Cannot remove yourself. Please promote another member to owner first.' };
     }
   }
-
-  const adminClient = await createAdminClient();
 
   // Check if this is the last owner
   const { data: member } = await adminClient
