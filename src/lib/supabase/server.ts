@@ -4,12 +4,26 @@ import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 export async function getServerSupabase() {
   const cookieStore = await cookies();
+  const allCookies = cookieStore.getAll();
+  
+  // Debug: log cookie names (not values for security)
+  const cookieNames = allCookies.map(c => c.name);
+  console.log('🍪 [SERVER SUPABASE] Available cookies:', cookieNames);
+  console.log('🍪 [SERVER SUPABASE] Supabase auth cookies:', 
+    cookieNames.filter(name => name.includes('sb-') || name.includes('supabase')));
+  
   return createSSRServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_ANON_KEY!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll: () => cookieStore.getAll(),
+        getAll: () => allCookies,
+        set: (name: string, value: string, options: any) => {
+          cookieStore.set(name, value, options);
+        },
+        remove: (name: string, options: any) => {
+          cookieStore.set(name, '', { ...options, maxAge: 0 });
+        },
       },
     }
   );

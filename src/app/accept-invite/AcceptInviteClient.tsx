@@ -15,7 +15,7 @@ interface AcceptInviteClientProps {
   tenantSlug?: string;
   tenantName?: string;
   role?: string;
-  userEmail?: string;
+  username?: string;
   error?: string;
 }
 
@@ -26,7 +26,7 @@ export default function AcceptInviteClient({
   tenantSlug,
   tenantName,
   role,
-  userEmail,
+  username,
   error,
 }: AcceptInviteClientProps) {
   const router = useRouter();
@@ -55,10 +55,10 @@ export default function AcceptInviteClient({
     if (result.success) {
       setSuccess(true);
       setMessage('Invitation accepted! Redirecting...');
-      // Redirect to admin after a short delay
+      // Use full page reload to ensure server sees the updated user_tenants
       setTimeout(() => {
-        router.push('/admin');
-      }, 1500);
+        window.location.href = '/admin';
+      }, 1000);
     } else {
       setMessage(result.error);
       setLoading(false);
@@ -130,10 +130,10 @@ export default function AcceptInviteClient({
               <p className="font-medium capitalize">{role}</p>
             </div>
           )}
-          {userEmail && (
+          {username && (
             <div>
-              <p className="text-sm text-gray-600">As:</p>
-              <p className="font-medium">{userEmail}</p>
+              <p className="text-sm text-gray-600">Username:</p>
+              <p className="font-medium">{username}</p>
             </div>
           )}
 

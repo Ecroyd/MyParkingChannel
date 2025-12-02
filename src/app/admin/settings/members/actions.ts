@@ -6,17 +6,23 @@ import { createServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
 import { getCurrentTenantContext } from '@/lib/auth/current-tenant-context';
 import { canManageMembers } from '@/lib/auth/permissions';
-import { sendEmail } from '@/lib/email';
+// Email sending removed - using invite links instead
+// import { sendEmail } from '@/lib/email';
 import { randomBytes } from 'crypto';
 
 type ActionResult<T = void> = 
   | { success: true; data?: T }
   | { success: false; error: string };
 
+type InviteResult = 
+  | { success: true; inviteUrl: string }
+  | { success: false; error: string };
+
 /**
  * Invite a new member to the tenant
+ * Returns an invite URL instead of sending an email
  */
-export async function inviteMember(formData: FormData): Promise<ActionResult> {
+export async function inviteMember(formData: FormData): Promise<InviteResult> {
   const ctx = await getCurrentTenantContext();
   if (!ctx) {
     return { success: false, error: 'Not authenticated' };
@@ -26,49 +32,31 @@ export async function inviteMember(formData: FormData): Promise<ActionResult> {
     return { success: false, error: 'You do not have permission to manage members' };
   }
 
-  const email = formData.get('email')?.toString().trim().toLowerCase();
+  const username = formData.get('username')?.toString().trim().toLowerCase();
   const role = formData.get('role')?.toString() as 'admin' | 'user' | null;
 
-  if (!email || !email.includes('@')) {
-    return { success: false, error: 'Valid email is required' };
+  if (!username || !/^[a-zA-Z0-9_-]+$/.test(username)) {
+    return { success: false, error: 'Username is required and can only contain letters, numbers, underscores, and hyphens' };
   }
 
   if (!role || !['admin', 'user'].includes(role)) {
     return { success: false, error: 'Role must be admin or user' };
   }
 
-  const supabase = await createServerClient();
   const adminClient = await createAdminClient();
 
-  // Check if user already exists and is already a member
-  const { data: existingUsers } = await adminClient.auth.admin.listUsers();
-  const existingUser = existingUsers.users.find((u: any) => u.email === email);
-
-  if (existingUser) {
-    const { data: existingMembership } = await adminClient
-      .from('user_tenants')
-      .select('user_id')
-      .eq('tenant_id', ctx.tenantId)
-      .eq('user_id', existingUser.id)
-      .maybeSingle();
-
-    if (existingMembership) {
-      return { success: false, error: 'User is already a member of this tenant' };
-    }
-  }
-
-  // Check for existing unaccepted invitation
+  // Check for existing unaccepted invitation with this username
   const { data: existingInvite } = await adminClient
     .from('tenant_invitations')
     .select('id, role')
     .eq('tenant_id', ctx.tenantId)
-    .eq('email', email)
+    .eq('email', username) // Using email field to store username
     .is('accepted_at', null)
     .gt('expires_at', new Date().toISOString())
     .maybeSingle();
 
   if (existingInvite) {
-    // Update existing invite role and resend
+    // Update existing invite role and regenerate token
     const token = randomBytes(32).toString('hex');
     const { error: updateError } = await adminClient
       .from('tenant_invitations')
@@ -83,10 +71,11 @@ export async function inviteMember(formData: FormData): Promise<ActionResult> {
       return { success: false, error: 'Failed to update invitation' };
     }
 
-    // Send email
-    await sendInviteEmail(email, token, ctx.tenantSlug, role);
+    // Generate invite URL
+    const inviteUrl = generateInviteUrl(token, ctx.tenantSlug);
+    
     revalidatePath('/admin/settings/members');
-    return { success: true };
+    return { success: true, inviteUrl };
   }
 
   // Create new invitation
@@ -95,7 +84,7 @@ export async function inviteMember(formData: FormData): Promise<ActionResult> {
     .from('tenant_invitations')
     .insert({
       tenant_id: ctx.tenantId,
-      email,
+      email: username, // Using email field to store username
       role,
       token,
       expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days
@@ -105,10 +94,11 @@ export async function inviteMember(formData: FormData): Promise<ActionResult> {
     return { success: false, error: 'Failed to create invitation' };
   }
 
-  // Send email
-  await sendInviteEmail(email, token, ctx.tenantSlug, role);
+  // Generate invite URL
+  const inviteUrl = generateInviteUrl(token, ctx.tenantSlug);
+  
   revalidatePath('/admin/settings/members');
-  return { success: true };
+  return { success: true, inviteUrl };
 }
 
 /**
@@ -275,9 +265,9 @@ export async function cancelInvitation(invitationId: string): Promise<ActionResu
 }
 
 /**
- * Resend an invitation email
+ * Resend an invitation - returns the invite URL
  */
-export async function resendInvitation(invitationId: string): Promise<ActionResult> {
+export async function resendInvitation(invitationId: string): Promise<InviteResult> {
   const ctx = await getCurrentTenantContext();
   if (!ctx) {
     return { success: false, error: 'Not authenticated' };
@@ -301,36 +291,18 @@ export async function resendInvitation(invitationId: string): Promise<ActionResu
     return { success: false, error: 'Invitation not found' };
   }
 
-  await sendInviteEmail(invite.email, invite.token, ctx.tenantSlug, invite.role);
-  return { success: true };
+  // Generate invite URL
+  const inviteUrl = generateInviteUrl(invite.token, ctx.tenantSlug);
+  
+  return { success: true, inviteUrl };
 }
 
 /**
- * Helper to send invitation email
+ * Helper to generate invite URL
+ * (Email sending removed - using invite links instead)
  */
-async function sendInviteEmail(email: string, token: string, tenantSlug: string, role: string) {
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
-  const inviteUrl = `${baseUrl}/accept-invite?token=${token}&tenant=${tenantSlug}`;
-
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2>You've been invited to join a team</h2>
-      <p>You've been invited to join as a <strong>${role}</strong>.</p>
-      <p>
-        <a href="${inviteUrl}" style="display: inline-block; padding: 12px 24px; background-color: #0070f3; color: white; text-decoration: none; border-radius: 6px;">
-          Accept Invitation
-        </a>
-      </p>
-      <p style="color: #666; font-size: 14px;">
-        Or copy and paste this link into your browser:<br>
-        <a href="${inviteUrl}">${inviteUrl}</a>
-      </p>
-      <p style="color: #666; font-size: 12px; margin-top: 24px;">
-        This invitation will expire in 7 days.
-      </p>
-    </div>
-  `;
-
-  await sendEmail(email, `You've been invited to join ${tenantSlug}`, html);
+function generateInviteUrl(token: string, tenantSlug: string): string {
+  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+  return `${baseUrl}/accept-invite?token=${token}&tenant=${tenantSlug}`;
 }
 

@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { createBrowserClient } from '@supabase/ssr';
 import { Button } from '@/components/ui/button';
@@ -18,7 +18,8 @@ const supabase = createBrowserClient(
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
+  const searchParams = useSearchParams();
+  const [emailOrUsername, setEmailOrUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -26,38 +27,71 @@ export default function LoginPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('🔐 [LOGIN] Starting login process...');
     setLoading(true);
     setError('');
 
     try {
+      const input = emailOrUsername.trim();
+      console.log('🔐 [LOGIN] Input:', input);
+      
+      // If input doesn't contain @, treat it as username and convert to valid email format
+      const loginEmail = input.includes('@') ? input : `${input}@users.myparkingchannel.app`;
+      console.log('🔐 [LOGIN] Using email:', loginEmail);
+
+      console.log('🔐 [LOGIN] Attempting signInWithPassword...');
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
+        email: loginEmail,
         password,
       });
 
       if (error) {
-        console.error('Login error:', error.message);
-        setError(error.message);
+        console.error('❌ [LOGIN] Error:', error);
+        console.error('❌ [LOGIN] Error message:', error.message);
+        console.error('❌ [LOGIN] Error status:', error.status);
+        setError(error.message || 'Login failed');
         setLoading(false);
         return;
       }
 
-      console.log('Login success:', data);
+      console.log('✅ [LOGIN] SignInWithPassword succeeded');
+      console.log('✅ [LOGIN] User data:', data?.user);
+      console.log('✅ [LOGIN] Session data:', data?.session);
+
+      // Wait a bit for session to be set
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       const {
         data: { session },
+        error: sessionError
       } = await supabase.auth.getSession();
 
+      if (sessionError) {
+        console.error('❌ [LOGIN] Session error:', sessionError);
+      }
+
+      console.log('🔐 [LOGIN] Retrieved session:', session);
+
       if (session) {
-        console.log('✅ Session is set, redirecting to admin');
-        // Redirect to /admin which will handle tenant detection
-        router.push('/admin');
+        console.log('✅ [LOGIN] Session is set, redirecting');
+        // Wait a moment for cookies to be set, then use window.location for full page reload
+        // This ensures cookies are available to the server on the next request
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // Check for redirect param - respect invite flow
+        const redirectParam = searchParams.get('redirect');
+        const redirectTo = redirectParam || '/admin';
+        console.log('🔐 [LOGIN] Redirecting to:', redirectTo);
+        window.location.href = redirectTo;
       } else {
-        setError('Login failed to set session');
+        console.error('❌ [LOGIN] No session after login');
+        setError('Login failed to set session. Please try again.');
+        setLoading(false);
       }
     } catch (err: any) {
+      console.error('❌ [LOGIN] Unexpected error:', err);
+      console.error('❌ [LOGIN] Error stack:', err.stack);
       setError(err.message || 'An unexpected error occurred');
-    } finally {
       setLoading(false);
     }
   };
@@ -96,15 +130,15 @@ export default function LoginPage() {
               )}
 
               <div>
-                <Label htmlFor="email" className="text-sm font-medium text-slate-700">
-                  Email Address
+                <Label htmlFor="emailOrUsername" className="text-sm font-medium text-slate-700">
+                  Username or Email
                 </Label>
                 <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Enter your email"
+                  id="emailOrUsername"
+                  type="text"
+                  value={emailOrUsername}
+                  onChange={(e) => setEmailOrUsername(e.target.value)}
+                  placeholder="Enter your username or email"
                   required
                   className="mt-1"
                 />
@@ -158,8 +192,8 @@ export default function LoginPage() {
             <div className="mt-6 text-center">
               <p className="text-sm text-slate-600">
                 Don't have an account?{' '}
-                <Link href="/" className="text-sky-600 hover:text-sky-700 font-medium">
-                  Apply for early access
+                <Link href="/signup" className="text-sky-600 hover:text-sky-700 font-medium">
+                  Sign up
                 </Link>
               </p>
             </div>

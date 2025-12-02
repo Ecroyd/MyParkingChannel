@@ -44,9 +44,10 @@ export async function acceptInvite(
     return { success: false, error: 'Invitation has expired' };
   }
 
-  // Check if email matches
-  if (user.email?.toLowerCase() !== invitation.email.toLowerCase()) {
-    return { success: false, error: 'This invitation was sent to a different email address' };
+  // Check if username matches (stored in email field, actual username in user_metadata)
+  const userUsername = user.user_metadata?.username;
+  if (userUsername?.toLowerCase() !== invitation.email.toLowerCase()) {
+    return { success: false, error: 'This invitation was sent to a different username' };
   }
 
   // Check if already a member

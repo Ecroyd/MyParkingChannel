@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { inviteMember, updateMemberRole, removeMember, cancelInvitation, resendInvitation } from './actions';
-import { X, Mail, User, Shield, Crown, Loader2 } from 'lucide-react';
+import { X, Mail, User, Shield, Crown, Loader2, Copy, Check } from 'lucide-react';
 
 interface Member {
   user_id: string;
@@ -29,7 +29,7 @@ interface Member {
 
 interface Invitation {
   id: string;
-  email: string;
+  email: string; // This field now stores username
   role: 'owner' | 'admin' | 'user';
   created_at: string;
   expires_at: string;
@@ -50,31 +50,48 @@ export default function MembersClient({
   currentUserRole,
   isOnlyOwner,
 }: MembersClientProps) {
-  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteUsername, setInviteUsername] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'user'>('user');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage(null);
+    setInviteUrl(null);
+    setCopied(false);
 
     const formData = new FormData();
-    formData.append('email', inviteEmail);
+    formData.append('username', inviteUsername);
     formData.append('role', inviteRole);
 
     const result = await inviteMember(formData);
 
     if (result.success) {
-      setMessage({ type: 'success', text: 'Invitation sent successfully' });
-      setInviteEmail('');
+      setInviteUrl(result.inviteUrl);
+      setMessage({ type: 'success', text: 'Invite link generated successfully' });
+      setInviteUsername('');
       setInviteRole('user');
     } else {
       setMessage({ type: 'error', text: result.error });
     }
 
     setLoading(false);
+  };
+
+  const handleCopy = async () => {
+    if (!inviteUrl) return;
+    
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
   };
 
   const handleUpdateRole = async (userId: string, newRole: 'owner' | 'admin' | 'user') => {
@@ -129,11 +146,14 @@ export default function MembersClient({
   const handleResendInvite = async (invitationId: string) => {
     setLoading(true);
     setMessage(null);
+    setInviteUrl(null);
+    setCopied(false);
 
     const result = await resendInvitation(invitationId);
 
     if (result.success) {
-      setMessage({ type: 'success', text: 'Invitation resent' });
+      setInviteUrl(result.inviteUrl);
+      setMessage({ type: 'success', text: 'Invite link generated' });
     } else {
       setMessage({ type: 'error', text: result.error });
     }
@@ -198,7 +218,13 @@ export default function MembersClient({
                       {getRoleIcon(member.role)}
                       <div>
                         <div className="font-medium">
-                          {member.users?.email || 'Unknown user'}
+                          {(() => {
+                            // Extract username from email (format: username@users.myparkingchannel.app)
+                            const email = member.users?.email || 'Unknown user';
+                            // Strip @users.myparkingchannel.app to show just the username
+                            const displayName = email.replace('@users.myparkingchannel.app', '');
+                            return displayName;
+                          })()}
                           {isCurrentUser && (
                             <span className="ml-2 text-xs text-gray-500">(You)</span>
                           )}
@@ -255,15 +281,17 @@ export default function MembersClient({
           <form onSubmit={handleInvite} className="space-y-4">
             <div className="grid gap-4 md:grid-cols-3">
               <div className="md:col-span-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="username">Username</Label>
                 <Input
-                  id="email"
-                  type="email"
-                  placeholder="colleague@example.com"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
+                  id="username"
+                  type="text"
+                  placeholder="johndoe"
+                  value={inviteUsername}
+                  onChange={(e) => setInviteUsername(e.target.value)}
                   required
                   disabled={loading}
+                  pattern="[a-zA-Z0-9_-]+"
+                  title="Username can only contain letters, numbers, underscores, and hyphens"
                 />
               </div>
               <div>
@@ -283,16 +311,54 @@ export default function MembersClient({
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Sending...
+                  Generating...
                 </>
               ) : (
                 <>
                   <Mail className="mr-2 h-4 w-4" />
-                  Send Invitation
+                  Generate Invite Link
                 </>
               )}
             </Button>
           </form>
+
+          {inviteUrl && (
+            <div className="mt-4 space-y-2 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm font-medium text-gray-700">
+                Share this link with your staff member so they can join this site:
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  type="text"
+                  readOnly
+                  value={inviteUrl}
+                  className="flex-1 text-xs font-mono bg-white"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCopy}
+                  className="shrink-0"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="h-4 w-4 mr-2" />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4 mr-2" />
+                      Copy
+                    </>
+                  )}
+                </Button>
+              </div>
+              <p className="text-xs text-gray-500">
+                This invitation will expire in 7 days.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -312,7 +378,7 @@ export default function MembersClient({
                   <div className="flex items-center gap-3">
                     <Mail className="h-4 w-4 text-gray-400" />
                     <div>
-                      <div className="font-medium">{invite.email}</div>
+                      <div className="font-medium">{invite.email}</div> {/* email field stores username */}
                       <div className="text-sm text-gray-500">
                         {getRoleLabel(invite.role)} • Invited {new Date(invite.created_at).toLocaleDateString()}
                       </div>

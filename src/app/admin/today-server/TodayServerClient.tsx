@@ -189,6 +189,51 @@ export default function TodayServerClient({
     return groupBookingsByDate(sortedCurrentlyParked, 'start_at');
   }, [sortedCurrentlyParked]);
 
+  // Group arrivals and departures by date, showing arrivals first then departures for each day
+  const groupedByDay = useMemo(() => {
+    // Get all unique dates from both arrivals and departures
+    const allDates = new Set<string>();
+    
+    sortedArrivals.forEach(booking => {
+      const date = new Date(booking.start_at);
+      const dateKey = date.toISOString().split('T')[0];
+      allDates.add(dateKey);
+    });
+    
+    sortedDepartures.forEach(booking => {
+      const date = new Date(booking.end_at);
+      const dateKey = date.toISOString().split('T')[0];
+      allDates.add(dateKey);
+    });
+    
+    // Sort dates
+    const sortedDates = Array.from(allDates).sort();
+    
+    return sortedDates.map(date => {
+      const arrivalsForDate = sortedArrivals.filter(booking => {
+        const bookingDate = new Date(booking.start_at).toISOString().split('T')[0];
+        return bookingDate === date;
+      });
+      
+      const departuresForDate = sortedDepartures.filter(booking => {
+        const bookingDate = new Date(booking.end_at).toISOString().split('T')[0];
+        return bookingDate === date;
+      });
+      
+      return {
+        date,
+        displayDate: new Date(date).toLocaleDateString('en-GB', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric'
+        }),
+        arrivals: arrivalsForDate,
+        departures: departuresForDate
+      };
+    });
+  }, [sortedArrivals, sortedDepartures]);
+
   const StatCard = ({ label, value, delta, variant, rightSlot }: {
     label: string;
     value: number;
@@ -513,101 +558,45 @@ export default function TodayServerClient({
           <p className="text-3xl font-bold text-green-600">£{kpis.totalRevenue.toFixed(2)}</p>
         </div>
 
-        {/* Arrivals */}
+        {/* Arrivals and Departures by Day */}
         <section className="bg-white rounded-lg border border-gray-200">
           <div className="p-4 border-b border-gray-200">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-gray-900">Arrivals</h2>
-                <p className="text-sm text-gray-600">Incoming bookings</p>
+                <h2 className="text-lg font-semibold text-gray-900">Arrivals & Departures</h2>
+                <p className="text-sm text-gray-600">Organized by day</p>
               </div>
-              <div className="flex items-center gap-2">
-                <Label htmlFor="arrivalsSort" className="text-sm text-gray-600">Sort:</Label>
-                <Select value={arrivalsSort} onValueChange={(value: 'closest' | 'most_recent') => setArrivalsSort(value)}>
-                  <SelectTrigger className="w-[140px]">
-                    <div className="flex items-center gap-2">
-                      <ArrowUpDown className="w-4 h-4 text-gray-400" />
-                      <SelectValue />
-                    </div>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="closest">Closest First</SelectItem>
-                    <SelectItem value="most_recent">Most Recent</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reference</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Plate</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Flight</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date & Time</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {groupedArrivals.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                      No arrivals in this period
-                    </td>
-                  </tr>
-                ) : (
-                  groupedArrivals.map((group, groupIndex) => (
-                    <React.Fragment key={group.date}>
-                      {/* Date Header */}
-                      <tr className="bg-gray-100 border-t-2 border-gray-300">
-                        <td colSpan={7} className="px-4 py-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-700">
-                              {group.displayDate}
-                            </span>
-                            <span className="text-xs text-gray-500">
-                              {group.bookings.length} {group.bookings.length === 1 ? 'arrival' : 'arrivals'}
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
-                      {/* Bookings for this date */}
-                      {group.bookings.map((booking) => (
-                        <BookingRow key={booking.id} booking={booking} type="arrival" />
-                      ))}
-                    </React.Fragment>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        {/* Departures */}
-        <section className="bg-white rounded-lg border border-gray-200">
-          <div className="p-4 border-b border-gray-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">Departures</h2>
-                <p className="text-sm text-gray-600">Outgoing bookings</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Label htmlFor="departuresSort" className="text-sm text-gray-600">Sort:</Label>
-                <Select value={departuresSort} onValueChange={(value: 'closest' | 'most_recent') => setDeparturesSort(value)}>
-                  <SelectTrigger className="w-[140px]">
-                    <div className="flex items-center gap-2">
-                      <ArrowUpDown className="w-4 h-4 text-gray-400" />
-                      <SelectValue />
-                    </div>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="closest">Closest First</SelectItem>
-                    <SelectItem value="most_recent">Most Recent</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="arrivalsSort" className="text-sm text-gray-600">Arrivals Sort:</Label>
+                  <Select value={arrivalsSort} onValueChange={(value: 'closest' | 'most_recent') => setArrivalsSort(value)}>
+                    <SelectTrigger className="w-[140px]">
+                      <div className="flex items-center gap-2">
+                        <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                        <SelectValue />
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="closest">Closest First</SelectItem>
+                      <SelectItem value="most_recent">Most Recent</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="departuresSort" className="text-sm text-gray-600">Departures Sort:</Label>
+                  <Select value={departuresSort} onValueChange={(value: 'closest' | 'most_recent') => setDeparturesSort(value)}>
+                    <SelectTrigger className="w-[140px]">
+                      <div className="flex items-center gap-2">
+                        <ArrowUpDown className="w-4 h-4 text-gray-400" />
+                        <SelectValue />
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="closest">Closest First</SelectItem>
+                      <SelectItem value="most_recent">Most Recent</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
           </div>
@@ -625,32 +614,54 @@ export default function TodayServerClient({
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {groupedDepartures.length === 0 ? (
+                {groupedByDay.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                      No departures in this period
+                      No arrivals or departures in this period
                     </td>
                   </tr>
                 ) : (
-                  groupedDepartures.map((group, groupIndex) => (
-                    <React.Fragment key={group.date}>
+                  groupedByDay.map((dayGroup) => (
+                    <React.Fragment key={dayGroup.date}>
                       {/* Date Header */}
                       <tr className="bg-gray-100 border-t-2 border-gray-300">
                         <td colSpan={7} className="px-4 py-3">
                           <div className="flex items-center justify-between">
                             <span className="text-sm font-semibold text-gray-700">
-                              {group.displayDate}
+                              {dayGroup.displayDate}
                             </span>
                             <span className="text-xs text-gray-500">
-                              {group.bookings.length} {group.bookings.length === 1 ? 'departure' : 'departures'}
+                              {dayGroup.arrivals.length} {dayGroup.arrivals.length === 1 ? 'arrival' : 'arrivals'}, {dayGroup.departures.length} {dayGroup.departures.length === 1 ? 'departure' : 'departures'}
                             </span>
                           </div>
                         </td>
                       </tr>
-                      {/* Bookings for this date */}
-                      {group.bookings.map((booking) => (
-                        <BookingRow key={booking.id} booking={booking} type="departure" />
-                      ))}
+                      {/* Arrivals for this date */}
+                      {dayGroup.arrivals.length > 0 && (
+                        <>
+                          <tr className="bg-blue-50">
+                            <td colSpan={7} className="px-4 py-2">
+                              <span className="text-xs font-semibold text-blue-800">Arrivals</span>
+                            </td>
+                          </tr>
+                          {dayGroup.arrivals.map((booking) => (
+                            <BookingRow key={`arrival-${booking.id}`} booking={booking} type="arrival" />
+                          ))}
+                        </>
+                      )}
+                      {/* Departures for this date */}
+                      {dayGroup.departures.length > 0 && (
+                        <>
+                          <tr className="bg-red-50">
+                            <td colSpan={7} className="px-4 py-2">
+                              <span className="text-xs font-semibold text-red-800">Departures</span>
+                            </td>
+                          </tr>
+                          {dayGroup.departures.map((booking) => (
+                            <BookingRow key={`departure-${booking.id}`} booking={booking} type="departure" />
+                          ))}
+                        </>
+                      )}
                     </React.Fragment>
                   ))
                 )}
