@@ -43,11 +43,13 @@ export async function GET(req: NextRequest) {
       ? ratePlanIdParam 
       : null;
     
-    // Normalize channel: empty string means null (all channels)
-    const channel = channelParam && channelParam !== '' ? channelParam : null;
+    // Channel: treat empty string as 'all', otherwise use the provided channel code
+    // For the editor, we want STRICT filtering - no fallback logic
+    const channel = channelParam && channelParam !== '' ? channelParam : 'all';
 
     // Query pricing_rules for this combination
     // We need to join with price_tiers to get the actual price values
+    // IMPORTANT: For the editor, we filter STRICTLY by the selected channel - no fallback
     let query = adminSupabase
       .from('pricing_rules')
       .select(`
@@ -72,11 +74,8 @@ export async function GET(req: NextRequest) {
       query = query.is('rate_plan_id', null);
     }
 
-    if (channel) {
-      query = query.eq('channel', channel);
-    } else {
-      query = query.is('channel', null);
-    }
+    // STRICT channel filter - only show rules for the exact channel selected
+    query = query.eq('channel', channel);
 
     const { data: rules, error: rulesError } = await query;
 
@@ -193,33 +192,12 @@ export async function PUT(req: NextRequest) {
       ? ratePlanIdRaw 
       : null;
     
-    // Normalize channel: empty string means null (all channels)
-    const channel = channelRaw && channelRaw !== '' ? channelRaw : null;
+    // Channel: treat null/empty as 'all', otherwise use the provided channel code
+    // IMPORTANT: For the editor, 'all' is a specific channel code, not a signal to save to all channels
+    const channel = channelRaw && channelRaw !== '' ? channelRaw : 'all';
     
-    // If channel is null (all channels), fetch all active channels for this tenant
-    let channelsToSave: string[];
-    if (channel) {
-      channelsToSave = [channel];
-    } else {
-      // Fetch all active channels for this tenant
-      const { data: allChannels, error: channelsError } = await adminSupabase
-        .from('tenant_channels')
-        .select('code')
-        .eq('tenant_id', tenantId)
-        .eq('is_active', true)
-        .order('sort_order', { ascending: true });
-
-      if (channelsError) {
-        console.error('Error fetching channels:', channelsError);
-        // Fallback to default channels if fetch fails
-        channelsToSave = ['direct', 'agent', 'web', 'all'];
-      } else {
-        // Extract channel codes, excluding 'all' itself (we don't want to save to 'all' channel)
-        channelsToSave = (allChannels || [])
-          .map((ch: any) => ch.code)
-          .filter((code: string) => code !== 'all'); // Don't save to 'all' channel, save to all individual channels
-      }
-    }
+    // Save to the specific channel only (no special "all channels" logic in the editor)
+    const channelsToSave = [channel];
 
     // Get season info for code generation
     const { data: season, error: seasonError } = await adminSupabase
@@ -494,12 +472,11 @@ export async function PUT(req: NextRequest) {
         .is('max_stay', null);
     }
 
-    // Return updated matrix for the selected channel (or first channel if "all" was selected)
-    const returnChannel = channel || channelsToSave[0];
+    // Return updated matrix for the selected channel
     const params = new URLSearchParams({
       season_id: seasonId,
       rate_plan_id: ratePlanId || '',
-      channel: returnChannel,
+      channel: channel,
     });
 
     // Call GET handler to return updated data

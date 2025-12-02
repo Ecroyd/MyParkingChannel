@@ -126,7 +126,7 @@ export default function LosMatrix({ seasonId, seasons }: LosMatrixProps) {
       const params = new URLSearchParams({
         season_id: selectedSeasonId,
         rate_plan_id: ratePlanId || '',
-        channel: channel === 'all' ? '' : channel,
+        channel: channel, // Send the channel code directly ('all', 'holidayextras', etc.)
       });
 
       const response = await fetch(`/api/admin/pricing/matrix?${params}`, {
@@ -195,7 +195,7 @@ export default function LosMatrix({ seasonId, seasons }: LosMatrixProps) {
         body: JSON.stringify({
           seasonId: selectedSeasonId,
           ratePlanId: ratePlanId || null,
-          channel: channel === 'all' ? null : channel,
+          channel: channel, // Send the channel code directly ('all', 'holidayextras', etc.)
           maxDays: MAX_DAYS,
           rows: rows.filter((r) => r.price !== null),
           extraDayPrice,
@@ -208,11 +208,7 @@ export default function LosMatrix({ seasonId, seasons }: LosMatrixProps) {
         return;
       }
 
-      if (channel === 'all') {
-        toast.success('Pricing matrix saved to all channels (direct, agent, web, default)');
-      } else {
-        toast.success('Pricing matrix saved');
-      }
+      toast.success('Pricing matrix saved');
       setHasChanges(false);
     } catch (error) {
       console.error('Error saving matrix:', error);
@@ -245,7 +241,7 @@ export default function LosMatrix({ seasonId, seasons }: LosMatrixProps) {
       const params = new URLSearchParams({
         season_id: copySourceSeasonId,
         rate_plan_id: ratePlanId || '',
-        channel: channel === 'all' ? '' : channel,
+        channel: channel, // Send the channel code directly ('all', 'holidayextras', etc.)
       });
 
       const response = await fetch(`/api/admin/pricing/matrix?${params}`, {
