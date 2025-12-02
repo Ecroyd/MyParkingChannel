@@ -160,7 +160,9 @@ export default function SettingsPage() {
         <TabsList>
           <TabsTrigger value="profile">Profile</TabsTrigger>
           <TabsTrigger value="security">Security</TabsTrigger>
-          <TabsTrigger value="members">Members</TabsTrigger>
+          <TabsTrigger value="members">
+            <a href="/admin/settings/members">Members</a>
+          </TabsTrigger>
           <TabsTrigger value="billing" disabled>Billing</TabsTrigger>
         </TabsList>
 
@@ -280,22 +282,12 @@ export default function SettingsPage() {
               <CardTitle className="text-sm">Team Members</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {members.map((m,i)=>(
-                <div key={i} className="flex items-center justify-between border rounded-xl p-3">
-                  <div>
-                    <div className="text-sm">{m.email}</div>
-                    <div className="text-xs text-gray-500">{m.role}</div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="outline">Make admin</Button>
-                    <Button size="sm" variant="outline">Remove</Button>
-                  </div>
-                </div>
-              ))}
-              <div className="flex gap-2">
-                <Input placeholder="Invite by email" />
-                <Button>Invite</Button>
-              </div>
+              <p className="text-sm text-gray-500">
+                Manage team members and invitations.
+              </p>
+              <Button asChild>
+                <a href="/admin/settings/members">Go to Members Page</a>
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>

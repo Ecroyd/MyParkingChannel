@@ -14,18 +14,22 @@ const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+import type { UserRole } from '@/lib/auth/permissions';
+
 interface AdminShellClientProps {
   children: ReactNode;
   user: any;
   tenant: any;
   isPlatformAdmin: boolean;
+  userRole: UserRole;
 }
 
 export default function AdminShellClient({ 
   children, 
   user, 
   tenant, 
-  isPlatformAdmin 
+  isPlatformAdmin,
+  userRole
 }: AdminShellClientProps) {
   const router = useRouter();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -50,7 +54,7 @@ export default function AdminShellClient({
   return (
     <div className="flex h-screen bg-[#f9fafb] text-gray-900">
       {/* Desktop Sidebar */}
-      <Sidebar features={isPlatformAdmin ? ['platform_admin'] : []} />
+      <Sidebar features={isPlatformAdmin ? ['platform_admin'] : []} userRole={userRole} />
       
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden bg-glass-gradient">
@@ -125,7 +129,7 @@ export default function AdminShellClient({
                 
                 {/* Mobile Navigation Content */}
                 <div className="flex-1 overflow-y-auto p-4">
-                  <MobileSidebar features={isPlatformAdmin ? ['platform_admin'] : []} />
+                  <MobileSidebar features={isPlatformAdmin ? ['platform_admin'] : []} userRole={userRole} />
                 </div>
               </div>
             </div>
