@@ -167,6 +167,7 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
         price,
         money_received,
         notes: getCell(r, map.notes),
+        _rawRow: r, // Store original raw row array for Holiday Extras phone finder
       });
     }
     console.log(`✅ Preview built: ${out.length} rows processed`);

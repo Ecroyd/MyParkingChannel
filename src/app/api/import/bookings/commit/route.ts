@@ -17,6 +17,86 @@ function toNumberOrNull(v:any): number|null {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
+
+// Phone finder helpers for Holiday Extras
+function normaliseCell(value: any): string {
+  if (value == null) return '';
+  return String(value).trim().replace(/^"|"$/g, '');
+}
+
+function isPhoneLike(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+
+  // Reject obvious non-phones:
+  if (/[A-Za-z]/.test(trimmed)) return false; // contains letters
+  if (trimmed.includes('/')) return false; // things like "05/30"
+
+  // Allow +, leading zeros, and digits
+  const digits = trimmed.replace(/[^\d]/g, '');
+  if (digits.length < 8) return false; // too short to be a real phone
+
+  return true;
+}
+
+function scorePhoneCandidate(value: string): number {
+  const trimmed = value.trim();
+  const digitsOnly = trimmed.replace(/[^\d]/g, '');
+
+  let score = 0;
+
+  // Prefer UK-style mobiles/formatting
+  if (trimmed.startsWith('+44') || trimmed.startsWith('0044')) {
+    score += 10;
+  } else if (trimmed.startsWith('44')) {
+    score += 8;
+  } else if (trimmed.startsWith('07')) {
+    score += 7;
+  }
+
+  // Longer digit strings are more likely real phone numbers
+  if (digitsOnly.length >= 11) score += 3;
+  if (digitsOnly.length >= 9) score += 1;
+
+  return score;
+}
+
+function pickBestPhoneFromRow(rawRow: any): string | null {
+  // rawRow might be an array or an object; support both.
+  let cells: string[] = [];
+
+  if (Array.isArray(rawRow)) {
+    cells = rawRow.map(normaliseCell);
+  } else if (typeof rawRow === 'object' && rawRow !== null) {
+    // preserve column order if we have it; Object.values is acceptable for our case
+    cells = Object.values(rawRow).map(normaliseCell);
+  }
+
+  const candidates: { value: string; score: number; index: number }[] = [];
+
+  cells.forEach((value, index) => {
+    if (!isPhoneLike(value)) return;
+    const score = scorePhoneCandidate(value);
+    if (score > 0) {
+      candidates.push({ value, score, index });
+    }
+  });
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  // Prefer highest score; if tied, prefer the one that appears later in the row
+  candidates.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return b.index - a.index;
+  });
+
+  const best = candidates[0].value.trim();
+
+  // Optional: normalise to a consistent format (e.g. remove spaces)
+  return best;
+}
 // Note: Date parsing is now done via RPC function in the prepare step
 // This function is kept for backward compatibility but dates should be parsed via RPC
 function sanitize(r: InRow) {
@@ -172,6 +252,19 @@ export async function POST(req: Request) {
         start_utc: startAtParsed || ''
       });
       
+      // For Holiday Extras, use phone finder to scan all columns for the best phone candidate
+      let phoneValue = raw.phone;
+      const profileNameUpper = (profileName || '').toUpperCase().replace(/\s+/g, '');
+      if (profileNameUpper === 'HOLIDAYEXTRAS' || profileNameUpper.includes('HOLIDAYEXTRAS')) {
+        const rawRow = (raw as any)._rawRow;
+        if (rawRow) {
+          const foundPhone = pickBestPhoneFromRow(rawRow);
+          if (foundPhone) {
+            phoneValue = foundPhone;
+          }
+        }
+      }
+
       const stagingRecord = {
         tenant_id: tenantId,
         source: sourceMapping || 'other',
@@ -187,7 +280,7 @@ export async function POST(req: Request) {
         vehicle_make: raw.vehicle_make,
         vehicle_model: raw.vehicle_model,
         flight_number: raw.flight_number,
-        phone: raw.phone,
+        phone: phoneValue,
         status: raw.status,
         price: raw.price,
         money_received: raw.money_received,

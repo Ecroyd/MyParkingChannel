@@ -229,6 +229,15 @@ export default function TodayServerClient({
     const { toast } = useToast();
     const time = type === 'arrival' ? booking.start_at : booking.end_at;
     
+    // Calculate number of days staying
+    const calculateDays = () => {
+      const start = new Date(booking.start_at);
+      const end = new Date(booking.end_at);
+      const diffTime = Math.abs(end.getTime() - start.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      return diffDays;
+    };
+    
     // Read gate_status directly from the booking, default to 'reserved' if not set
     const initialGateStatus = (booking.gate_status as GateStatus) || 'reserved';
 
@@ -355,12 +364,6 @@ export default function TodayServerClient({
         className="hover:bg-gray-50"
       >
         <td 
-          className="px-4 py-3 text-sm font-medium text-gray-900 cursor-pointer"
-          onClick={() => handleBookingClick(booking)}
-        >
-          {booking.reference}
-        </td>
-        <td 
           className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
           onClick={() => handleBookingClick(booking)}
         >
@@ -389,14 +392,36 @@ export default function TodayServerClient({
           className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
           onClick={() => handleBookingClick(booking)}
         >
-          {new Date(time).toLocaleString('en-GB', { 
-            timeZone: 'UTC',
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-          })}
+          <div className="flex flex-col">
+            <div className="font-medium">Arrival</div>
+            <div className="text-xs text-gray-600">
+              {new Date(booking.start_at).toLocaleString('en-GB', { 
+                timeZone: 'UTC',
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              })}
+            </div>
+            <div className="font-medium mt-1">Departure</div>
+            <div className="text-xs text-gray-600">
+              {new Date(booking.end_at).toLocaleString('en-GB', { 
+                timeZone: 'UTC',
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              })}
+            </div>
+          </div>
+        </td>
+        <td 
+          className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
+          onClick={() => handleBookingClick(booking)}
+        >
+          {calculateDays()} {calculateDays() === 1 ? 'day' : 'days'}
         </td>
         <td 
           className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
@@ -590,11 +615,11 @@ export default function TodayServerClient({
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reference</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Plate</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Flight</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date & Time</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Arrival & Departure</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Days</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                 </tr>
@@ -663,11 +688,11 @@ export default function TodayServerClient({
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reference</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Plate</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Flight</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Arrived</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Arrival & Departure</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Days</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                 </tr>
