@@ -116,6 +116,7 @@ export async function GET(request: NextRequest) {
         startAt: start_at,
         endAt: end_at,
         currency,
+        channelCode: auth.channelCode,
       });
     } catch (err: unknown) {
       // Handle product not found or other engine errors
@@ -236,6 +237,23 @@ export async function GET(request: NextRequest) {
       const capacities = Object.values(capacityByDate).filter((c): c is number => c !== null);
       const minCapacityAcrossDays = capacities.length > 0 ? Math.min(...capacities) : null;
 
+      // Add pricing source info
+      const pricingSource = availabilityResult.pricing._pricingSource;
+      const pricingSourceInfo = pricingSource ? {
+        table: pricingSource.table,
+        rate_plan_id: pricingSource.ratePlanId || null,
+        rate_plan_name: pricingSource.ratePlanName,
+        price_per_day: pricingSource.pricePerDay,
+        days: availabilityResult.pricing.days,
+        base_price_total: availabilityResult.pricing.basePrice * availabilityResult.pricing.days,
+        season_id: pricingSource.seasonId || null,
+        channel_code: pricingSource.channelCode || null,
+        pricing_rule_id: pricingSource.pricingRuleId || null,
+        tier_id: pricingSource.tierId || null,
+        tier_type: pricingSource.tierType || null,
+        tier_value: pricingSource.tierValue || null,
+      } : null;
+
       (response as any).debug = {
         tenant_id: auth.tenantId,
         rolling_capacity_months: rollingMonths,
@@ -244,6 +262,7 @@ export async function GET(request: NextRequest) {
         capacity_by_date: capacityByDate,
         has_closed_date: hasClosedDate,
         min_capacity_across_days: minCapacityAcrossDays,
+        pricing_source: pricingSourceInfo,
       };
     }
 

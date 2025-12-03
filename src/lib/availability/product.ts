@@ -2,6 +2,7 @@
 // Product-based availability calculation for supplier API
 
 import { createAdminClient } from '@/lib/supabase/admin';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 const DAY_MS = 1000 * 60 * 60 * 24;
 
@@ -16,10 +17,11 @@ export type AvailabilityResult = {
     ratePlanId: string;
     ratePlanName: string;
     days: number;
-    basePrice: number; // decimal in GBP
+    basePrice: number; // decimal in GBP (daily rate)
     surcharges: any[];
     discounts: any[];
     totalPrice: number;
+    _pricingSource?: PricingSource; // Internal field for debug
   };
 };
 
@@ -29,7 +31,21 @@ type AvailabilityInput = {
   startAt: string;
   endAt: string;
   currency?: string;
+  channelCode?: string; // Channel code for pricing (e.g. 'agent', 'cavu', 'holiday_extras')
   excludeBookingReference?: string; // For date change amendments
+};
+
+type PricingSource = {
+  table: string;
+  ratePlanId?: string | null;
+  ratePlanName: string;
+  pricePerDay: number;
+  seasonId?: string | null;
+  channelCode?: string;
+  pricingRuleId?: string;
+  tierId?: string;
+  tierType?: string;
+  tierValue?: number;
 };
 
 /**
@@ -65,6 +81,321 @@ function bookingTouchesDate(booking: { start_at: string; end_at: string }, dateS
 }
 
 /**
+ * Find season ID for a given date range
+ */
+async function findSeasonForDateRange(
+  supabase: SupabaseClient,
+  tenantId: string,
+  firstDate: string
+): Promise<string | null> {
+  const { data: seasonRanges } = await supabase
+    .from('season_ranges')
+    .select('season_id, range')
+    .eq('tenant_id', tenantId)
+    .limit(100);
+
+  if (!seasonRanges || seasonRanges.length === 0) {
+    return null;
+  }
+
+  // Check if any season range covers our date
+  for (const sr of seasonRanges) {
+    const rangeStr = sr.range as string;
+    // Parse daterange format [start,end) or (start,end)
+    const match = rangeStr.match(/^[\[\(]([^,]+),([^,\)]+)[\)\]]$/);
+    if (match) {
+      const rangeStart = match[1];
+      const rangeEnd = match[2];
+      if (firstDate >= rangeStart && firstDate < rangeEnd) {
+        return sr.season_id;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Get base price per day from pricing tables (source of truth from admin Pricing UI)
+ * Implements proper pricing_rules and price_tiers resolution
+ */
+async function getProductBasePricePerDay(
+  supabase: SupabaseClient,
+  params: {
+    tenantId: string;
+    productId: string;
+    startAt: string;
+    endAt: string;
+    currency: string;
+    channelCode?: string;
+    days: number;
+  }
+): Promise<{ ratePlanName: string; pricePerDay: number; source: PricingSource }> {
+  const { tenantId, productId, startAt, endAt, currency, channelCode, days } = params;
+  const stayDates = generateStayDates(startAt, endAt);
+  const firstDate = stayDates[0];
+
+  // Default channel code for supplier API
+  const effectiveChannelCode = channelCode || 'agent';
+
+  // Step 1: Get base daily rate from rate_plan or tenant_pricing
+  let baseDailyRate: number;
+  let ratePlanId: string | null = null;
+  let ratePlanName = 'standard';
+
+  // Try to get rate plan from product_rate_plans
+  const { data: ratePlan } = await supabase
+    .from('product_rate_plans')
+    .select('id, name, base_price_cents, currency')
+    .eq('product_id', productId)
+    .limit(1)
+    .maybeSingle();
+
+  if (ratePlan) {
+    baseDailyRate = ratePlan.base_price_cents / 100;
+    ratePlanId = ratePlan.id;
+    ratePlanName = ratePlan.name || 'standard';
+  } else {
+    // Fallback to tenant_pricing for base rate
+    const { data: tenantPricing, error: pricingError } = await supabase
+      .from('tenant_pricing')
+      .select('daily_rate, currency')
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (pricingError) {
+      throw new Error(`Failed to get base pricing: ${pricingError.message || JSON.stringify(pricingError)}`);
+    }
+
+    if (!tenantPricing || !tenantPricing.daily_rate) {
+      throw new Error('No base pricing configured. Please configure pricing in the admin Pricing UI.');
+    }
+
+    baseDailyRate = Number(tenantPricing.daily_rate);
+    if (isNaN(baseDailyRate) || baseDailyRate <= 0) {
+      throw new Error(`Invalid daily_rate in tenant_pricing: ${tenantPricing.daily_rate}`);
+    }
+    ratePlanId = 'tenant-default';
+  }
+
+  // Step 2: Find season for the date range
+  const seasonId = await findSeasonForDateRange(supabase, tenantId, firstDate);
+
+  // Step 3: Query pricing_rules with proper filters
+  // For LOS matrix, we need to match rules where the stay length falls within min_stay and max_stay
+  // Typically: min_stay <= days AND (max_stay >= days OR max_stay IS NULL)
+  // But also support exact matches: min_stay = days AND (max_stay = days OR max_stay IS NULL)
+  let pricingRulesQuery = supabase
+    .from('pricing_rules')
+    .select(`
+      id,
+      tenant_id,
+      rate_plan_id,
+      season_id,
+      tier_id,
+      channel,
+      min_stay,
+      max_stay,
+      priority,
+      is_active
+    `)
+    .eq('tenant_id', tenantId)
+    .eq('is_active', true)
+    .lte('min_stay', days)
+    .or(`max_stay.is.null,max_stay.gte.${days}`);
+
+  // Filter by season
+  if (seasonId) {
+    pricingRulesQuery = pricingRulesQuery.eq('season_id', seasonId);
+  } else {
+    pricingRulesQuery = pricingRulesQuery.is('season_id', null);
+  }
+
+  // Filter by rate_plan (if we have one)
+  if (ratePlanId && ratePlanId !== 'tenant-default') {
+    pricingRulesQuery = pricingRulesQuery.eq('rate_plan_id', ratePlanId);
+  } else {
+    pricingRulesQuery = pricingRulesQuery.is('rate_plan_id', null);
+  }
+
+  // Note: We'll fetch all matching rules and filter by channel in JavaScript
+  // This is because Supabase .or() with nulls can be tricky
+
+  const { data: allRules, error: rulesError } = await pricingRulesQuery.order('priority', { ascending: true });
+
+  if (rulesError) {
+    console.error('[AVAILABILITY] Error querying pricing_rules:', rulesError);
+    // Fallback to base rate without rule
+    return {
+      ratePlanName,
+      pricePerDay: baseDailyRate,
+      source: {
+        table: ratePlanId === 'tenant-default' ? 'tenant_pricing' : 'product_rate_plans',
+        ratePlanId,
+        ratePlanName,
+        pricePerDay: baseDailyRate,
+        channelCode: effectiveChannelCode,
+        seasonId,
+      },
+    };
+  }
+
+  if (!allRules || allRules.length === 0) {
+    // No pricing rules found, use base rate
+    return {
+      ratePlanName,
+      pricePerDay: baseDailyRate,
+      source: {
+        table: ratePlanId === 'tenant-default' ? 'tenant_pricing' : 'product_rate_plans',
+        ratePlanId,
+        ratePlanName,
+        pricePerDay: baseDailyRate,
+        channelCode: effectiveChannelCode,
+        seasonId,
+      },
+    };
+  }
+
+  // Step 4: Filter by channel and apply channel precedence
+  // First, prioritize exact day matches (min_stay === days), then range matches
+  // Filter rules where channel matches or is null
+  const exactDayMatches = allRules.filter(r => 
+    r.min_stay === days && (r.max_stay === null || r.max_stay === days) &&
+    (!r.channel || r.channel === effectiveChannelCode || r.channel === 'agent' || r.channel === 'all')
+  );
+  
+  const rangeMatches = allRules.filter(r => 
+    r.min_stay !== days && r.min_stay <= days && (r.max_stay === null || r.max_stay >= days) &&
+    (!r.channel || r.channel === effectiveChannelCode || r.channel === 'agent' || r.channel === 'all')
+  );
+  
+  // Prefer exact day matches over range matches
+  const channelFilteredRules = exactDayMatches.length > 0 ? exactDayMatches : rangeMatches;
+
+  if (channelFilteredRules.length === 0) {
+    // No matching channel rules, use base rate
+    return {
+      ratePlanName,
+      pricePerDay: baseDailyRate,
+      source: {
+        table: ratePlanId === 'tenant-default' ? 'tenant_pricing' : 'product_rate_plans',
+        ratePlanId,
+        ratePlanName,
+        pricePerDay: baseDailyRate,
+        channelCode: effectiveChannelCode,
+        seasonId,
+      },
+    };
+  }
+
+  // Apply channel precedence and select best rule
+  // Precedence: channel-specific > 'agent' > 'all' > null
+  let selectedRule = null;
+  
+  // Try channel-specific first
+  selectedRule = channelFilteredRules.find(r => r.channel === effectiveChannelCode);
+  
+  // Try 'agent' channel
+  if (!selectedRule && effectiveChannelCode !== 'agent') {
+    selectedRule = channelFilteredRules.find(r => r.channel === 'agent');
+  }
+  
+  // Try 'all' channel
+  if (!selectedRule && effectiveChannelCode !== 'all') {
+    selectedRule = channelFilteredRules.find(r => r.channel === 'all');
+  }
+  
+  // Try null channel
+  if (!selectedRule) {
+    selectedRule = channelFilteredRules.find(r => !r.channel);
+  }
+  
+  // If still no rule, use first one (already sorted by priority)
+  if (!selectedRule) {
+    selectedRule = channelFilteredRules[0];
+  }
+
+  // Step 5: Get price_tier for the selected rule
+  const { data: tier, error: tierError } = await supabase
+    .from('price_tiers')
+    .select('id, type, value')
+    .eq('id', selectedRule.tier_id)
+    .eq('tenant_id', tenantId)
+    .maybeSingle();
+
+  if (tierError || !tier) {
+    console.error('[AVAILABILITY] Error getting price_tier:', tierError);
+    // Fallback to base rate
+    return {
+      ratePlanName,
+      pricePerDay: baseDailyRate,
+      source: {
+        table: ratePlanId === 'tenant-default' ? 'tenant_pricing' : 'product_rate_plans',
+        ratePlanId,
+        ratePlanName,
+        pricePerDay: baseDailyRate,
+        channelCode: effectiveChannelCode,
+        seasonId,
+      },
+    };
+  }
+
+  // Step 6: Calculate price_per_day based on tier type
+  // IMPORTANT: For LOS matrix pricing rules (where min_stay === max_stay === days),
+  // the tier.value stored in the database is the TOTAL price for that stay length,
+  // even though tier.type is 'multiplier'. This is how the admin Pricing UI stores LOS prices.
+  // For example: if admin sets "2 per day for 3 days", it stores tier.value = 6 (total).
+  let pricePerDay: number;
+  const tierValue = Number(tier.value);
+  
+  // Check if this is a LOS matrix rule (exact day match: min_stay === max_stay === days)
+  const isLosMatrixRule = selectedRule.min_stay === days && (selectedRule.max_stay === null || selectedRule.max_stay === days);
+  
+  if (isLosMatrixRule) {
+    // LOS matrix rule: tier.value is the TOTAL price for this exact stay length
+    // Divide by days to get per-day rate
+    pricePerDay = tierValue / days;
+  } else if (tier.type === 'flat' || tier.type === 'absolute') {
+    // Flat/Absolute: tier.value is the final per-day price
+    pricePerDay = tierValue;
+  } else if (tier.type === 'multiplier') {
+    // Regular multiplier (for non-LOS rules): base_daily_rate * tier.value
+    pricePerDay = baseDailyRate * tierValue;
+  } else {
+    // Unknown type: try to infer from rule structure
+    if (selectedRule.min_stay === days && (selectedRule.max_stay === null || selectedRule.max_stay === days)) {
+      // Looks like LOS matrix rule, treat as total price
+      pricePerDay = tierValue / days;
+    } else {
+      // Fallback to multiplier behavior
+      console.warn(`[AVAILABILITY] Unknown tier type: ${tier.type}, treating as multiplier`);
+      pricePerDay = baseDailyRate * tierValue;
+    }
+  }
+
+  if (isNaN(pricePerDay) || pricePerDay <= 0) {
+    throw new Error(`Invalid price calculation: baseDailyRate=${baseDailyRate}, tier.type=${tier.type}, tier.value=${tier.value}`);
+  }
+
+  return {
+    ratePlanName,
+    pricePerDay,
+    source: {
+      table: 'pricing_rules',
+      ratePlanId: selectedRule.rate_plan_id,
+      ratePlanName,
+      pricePerDay,
+      seasonId: selectedRule.season_id,
+      channelCode: selectedRule.channel || effectiveChannelCode,
+      pricingRuleId: selectedRule.id,
+      tierId: selectedRule.tier_id,
+      tierType: tier.type,
+      tierValue: tierValue,
+    },
+  };
+}
+
+/**
  * Calculate availability for a product using tenant capacity and pricing
  */
 export async function calculateProductAvailability(
@@ -76,6 +407,7 @@ export async function calculateProductAvailability(
     startAt,
     endAt,
     currency: inputCurrency,
+    channelCode,
     excludeBookingReference,
   } = input;
 
@@ -151,48 +483,20 @@ export async function calculateProductAvailability(
     }
   }
 
-  // 2) Get rate plan for pricing (fallback to tenant_pricing if no rate plan)
-  const { data: ratePlan } = await supabase
-    .from('product_rate_plans')
-    .select('*')
-    .eq('product_id', productId)
-    .limit(1)
-    .maybeSingle();
-
-  // If no rate plan, get from tenant_pricing
-  let basePricePerDay: number;
-  let ratePlanId: string;
-  let ratePlanName: string;
-  let pricingCurrency: string = currency;
-
-  if (ratePlan) {
-    basePricePerDay = ratePlan.base_price_cents / 100;
-    ratePlanId = ratePlan.id;
-    ratePlanName = ratePlan.name || 'standard';
-    pricingCurrency = ratePlan.currency || currency;
-  } else {
-    // Fallback to tenant_pricing.daily_rate
-    const { data: tenantPricing } = await supabase
-      .from('tenant_pricing')
-      .select('daily_rate, currency')
-      .eq('tenant_id', tenantId)
-      .maybeSingle();
-
-    basePricePerDay = Number(tenantPricing?.daily_rate ?? 10);
-    ratePlanId = 'tenant-default';
-    ratePlanName = 'standard';
-    pricingCurrency = tenantPricing?.currency || currency;
-  }
-
   // At this point, productId should always be set (we throw if no product found)
   if (!productId) {
     throw new Error('Product ID is required but was not found');
   }
 
+  // 2) Get pricing from database (source of truth from admin Pricing UI)
   const stayDates = generateStayDates(startAt, endAt);
   const days = stayDates.length;
 
+  let pricingInfo: { ratePlanName: string; pricePerDay: number; source: PricingSource };
+  let pricingCurrency: string = currency;
+
   if (stayDates.length === 0) {
+    // Return early with zero pricing if no dates
     return {
       productId,
       startAt,
@@ -201,8 +505,8 @@ export async function calculateProductAvailability(
       availabilityStatus: 'closed',
       remainingCapacity: null,
       pricing: {
-        ratePlanId,
-        ratePlanName,
+        ratePlanId: 'tenant-default',
+        ratePlanName: 'standard',
         days: 0,
         basePrice: 0,
         totalPrice: 0,
@@ -210,6 +514,30 @@ export async function calculateProductAvailability(
         discounts: [],
       },
     };
+  }
+
+  try {
+    pricingInfo = await getProductBasePricePerDay(supabase, {
+      tenantId,
+      productId,
+      startAt,
+      endAt,
+      currency,
+      channelCode,
+      days,
+    });
+
+    // Get currency from tenant_pricing if we used that source
+    if (pricingInfo.source.table === 'tenant_pricing') {
+      const { data: tenantPricing } = await supabase
+        .from('tenant_pricing')
+        .select('currency')
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
+      pricingCurrency = tenantPricing?.currency || currency;
+    }
+  } catch (error: any) {
+    throw new Error(`Failed to get pricing: ${error.message || String(error)}`);
   }
 
   // 3) Determine capacity for each date
@@ -343,8 +671,15 @@ export async function calculateProductAvailability(
     availabilityStatus = 'sold_out';
   }
 
-  // 7) pricing = days * basePricePerDay
-  const basePrice = days * basePricePerDay;
+  // 7) pricing - base_price is the daily rate
+  const basePricePerDay = pricingInfo.pricePerDay; // Daily rate (e.g., 7 GBP per day)
+  const surcharges: any[] = [];
+  const discounts: any[] = [];
+  
+  // Calculate total: base_price * days + surcharges - discounts
+  const surchargesTotal = surcharges.reduce((sum, s) => sum + (s.amount || 0), 0);
+  const discountsTotal = discounts.reduce((sum, d) => sum + (d.amount || 0), 0);
+  const totalPrice = basePricePerDay * days + surchargesTotal - discountsTotal;
 
   return {
     productId,
@@ -354,13 +689,15 @@ export async function calculateProductAvailability(
     availabilityStatus,
     remainingCapacity: overallRemaining,
     pricing: {
-      ratePlanId,
-      ratePlanName,
+      ratePlanId: pricingInfo.source.ratePlanId || 'tenant-default',
+      ratePlanName: pricingInfo.ratePlanName,
       days,
-      basePrice,
-      totalPrice: basePrice,
-      surcharges: [],
-      discounts: [],
+      basePrice: basePricePerDay,
+      totalPrice,
+      surcharges,
+      discounts,
+      // Include pricing source for debug
+      _pricingSource: pricingInfo.source,
     },
   };
 }
