@@ -33,6 +33,10 @@ type Booking = {
   source: string
   created_at: string
   highlight_code?: BookingHighlightCode
+  dynamic_pricing_applied?: boolean
+  dynamic_pricing_multiplier?: number | null
+  dynamic_pricing_rule_id?: string | null
+  dynamic_pricing_occupancy_percent?: number | null
 }
 
 type BookingsPageClientProps = {
