@@ -21,10 +21,23 @@ export async function getServerSupabase() {
           return cookieStore.get(name)?.value;
         },
         set: (name: string, value: string, options: any) => {
-          cookieStore.set({ name, value, ...options });
+          // In Next.js 15, cookies can only be modified in Server Actions or Route Handlers.
+          // In Server Components, we make this a no-op to avoid errors.
+          // Token refresh will happen in Route Handlers/Server Actions where cookies can be set.
+          try {
+            cookieStore.set({ name, value, ...options });
+          } catch (error) {
+            // Silently ignore cookie setting errors in Server Components
+            // This is expected behavior in Next.js 15
+          }
         },
         remove: (name: string, options: any) => {
-          cookieStore.set({ name, value: '', ...options });
+          // Same as set - no-op in Server Components
+          try {
+            cookieStore.set({ name, value: '', ...options });
+          } catch (error) {
+            // Silently ignore cookie removal errors in Server Components
+          }
         },
       },
     }

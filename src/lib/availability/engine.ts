@@ -155,6 +155,41 @@ export async function calculateAvailability(
     };
   });
 
+  // Load tenant_settings for rolling capacity defaults
+  const { data: tenantSettings } = await supabase
+    .from('tenant_settings')
+    .select('rolling_capacity_months, default_daily_capacity')
+    .eq('tenant_id', tenantId)
+    .maybeSingle();
+
+  const rollingMonths = tenantSettings?.rolling_capacity_months ?? 12;
+  const defaultDailyCapacity = tenantSettings?.default_daily_capacity ?? 250;
+
+  // Calculate the booking horizon date (today + rolling months)
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const horizonDate = new Date(today);
+  horizonDate.setUTCMonth(horizonDate.getUTCMonth() + rollingMonths);
+
+  // Fill in missing capacity rows using rolling capacity logic
+  for (const d of stayDates) {
+    if (!capByDate[d]) {
+      const dateObj = new Date(d + 'T00:00:00Z');
+      
+      // Check if date is within booking horizon
+      if (dateObj <= horizonDate) {
+        // Use default daily capacity
+        capByDate[d] = {
+          date: d,
+          capacity: defaultDailyCapacity,
+          direct_reserve_mode: 'none',
+          direct_reserve_value: 0,
+        };
+      }
+      // If date is beyond horizon, capByDate[d] remains undefined (will be treated as closed)
+    }
+  }
+
   // 2) Load all overlapping bookings for tenant across the period
   let bookingsQuery = supabase
     .from('bookings')
@@ -215,8 +250,15 @@ export async function calculateAvailability(
   for (const d of stayDates) {
     const capRow = capByDate[d];
 
-    // If no capacity row or zero capacity, this day is closed
-    if (!capRow || capRow.capacity <= 0) {
+    // If no capacity row (beyond booking horizon or explicitly closed), this day is closed
+    if (!capRow) {
+      availability_status = 'closed';
+      overallRemaining = null;
+      break;
+    }
+
+    // If capacity is zero or negative, this day is closed
+    if (capRow.capacity <= 0) {
       availability_status = 'closed';
       overallRemaining = null;
       break;

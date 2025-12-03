@@ -15,6 +15,8 @@ export default function CapacitySettingsPage() {
   const { tenantId, tenantSlug, loading } = useTenant()
 
   const [defaultCap, setDefaultCap] = useState<number | ''>('')
+  const [rollingMonths, setRollingMonths] = useState<number | ''>('')
+  const [defaultDailyCapacity, setDefaultDailyCapacity] = useState<number | ''>('')
   const [overrides, setOverrides] = useState<OverrideRow[]>([])
   const [rangeFrom, setRangeFrom] = useState<string>(format(new Date(), 'yyyy-MM-dd'))
   const [rangeTo, setRangeTo] = useState<string>(format(addDays(new Date(), 30), 'yyyy-MM-dd'))
@@ -25,12 +27,15 @@ export default function CapacitySettingsPage() {
     ;(async () => {
       setStatus('Loading…')
       const qs = new URLSearchParams({ tenant_id: tenantId, from: rangeFrom, to: rangeTo })
-      const [r1, r2] = await Promise.all([
+      const [r1, r2, r3] = await Promise.all([
         fetch(`/api/settings/capacity/default?tenant_id=${tenantId}`),
-        fetch(`/api/settings/capacity/overrides?${qs}`)
+        fetch(`/api/settings/capacity/overrides?${qs}`),
+        fetch(`/api/settings/capacity/rolling?tenant_id=${tenantId}`)
       ])
-      const j1 = await r1.json(); const j2 = await r2.json()
+      const j1 = await r1.json(); const j2 = await r2.json(); const j3 = await r3.json()
       setDefaultCap(j1.default_capacity ?? '')
+      setRollingMonths(j3.rolling_capacity_months ?? '')
+      setDefaultDailyCapacity(j3.default_daily_capacity ?? '')
       setOverrides(j2.rows ?? [])
       setStatus('')
     })()
@@ -61,6 +66,28 @@ export default function CapacitySettingsPage() {
     } else {
       setStatus(`Error: ${j.error ?? 'unknown'}`)
       toast.error(`Failed to save default capacity: ${j.error}`)
+    }
+  }
+
+  async function saveRollingCapacity() {
+    if (!tenantId || rollingMonths === '' || defaultDailyCapacity === '') return
+    setStatus('Saving rolling capacity…')
+    const r = await fetch('/api/settings/capacity/rolling', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        tenant_id: tenantId, 
+        rolling_capacity_months: Number(rollingMonths),
+        default_daily_capacity: Number(defaultDailyCapacity)
+      })
+    })
+    const j = await r.json()
+    if (r.ok) {
+      setStatus('Rolling capacity saved.')
+      toast.success('Rolling capacity settings saved successfully')
+    } else {
+      setStatus(`Error: ${j.error ?? 'unknown'}`)
+      toast.error(`Failed to save rolling capacity: ${j.error}`)
     }
   }
 
@@ -115,7 +142,59 @@ export default function CapacitySettingsPage() {
 
       <Card className="shadow-soft">
         <CardHeader>
-          <CardTitle className="text-lg">Default Capacity</CardTitle>
+          <CardTitle className="text-lg">Rolling Capacity Settings</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Accept bookings up to (months)
+              </label>
+              <Input
+                type="number" 
+                min={1}
+                max={60}
+                placeholder="12"
+                value={rollingMonths}
+                onChange={e => setRollingMonths(e.target.value === '' ? '' : Number(e.target.value))}
+              />
+              <p className="text-xs text-slate-500 mt-1">How many months in advance bookings are accepted</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Default daily capacity
+              </label>
+              <Input
+                type="number" 
+                min={0} 
+                placeholder="250"
+                value={defaultDailyCapacity}
+                onChange={e => setDefaultDailyCapacity(e.target.value === '' ? '' : Number(e.target.value))}
+              />
+              <p className="text-xs text-slate-500 mt-1">Used when no specific capacity override exists</p>
+            </div>
+            <div className="flex items-end">
+              <Button 
+                onClick={saveRollingCapacity}
+                disabled={rollingMonths === '' || defaultDailyCapacity === ''}
+                className="w-full"
+              >
+                <Save className="h-4 w-4 mr-2" />
+                Save Settings
+              </Button>
+            </div>
+          </div>
+          {status && (
+            <div className="flex items-center">
+              <Badge variant="outline" className="text-xs">{status}</Badge>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-soft">
+        <CardHeader>
+          <CardTitle className="text-lg">Legacy Default Capacity</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

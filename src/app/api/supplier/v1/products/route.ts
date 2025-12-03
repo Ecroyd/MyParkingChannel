@@ -5,7 +5,6 @@ import {
   authenticateSupplierApi,
   SupplierAuthError,
 } from '@/lib/supplier/auth';
-import { SupplierProduct } from '@/lib/supplier/types';
 
 export async function GET(req: NextRequest) {
   try {
@@ -21,41 +20,56 @@ export async function GET(req: NextRequest) {
 
     const supabase = createAdminClient();
 
-    // For now, return a default product since we don't have a parking_products table yet
-    // TODO: Replace with real parking_products table query when available
-    const { data: tenantProfile } = await supabase
-      .from('tenant_public_profile')
-      .select('business_name, airport_code')
+    // Load all active products for this tenant
+    const { data: products, error: productsError } = await supabase
+      .from('products')
+      .select('id, code, name, description, is_active')
       .eq('tenant_id', auth.tenantId)
-      .maybeSingle();
+      .eq('is_active', true);
 
-    const displayName = tenantProfile?.business_name || 'Car Park';
-    const airportCode = tenantProfile?.airport_code || null;
+    if (productsError) {
+      console.error('Products query error:', productsError);
+      return NextResponse.json(
+        { error: { code: 'INTERNAL_ERROR', message: 'Failed to load products' } },
+        { status: 500 }
+      );
+    }
 
-    // Return default product structure
-    const products: SupplierProduct[] = [
-      {
-        id: `default-${auth.tenantId}`,
-        code: `DEFAULT_${auth.tenantId}`,
-        name: displayName,
-        description: 'Standard airport parking',
-        location: {
-          airport_code: airportCode || undefined,
-        },
-        min_stay_hours: 24,
-        max_stay_days: 60,
-        lead_time_hours: 2,
-        cancellation_policy: {
-          free_until_hours_before: 24,
-          fee_percentage_after: 100,
-        },
-        features: ['cctv', 'fenced', 'park_and_ride'],
-        currency: 'GBP',
-        status: 'active',
-      },
-    ];
+    if (!products || products.length === 0) {
+      return NextResponse.json([], { status: 200 });
+    }
 
-    return NextResponse.json(products, { status: 200 });
+    // For each product, load the rate plan
+    const productsWithRatePlans = await Promise.all(
+      products.map(async (product) => {
+        const { data: ratePlan, error: ratePlanError } = await supabase
+          .from('product_rate_plans')
+          .select('id, base_price_cents, currency, billing_type')
+          .eq('product_id', product.id)
+          .limit(1)
+          .maybeSingle();
+
+        if (ratePlanError) {
+          console.error(`Rate plan query error for product ${product.id}:`, ratePlanError);
+        }
+
+        return {
+          id: product.id,
+          code: product.code,
+          name: product.name,
+          description: product.description || null,
+          rate_plan: ratePlan
+            ? {
+                base_price: ratePlan.base_price_cents / 100,
+                currency: ratePlan.currency,
+                billing_type: ratePlan.billing_type,
+              }
+            : null,
+        };
+      })
+    );
+
+    return NextResponse.json(productsWithRatePlans, { status: 200 });
   } catch (err: any) {
     if (err instanceof SupplierAuthError) {
       return NextResponse.json(

@@ -296,35 +296,64 @@ export default function LosMatrix({ seasonId, seasons }: LosMatrixProps) {
         channel: 'all', // Always copy from 'all' channel for baseline
       });
 
+      console.log('[LosMatrix] Copying from season:', {
+        sourceSeasonId: copySourceSeasonId,
+        targetSeasonId: selectedSeasonId,
+        ratePlanId,
+        channel: 'all',
+      });
+
       const response = await fetch(`/api/admin/pricing/matrix?${params}`, {
         credentials: 'include',
       });
       const result = await response.json();
 
       if (result.error) {
+        console.error('[LosMatrix] Copy error from API:', result.error);
         toast.error(result.error);
         return;
       }
 
+      console.log('[LosMatrix] Copy result:', {
+        rowsCount: result.rows?.length || 0,
+        extraDayPrice: result.extraDayPrice,
+        firstFewRows: result.rows?.slice(0, 5),
+      });
+
       // Copy rows - when copying from 'all', we just copy the price (no basePrice needed)
       const newRows: LosRow[] = [];
+      let copiedCount = 0;
       for (let i = 1; i <= MAX_DAYS; i++) {
         const rowData = result.rows?.find((r: any) => (r.days === i || r.day === i));
+        const price = rowData?.price ?? null;
+        if (price !== null) copiedCount++;
         newRows.push({
           days: i,
-          price: rowData?.price ?? null,
+          price,
           basePrice: null, // When copying from 'all', basePrice is null
         });
       }
+      
+      console.log('[LosMatrix] Copied rows:', {
+        totalRows: newRows.length,
+        rowsWithPrices: copiedCount,
+        extraDayPrice: result.extraDayPrice,
+      });
+
       setRows(newRows);
       setExtraDayPrice(result.extraDayPrice ?? null);
       setBaseExtraPrice(null); // When copying from 'all', baseExtraPrice is null
       setHasChanges(true);
       setCopyDialogOpen(false);
       setCopySourceSeasonId('');
-      toast.success('Copied pricing from season');
+      
+      if (copiedCount === 0) {
+        toast.error('No pricing data found in source season');
+      } else {
+        toast.success(`Copied ${copiedCount} pricing entries from season`);
+      }
     } catch (error) {
-      console.error('Error copying matrix:', error);
+      console.error('[LosMatrix] Error copying matrix:', error);
       toast.error('Failed to copy pricing matrix');
     }
   };
