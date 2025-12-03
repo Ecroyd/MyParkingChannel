@@ -117,23 +117,35 @@ export async function GET(request: NextRequest) {
         endAt: end_at,
         currency,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Handle product not found or other engine errors
-      if (err.message?.includes('Product not found') || err.message?.includes('not active')) {
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'string'
+          ? err
+          : 'Unknown availability engine error';
+
+      if (errorMessage.includes('Product not found') || errorMessage.includes('not active')) {
         return NextResponse.json(
-          { error: { code: 'NOT_FOUND', message: err.message } },
+          { error: { code: 'NOT_FOUND', message: errorMessage } },
           { status: 404 }
         );
       }
-      if (err.message?.includes('No active products')) {
+      if (errorMessage.includes('No active products')) {
         return NextResponse.json(
-          { error: { code: 'NOT_FOUND', message: err.message } },
+          { error: { code: 'NOT_FOUND', message: errorMessage } },
           { status: 404 }
         );
       }
+
+      // For all other errors (including Supabase query errors), return the actual error message
       console.error('Availability engine error:', err);
       return NextResponse.json(
-        { error: { code: 'INTERNAL_ERROR', message: 'Failed to calculate availability' } },
+        {
+          error: 'availability_engine_failed',
+          message: errorMessage,
+        },
         { status: 500 }
       );
     }

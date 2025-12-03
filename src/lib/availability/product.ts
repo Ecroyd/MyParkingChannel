@@ -184,6 +184,11 @@ export async function calculateProductAvailability(
     pricingCurrency = tenantPricing?.currency || currency;
   }
 
+  // At this point, productId should always be set (we throw if no product found)
+  if (!productId) {
+    throw new Error('Product ID is required but was not found');
+  }
+
   const stayDates = generateStayDates(startAt, endAt);
   const days = stayDates.length;
 
@@ -255,20 +260,14 @@ export async function calculateProductAvailability(
   }
 
   // 4) Calculate occupancy - query bookings that overlap the period
-  // Count bookings for this product (or all bookings if product_id is null in legacy bookings)
+  // Capacity is per tenant, not per product, so we count ALL bookings for the tenant
   let bookingsQuery = supabase
     .from('bookings')
-    .select('start_at, end_at, status, product_id')
+    .select('start_at, end_at, status')
     .eq('tenant_id', tenantId)
-    .in('status', ['reserved', 'confirmed', 'checked_in'])
+    .neq('status', 'cancelled')
     .lt('start_at', endAt)
     .gt('end_at', startAt);
-
-  // Filter by product_id if provided, otherwise count all bookings (legacy support)
-  // For legacy bookings where product_id is null, count them as using tenant capacity
-  if (productId) {
-    bookingsQuery = bookingsQuery.or(`product_id.eq.${productId},product_id.is.null`);
-  }
 
   if (excludeBookingReference) {
     bookingsQuery = bookingsQuery.neq('reference', excludeBookingReference);
@@ -277,7 +276,27 @@ export async function calculateProductAvailability(
   const { data: bookings, error: bookingsError } = await bookingsQuery;
 
   if (bookingsError) {
-    throw new Error('Failed to check bookings');
+    console.error('[AVAILABILITY] bookingsError in calculateProductAvailability', {
+      error: bookingsError,
+      tenantId,
+      productId: inputProductId,
+      startAt,
+      endAt,
+    });
+
+    // Rethrow the original error so the route can see the actual message
+    if (bookingsError instanceof Error) {
+      throw bookingsError;
+    } else {
+      // If bookingsError is not an Error object, create one with the message
+      // Supabase errors typically have a message property
+      const errorObj = bookingsError as { message?: string } | null | undefined;
+      const errorMessage = 
+        (errorObj && typeof errorObj === 'object' && 'message' in errorObj && errorObj.message)
+          ? String(errorObj.message)
+          : JSON.stringify(bookingsError);
+      throw new Error(`Failed to check bookings: ${errorMessage}`);
+    }
   }
 
   // Count occupancy per date
