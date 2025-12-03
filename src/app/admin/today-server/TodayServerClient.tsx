@@ -9,7 +9,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { GateStatus } from '@/lib/bookings/gateStatus';
 import { cn } from '@/lib/utils';
-import { useToast } from '@/hooks/use-toast';
+import { useToast, toast as toastFn } from '@/hooks/use-toast';
+import { BookingHighlightIcon } from '@/components/bookings/BookingHighlightIcon';
+import { DynamicPricingBadge } from '@/components/bookings/DynamicPricingBadge';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+
+import { BookingHighlightCode } from '@/types/bookings';
 
 interface Booking {
   id: string;
@@ -35,6 +46,7 @@ interface Booking {
   checked_in_at: string | null;
   checked_out_at: string | null;
   gate_status?: string | null;
+  highlight_code: BookingHighlightCode;
 }
 
 interface Tenant {
@@ -78,6 +90,8 @@ export default function TodayServerClient({
   const [arrivalsSort, setArrivalsSort] = useState<'closest' | 'most_recent'>('closest');
   const [departuresSort, setDeparturesSort] = useState<'closest' | 'most_recent'>('closest');
   const [parkedSort, setParkedSort] = useState<'closest' | 'most_recent'>('closest');
+  const [highlightMode, setHighlightMode] = useState(false);
+  const [updatingHighlightId, setUpdatingHighlightId] = useState<string | null>(null);
 
   const handleBookingClick = (booking: Booking) => {
     setSelectedBookingId(booking.id);
@@ -85,6 +99,49 @@ export default function TodayServerClient({
 
   const handleBookingUpdated = () => {
     router.refresh();
+  };
+
+  const updateHighlight = async (bookingId: string, highlightCode: BookingHighlightCode) => {
+    try {
+      setUpdatingHighlightId(bookingId);
+
+      const res = await fetch('/api/bookings/highlight', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          bookingId, 
+          tenantId: tenant.id, 
+          highlightCode 
+        }),
+      });
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || 'Failed to update highlight');
+      }
+
+      // Update local state
+      const updateBookingInState = (booking: Booking) => 
+        booking.id === bookingId ? { ...booking, highlight_code: highlightCode } : booking;
+
+      setArrivals(prev => prev.map(updateBookingInState));
+      setDepartures(prev => prev.map(updateBookingInState));
+      setCurrentlyParked(prev => prev.map(updateBookingInState));
+
+      toastFn({
+        title: 'Highlight updated',
+        description: 'Booking highlight has been saved',
+      });
+    } catch (err: any) {
+      console.error('Failed to update highlight:', err);
+      toastFn({
+        title: 'Error',
+        description: err.message || 'Could not update highlight',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdatingHighlightId(null);
+    }
   };
 
   const fetchDataForDateRange = async (from: string, to: string) => {
@@ -290,6 +347,12 @@ export default function TodayServerClient({
     const [isPending, startTransition] = useTransition();
     const lastUpdateRef = useRef<{ gate_status: string | null } | null>(null);
 
+    const handleRowClick = () => {
+      if (!highlightMode) {
+        handleBookingClick(booking);
+      }
+    };
+
     // Sync gateStatus with booking prop changes (e.g., after router.refresh())
     // But don't override if we just updated and the data matches our last update
     useEffect(() => {
@@ -406,36 +469,121 @@ export default function TodayServerClient({
 
     return (
       <tr 
-        className="hover:bg-gray-50"
+        className={cn("hover:bg-gray-50", highlightMode && "cursor-pointer")}
       >
         <td 
           className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
-          onClick={() => handleBookingClick(booking)}
+          onClick={handleRowClick}
         >
           <div className="flex items-center gap-2">
+            {highlightMode ? (
+              <div onClick={(e) => e.stopPropagation()} className="inline-flex">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="inline-flex items-center justify-center focus:outline-none hover:opacity-80 transition-opacity cursor-pointer min-w-[20px] min-h-[20px]"
+                      disabled={updatingHighlightId === booking.id}
+                    >
+                      <BookingHighlightIcon highlightCode={booking.highlight_code || 'none'} />
+                      {(!booking.highlight_code || booking.highlight_code === 'none') && (
+                        <span className="w-3 h-3 border border-gray-300 rounded-full" />
+                      )}
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="z-50 bg-white border border-gray-200 shadow-lg">
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      updateHighlight(booking.id, 'key');
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <BookingHighlightIcon highlightCode="key" />
+                    <span>Key icon</span>
+                    {booking.highlight_code === 'key' && <span className="ml-auto">✓</span>}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      updateHighlight(booking.id, 'dot_green');
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <BookingHighlightIcon highlightCode="dot_green" />
+                    <span>Green dot</span>
+                    {booking.highlight_code === 'dot_green' && <span className="ml-auto">✓</span>}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      updateHighlight(booking.id, 'dot_amber');
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <BookingHighlightIcon highlightCode="dot_amber" />
+                    <span>Amber dot</span>
+                    {booking.highlight_code === 'dot_amber' && <span className="ml-auto">✓</span>}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      updateHighlight(booking.id, 'dot_red');
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <BookingHighlightIcon highlightCode="dot_red" />
+                    <span>Red dot</span>
+                    {booking.highlight_code === 'dot_red' && <span className="ml-auto">✓</span>}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      updateHighlight(booking.id, 'none');
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <BookingHighlightIcon highlightCode="none" />
+                    <span>No highlight</span>
+                    {booking.highlight_code === 'none' && <span className="ml-auto">✓</span>}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              </div>
+            ) : (
+              <BookingHighlightIcon highlightCode={booking.highlight_code || 'none'} />
+            )}
             {booking.customer_name}
             {(booking as any).is_incomplete && (
               <span className="inline-flex px-1.5 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 rounded">
                 Incomplete
               </span>
             )}
+            {(booking as any).dynamic_pricing_applied && (
+              <DynamicPricingBadge
+                applied={(booking as any).dynamic_pricing_applied}
+                multiplier={(booking as any).dynamic_pricing_multiplier}
+                occupancyPercent={(booking as any).dynamic_pricing_occupancy_percent}
+                ruleId={(booking as any).dynamic_pricing_rule_id}
+              />
+            )}
           </div>
         </td>
         <td 
           className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
-          onClick={() => handleBookingClick(booking)}
+          onClick={handleRowClick}
         >
           {booking.plate}
         </td>
         <td 
           className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
-          onClick={() => handleBookingClick(booking)}
+          onClick={handleRowClick}
         >
           {booking.flight_number || '-'}
         </td>
         <td 
           className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
-          onClick={() => handleBookingClick(booking)}
+          onClick={handleRowClick}
         >
           <div className="flex flex-col">
             <div className="font-medium">Arrival</div>
@@ -464,13 +612,13 @@ export default function TodayServerClient({
         </td>
         <td 
           className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
-          onClick={() => handleBookingClick(booking)}
+          onClick={handleRowClick}
         >
           {calculateDays()} {calculateDays() === 1 ? 'day' : 'days'}
         </td>
         <td 
           className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
-          onClick={() => handleBookingClick(booking)}
+          onClick={handleRowClick}
         >
           £{booking.money_charged || 0}
         </td>
@@ -505,11 +653,18 @@ export default function TodayServerClient({
     <>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Today's Overview</h1>
             <p className="text-gray-600">Welcome to {tenant.name}</p>
           </div>
+          <Button
+            variant={highlightMode ? 'default' : 'outline'}
+            onClick={() => setHighlightMode((v) => !v)}
+            className="shrink-0 w-full sm:w-auto"
+          >
+            {highlightMode ? 'Done highlighting' : 'Highlight bookings'}
+          </Button>
         </div>
 
         {/* Date Range Selector */}

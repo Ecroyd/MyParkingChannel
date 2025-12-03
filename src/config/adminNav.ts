@@ -26,12 +26,22 @@ export const ADMIN_NAV: NavNode[] = [
     ],
   },
   { key: "booking-rules", label: "Booking Rules", href: "/admin/booking-rules", section: "Core", minRole: "admin" },
-  { key: "pricing", label: "Pricing", href: "/admin/pricing", section: "Core", minRole: "admin" },
+  { 
+    key: "pricing", 
+    label: "Pricing", 
+    href: "/admin/pricing", 
+    section: "Core", 
+    minRole: "admin",
+    children: [
+      { key: "dynamic-pricing", label: "Dynamic Pricing", href: "/admin/settings/dynamic-pricing", minRole: "admin" },
+    ],
+  },
   { key: "analytics", label: "Analytics", href: "/admin/analytics", section: "Core", minRole: "admin" },
 
   // ——— Sites & Integrations ———
   { key: "tenant-sites", label: "Tenant Sites", href: "/admin/tenant-sites-server", section: "Sites & Integrations", minRole: "admin" },
   { key: "site-seo", label: "Site & SEO", href: "/admin/site-seo", section: "Sites & Integrations", minRole: "admin" },
+  { key: "channels", label: "Channels", href: "/admin/channels", section: "Sites & Integrations", minRole: "admin" },
   { key: "integrations-flights", label: "Flight Data", href: "/admin/integrations/flights", section: "Sites & Integrations", minRole: "admin" },
   { 
     key: "integrations", 

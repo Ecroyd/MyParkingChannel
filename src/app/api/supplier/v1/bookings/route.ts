@@ -101,6 +101,50 @@ export async function POST(req: NextRequest) {
     const customerName = `${body.customer.first_name} ${body.customer.last_name}`.trim();
     const flightNumber = body.flight?.departure_number || body.flight?.arrival_number || null;
 
+    // Get dynamic pricing metadata from availability if available
+    // The supplier should have called /availability first, which includes dynamic pricing info
+    // For now, we'll fetch it again to ensure we have the latest data
+    let dynamicPricingData: {
+      dynamic_pricing_applied: boolean;
+      dynamic_pricing_multiplier: number | null;
+      dynamic_pricing_rule_id: string | null;
+      dynamic_pricing_occupancy_percent: number | null;
+      dynamic_pricing_note: string | null;
+    } = {
+      dynamic_pricing_applied: false,
+      dynamic_pricing_multiplier: null,
+      dynamic_pricing_rule_id: null,
+      dynamic_pricing_occupancy_percent: null,
+      dynamic_pricing_note: null,
+    };
+
+    try {
+      const { calculateAvailability } = await import('@/lib/availability/engine');
+      const availability = await calculateAvailability({
+        tenantId: auth.tenantId,
+        startAt: body.start_at,
+        endAt: body.end_at,
+        currency: body.price.currency || 'GBP',
+        channel: 'partner',
+        channelCode: auth.channelCode,
+      });
+
+      if (availability.pricing.dynamicPricingApplied) {
+        dynamicPricingData = {
+          dynamic_pricing_applied: true,
+          dynamic_pricing_multiplier: availability.pricing.dynamicPricingMultiplier || null,
+          dynamic_pricing_rule_id: availability.pricing.dynamicPricingRuleId || null,
+          dynamic_pricing_occupancy_percent: availability.pricing.dynamicPricingOccupancyPercent || null,
+          dynamic_pricing_note: availability.pricing.dynamicPricingOccupancyPercent
+            ? `Occupancy ${availability.pricing.dynamicPricingOccupancyPercent.toFixed(1)}%`
+            : null,
+        };
+      }
+    } catch (error) {
+      console.error('Error fetching dynamic pricing data for booking:', error);
+      // Continue without dynamic pricing data
+    }
+
     const { data, error } = await supabase
       .from('bookings')
       .insert({
@@ -127,6 +171,7 @@ export async function POST(req: NextRequest) {
         is_incomplete: false,
         missing_fields: [],
         direction: 'arrival',
+        ...dynamicPricingData,
       })
       .select('created_at')
       .single();

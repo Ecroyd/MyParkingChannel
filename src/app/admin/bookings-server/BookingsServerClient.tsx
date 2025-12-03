@@ -11,6 +11,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { CalendarDays, Search, Plus, Filter, Trash2, Eye, Edit, ArrowUpDown } from 'lucide-react';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
 import NewBookingModal from '@/components/bookings/NewBookingModal';
+import { BookingHighlightIcon } from '@/components/bookings/BookingHighlightIcon';
+import { DynamicPricingBadge } from '@/components/bookings/DynamicPricingBadge';
 import { toast } from 'sonner';
 
 interface BookingsServerClientProps {
@@ -395,6 +397,7 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
                       />
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-2">
+                          <BookingHighlightIcon highlightCode={booking.highlight_code || 'none'} />
                           <h3 className="font-medium text-gray-900">
                             {booking.customer_name || 'Unknown Customer'}
                           </h3>
@@ -406,6 +409,12 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
                               Incomplete ({booking.missing_fields?.join(', ')})
                             </Badge>
                           )}
+                          <DynamicPricingBadge
+                            applied={booking.dynamic_pricing_applied}
+                            multiplier={booking.dynamic_pricing_multiplier}
+                            occupancyPercent={booking.dynamic_pricing_occupancy_percent}
+                            ruleId={booking.dynamic_pricing_rule_id}
+                          />
                           {booking.reference && (
                             <span className="text-sm text-gray-500">#{booking.reference}</span>
                           )}

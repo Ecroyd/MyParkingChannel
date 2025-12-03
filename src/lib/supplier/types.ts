@@ -43,6 +43,11 @@ export type AvailabilityResponse = {
     surcharges?: { code: string; description?: string; amount: number }[];
     discounts?: { code: string; description?: string; amount: number }[];
     total_price: number;
+    // Dynamic pricing metadata (optional, only present if dynamic pricing is enabled)
+    dynamicPricingApplied?: boolean;
+    dynamicPricingMultiplier?: number | null;
+    dynamicPricingRuleId?: string | null;
+    dynamicPricingOccupancyPercent?: number | null;
   };
 };
 

@@ -8,6 +8,7 @@ import DateRangeModal from '@/components/admin/DateRangeModal';
 import { useDateRangeModal } from '@/hooks/useDateRangeModal';
 import { Calendar } from 'lucide-react';
 import ExemptionsPanel from '../_components/ExemptionsPanel';
+import { BookingHighlightIcon } from '@/components/bookings/BookingHighlightIcon';
 
 interface DashboardClientProps {
   user: any;
@@ -165,6 +166,7 @@ export default function DashboardClient({
                 >
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
+                      <BookingHighlightIcon highlightCode={booking.highlight_code || 'none'} />
                       <p className="font-medium text-gray-900">{booking.customer_name}</p>
                       <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${
                         booking.status === 'checked_in' ? 'bg-green-100 text-green-800' :
@@ -216,6 +218,7 @@ export default function DashboardClient({
                 >
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
+                      <BookingHighlightIcon highlightCode={booking.highlight_code || 'none'} />
                       <p className="font-medium text-gray-900">{booking.customer_name}</p>
                       <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${
                         booking.status === 'checked_in' ? 'bg-green-100 text-green-800' :

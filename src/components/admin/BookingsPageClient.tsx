@@ -8,6 +8,9 @@ import EmptyState from '@/components/admin/EmptyState'
 import { Plus, Search } from 'lucide-react'
 import NewBookingDialog from '@/components/bookings/NewBookingDialog'
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal'
+import { BookingHighlightIcon } from '@/components/bookings/BookingHighlightIcon'
+import { DynamicPricingBadge } from '@/components/bookings/DynamicPricingBadge'
+import { BookingHighlightCode } from '@/types/bookings'
 
 type Booking = {
   id: string
@@ -29,6 +32,7 @@ type Booking = {
   notes: string | null
   source: string
   created_at: string
+  highlight_code?: BookingHighlightCode
 }
 
 type BookingsPageClientProps = {
@@ -187,7 +191,20 @@ export default function BookingsPageClient({
             <tbody className="bg-surface/70">
               {bookings.map((r) => (
                 <tr key={r.id} className="hover:bg-fg/3 transition-colors cursor-pointer" onClick={() => handleBookingClick(r)}>
-                  <td className="font-medium">{r.reference}</td>
+                  <td className="font-medium">
+                    <div className="flex items-center gap-2">
+                      <BookingHighlightIcon highlightCode={r.highlight_code || 'none'} />
+                      {r.reference}
+                      {r.dynamic_pricing_applied && (
+                        <DynamicPricingBadge
+                          applied={r.dynamic_pricing_applied}
+                          multiplier={r.dynamic_pricing_multiplier}
+                          occupancyPercent={r.dynamic_pricing_occupancy_percent}
+                          ruleId={r.dynamic_pricing_rule_id}
+                        />
+                      )}
+                    </div>
+                  </td>
                   <td>{r.customer_name}</td>
                   <td className="text-fg/60">{r.customer_email}</td>
                   <td className="font-medium">{r.plate}</td>

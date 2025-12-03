@@ -46,7 +46,7 @@ export default async function TodayServerPage() {
     // Get today's arrivals (bookings starting today)
     const { data: arrivals, error: arrivalsError } = await adminClient
       .from('bookings')
-      .select('id, tenant_id, reference, customer_name, customer_email, customer_phone, plate, car_make, car_model, car_color, start_at, end_at, status, money_received, money_charged, source, flight_number, notes, stripe_payment_intent_id, payment_status, checked_in_at, checked_out_at, gate_status')
+      .select('id, tenant_id, reference, customer_name, customer_email, customer_phone, plate, car_make, car_model, car_color, start_at, end_at, status, money_received, money_charged, source, flight_number, notes, stripe_payment_intent_id, payment_status, checked_in_at, checked_out_at, gate_status, highlight_code')
       .eq('tenant_id', tenantId)
       .gte('start_at', startOfDayUTC.toISOString())
       .lt('start_at', endOfDayUTC.toISOString())
@@ -55,7 +55,7 @@ export default async function TodayServerPage() {
     // Get today's departures (bookings ending today)
     const { data: departures, error: departuresError } = await adminClient
       .from('bookings')
-      .select('id, tenant_id, reference, customer_name, customer_email, customer_phone, plate, car_make, car_model, car_color, start_at, end_at, status, money_received, money_charged, source, flight_number, notes, stripe_payment_intent_id, payment_status, checked_in_at, checked_out_at, gate_status')
+      .select('id, tenant_id, reference, customer_name, customer_email, customer_phone, plate, car_make, car_model, car_color, start_at, end_at, status, money_received, money_charged, source, flight_number, notes, stripe_payment_intent_id, payment_status, checked_in_at, checked_out_at, gate_status, highlight_code')
       .eq('tenant_id', tenantId)
       .gte('end_at', startOfDayUTC.toISOString())
       .lt('end_at', endOfDayUTC.toISOString())
@@ -65,7 +65,7 @@ export default async function TodayServerPage() {
     const nowUTC = new Date();
     const { data: currentlyParked, error: currentlyParkedError } = await adminClient
       .from('bookings')
-      .select('id, tenant_id, reference, customer_name, customer_email, customer_phone, plate, car_make, car_model, car_color, start_at, end_at, status, money_received, money_charged, source, flight_number, notes, stripe_payment_intent_id, payment_status, checked_in_at, checked_out_at, gate_status')
+      .select('id, tenant_id, reference, customer_name, customer_email, customer_phone, plate, car_make, car_model, car_color, start_at, end_at, status, money_received, money_charged, source, flight_number, notes, stripe_payment_intent_id, payment_status, checked_in_at, checked_out_at, gate_status, highlight_code')
       .eq('tenant_id', tenantId)
       .lte('start_at', nowUTC.toISOString())
       .gte('end_at', nowUTC.toISOString())

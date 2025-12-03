@@ -3,6 +3,8 @@
 import * as React from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { toMoney } from '@/lib/money';
+import { BookingHighlightIcon } from './BookingHighlightIcon';
+import { BookingHighlightCode } from '@/types/bookings';
 
 type Booking = {
   id: string;
@@ -25,6 +27,7 @@ type Booking = {
   missing_fields?: string[];
   stripe_payment_intent_id?: string | null;
   payment_status?: string | null;
+  highlight_code?: BookingHighlightCode;
 };
 
 export default function BookingDetailsModal({
@@ -54,6 +57,7 @@ export default function BookingDetailsModal({
       <div className="bg-white w-full max-w-3xl rounded-2xl shadow-xl">
         <div className="p-4 border-b flex items-center justify-between">
           <div className="flex items-center gap-3">
+            <BookingHighlightIcon highlightCode={booking?.highlight_code || 'none'} />
             <h2 className="text-lg font-semibold">Booking {booking?.reference}</h2>
             {booking?.is_incomplete && (
               <span className="inline-flex px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded">

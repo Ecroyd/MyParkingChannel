@@ -376,9 +376,60 @@ export async function calculateAvailability(
     base_price = 10 * days; // Minimum £10 per day fallback
   }
 
+  // Apply dynamic pricing based on occupancy
+  let final_price = base_price;
+  let dynamicPricingApplied = false;
+  let dynamicPricingMultiplier: number | null = null;
+  let dynamicPricingRuleId: string | null = null;
+  let dynamicPricingOccupancyPercent: number | null = null;
+
+  try {
+    const {
+      getTenantDynamicSettings,
+      applyDynamicPricingToBasePrice,
+      computeOccupancyPercent,
+    } = await import('@/lib/pricing/dynamic');
+
+    const { settings, rules } = await getTenantDynamicSettings(tenantId);
+
+    if (settings && rules.length > 0) {
+      const occupancyPercent = await computeOccupancyPercent({
+        tenantId,
+        startAt,
+        endAt,
+        excludeBookingReference: excludeReference || null,
+      });
+
+      dynamicPricingOccupancyPercent = occupancyPercent;
+
+      const dynamic = applyDynamicPricingToBasePrice(base_price, occupancyPercent, rules);
+
+      if (dynamic.applied) {
+        final_price = dynamic.finalPrice;
+        dynamicPricingApplied = true;
+        dynamicPricingMultiplier = dynamic.multiplier;
+        dynamicPricingRuleId = dynamic.rule?.id || null;
+      }
+    }
+  } catch (error) {
+    console.error('Error applying dynamic pricing, using base price:', error);
+    // Continue with base price if dynamic pricing fails
+  }
+
   const surcharges: { code: string; description?: string; amount: number }[] = [];
   const discounts: { code: string; description?: string; amount: number }[] = [];
-  const total_price = base_price;
+  
+  // Add dynamic pricing as a surcharge if applied
+  if (dynamicPricingApplied && dynamicPricingMultiplier) {
+    const dynamicIncrease = final_price - base_price;
+    surcharges.push({
+      code: 'dynamic_pricing',
+      description: `Dynamic pricing (occupancy ${dynamicPricingOccupancyPercent?.toFixed(1)}%)`,
+      amount: dynamicIncrease,
+    });
+  }
+
+  const total_price = final_price;
 
   return {
     product_id: 'tenant_pool', // placeholder; capacity is per-tenant for now
@@ -394,6 +445,11 @@ export async function calculateAvailability(
       surcharges,
       discounts,
       total_price,
+      // Dynamic pricing metadata
+      dynamicPricingApplied,
+      dynamicPricingMultiplier,
+      dynamicPricingRuleId,
+      dynamicPricingOccupancyPercent,
     },
   };
 }

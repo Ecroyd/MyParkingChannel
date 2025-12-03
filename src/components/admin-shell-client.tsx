@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { Menu, X } from 'lucide-react';
+import { DynamicPricingBadge } from './admin/DynamicPricingBadge';
 import Sidebar from '@/components/admin/Sidebar';
 import MobileSidebar from '@/components/admin/MobileSidebar';
 import InstallPWAButton from '@/components/InstallPWAButton';
@@ -95,6 +96,7 @@ export default function AdminShellClient({
               </h1>
             </div>
             <div className="flex items-center space-x-2 md:space-x-4">
+              <DynamicPricingBadge />
               <span className="text-xs md:text-sm text-gray-600 hidden sm:block">Welcome, {user?.email}</span>
               <button
                 onClick={handleLogout}
