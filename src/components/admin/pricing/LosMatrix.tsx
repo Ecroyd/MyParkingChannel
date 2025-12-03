@@ -123,6 +123,13 @@ export default function LosMatrix({ seasonId, seasons }: LosMatrixProps) {
 
     setLoading(true);
     try {
+      // Debug: log what we're sending
+      console.log('[LosMatrix] Loading matrix:', {
+        seasonId: selectedSeasonId,
+        ratePlanId,
+        channel,
+      });
+
       const params = new URLSearchParams({
         season_id: selectedSeasonId,
         rate_plan_id: ratePlanId || '',
@@ -138,6 +145,14 @@ export default function LosMatrix({ seasonId, seasons }: LosMatrixProps) {
         toast.error(result.error);
         return;
       }
+
+      // Debug: log what we received
+      console.log('[LosMatrix] Matrix loaded:', {
+        channel,
+        rowsCount: result.rows?.length || 0,
+        extraDayPrice: result.extraDayPrice,
+        rows: result.rows?.slice(0, 5), // First 5 rows for debugging
+      });
 
       // Populate rows
       const newRows: LosRow[] = [];
@@ -188,18 +203,27 @@ export default function LosMatrix({ seasonId, seasons }: LosMatrixProps) {
 
     setSaving(true);
     try {
+      const payload = {
+        seasonId: selectedSeasonId,
+        ratePlanId: ratePlanId || null,
+        channel: channel, // Send the channel code directly ('all', 'holidayextras', etc.)
+        maxDays: MAX_DAYS,
+        rows: rows.filter((r) => r.price !== null),
+        extraDayPrice,
+      };
+
+      // Debug: log what we're saving
+      console.log('[LosMatrix] Saving matrix:', {
+        channel,
+        rowsCount: payload.rows.length,
+        firstRow: payload.rows[0],
+      });
+
       const response = await fetch('/api/admin/pricing/matrix', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({
-          seasonId: selectedSeasonId,
-          ratePlanId: ratePlanId || null,
-          channel: channel, // Send the channel code directly ('all', 'holidayextras', etc.)
-          maxDays: MAX_DAYS,
-          rows: rows.filter((r) => r.price !== null),
-          extraDayPrice,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const result = await response.json();

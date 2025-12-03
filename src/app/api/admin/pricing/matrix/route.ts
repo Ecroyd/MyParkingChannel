@@ -47,6 +47,15 @@ export async function GET(req: NextRequest) {
     // For the editor, we want STRICT filtering - no fallback logic
     const channel = channelParam && channelParam !== '' ? channelParam : 'all';
 
+    // Debug logging
+    console.log('[GET /api/admin/pricing/matrix] Query params:', {
+      seasonId,
+      ratePlanId,
+      channelParam,
+      channel,
+      tenantId,
+    });
+
     // Query pricing_rules for this combination
     // We need to join with price_tiers to get the actual price values
     // IMPORTANT: For the editor, we filter STRICTLY by the selected channel - no fallback
@@ -54,6 +63,7 @@ export async function GET(req: NextRequest) {
       .from('pricing_rules')
       .select(`
         id,
+        channel,
         min_stay,
         max_stay,
         tier_id,
@@ -75,9 +85,23 @@ export async function GET(req: NextRequest) {
     }
 
     // STRICT channel filter - only show rules for the exact channel selected
+    // This is critical: we MUST filter by the exact channel code, no fallback
     query = query.eq('channel', channel);
 
     const { data: rules, error: rulesError } = await query;
+
+    // Debug logging
+    console.log('[GET /api/admin/pricing/matrix] Query result:', {
+      channel,
+      rulesCount: rules?.length || 0,
+      rules: rules?.map((r: any) => ({
+        channel: r.channel,
+        min_stay: r.min_stay,
+        max_stay: r.max_stay,
+        tier_value: Array.isArray(r.price_tiers) ? r.price_tiers[0]?.value : r.price_tiers?.value,
+      })),
+      error: rulesError,
+    });
 
     if (rulesError) {
       console.error('Error querying pricing rules:', rulesError);
@@ -195,6 +219,16 @@ export async function PUT(req: NextRequest) {
     // Channel: treat null/empty as 'all', otherwise use the provided channel code
     // IMPORTANT: For the editor, 'all' is a specific channel code, not a signal to save to all channels
     const channel = channelRaw && channelRaw !== '' ? channelRaw : 'all';
+    
+    // Debug logging
+    console.log('[PUT /api/admin/pricing/matrix] Request body:', {
+      seasonId,
+      ratePlanId,
+      channelRaw,
+      channel,
+      tenantId,
+      rowsCount: rows?.length || 0,
+    });
     
     // Save to the specific channel only (no special "all channels" logic in the editor)
     const channelsToSave = [channel];
