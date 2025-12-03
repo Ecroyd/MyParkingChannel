@@ -24,6 +24,7 @@ import {
 interface LosRow {
   days: number;
   price: number | null;
+  basePrice?: number | null; // Base price from 'all' channel (for override channels)
 }
 
 interface LosMatrixProps {
@@ -49,6 +50,7 @@ export default function LosMatrix({ seasonId, seasons }: LosMatrixProps) {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [rows, setRows] = useState<LosRow[]>([]);
   const [extraDayPrice, setExtraDayPrice] = useState<number | null>(null);
+  const [baseExtraPrice, setBaseExtraPrice] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
@@ -154,17 +156,19 @@ export default function LosMatrix({ seasonId, seasons }: LosMatrixProps) {
         rows: result.rows?.slice(0, 5), // First 5 rows for debugging
       });
 
-      // Populate rows
+      // Populate rows (now includes basePrice for override channels)
       const newRows: LosRow[] = [];
       for (let i = 1; i <= MAX_DAYS; i++) {
-        const rowData = result.rows?.find((r: any) => r.days === i);
+        const rowData = result.rows?.find((r: any) => (r.days === i || r.day === i));
         newRows.push({
           days: i,
           price: rowData?.price ?? null,
+          basePrice: rowData?.basePrice ?? null,
         });
       }
       setRows(newRows);
       setExtraDayPrice(result.extraDayPrice ?? null);
+      setBaseExtraPrice(result.baseExtraPrice ?? null);
       setHasChanges(false);
     } catch (error) {
       console.error('Error loading matrix:', error);
@@ -208,8 +212,13 @@ export default function LosMatrix({ seasonId, seasons }: LosMatrixProps) {
         ratePlanId: ratePlanId || null,
         channel: channel, // Send the channel code directly ('all', 'holidayextras', etc.)
         maxDays: MAX_DAYS,
-        rows: rows.filter((r) => r.price !== null),
+        rows: rows.map((r) => ({
+          day: r.days, // Use 'day' as per API spec
+          price: r.price,
+          basePrice: r.basePrice ?? null, // Include basePrice for diff-based logic
+        })),
         extraDayPrice,
+        baseExtraPrice, // Include baseExtraPrice for diff-based logic
       };
 
       // Debug: log what we're saving
@@ -226,9 +235,27 @@ export default function LosMatrix({ seasonId, seasons }: LosMatrixProps) {
         body: JSON.stringify(payload),
       });
 
+      if (!response.ok) {
+        let result;
+        try {
+          result = await response.json();
+        } catch (e) {
+          console.error('[LosMatrix] Failed to parse error response:', e);
+          result = { error: `HTTP ${response.status}: ${response.statusText}` };
+        }
+        console.error('[LosMatrix] Save error:', {
+          status: response.status,
+          statusText: response.statusText,
+          result,
+        });
+        toast.error(result.details || result.error || 'Failed to save pricing matrix');
+        return;
+      }
+
       const result = await response.json();
       if (result.error) {
-        toast.error(result.error);
+        console.error('[LosMatrix] Save error:', result);
+        toast.error(result.details || result.error);
         return;
       }
 
