@@ -289,10 +289,11 @@ export default function LosMatrix({ seasonId, seasons }: LosMatrixProps) {
     }
 
     try {
+      // Always copy from 'all' channel of source season to get baseline pricing
       const params = new URLSearchParams({
         season_id: copySourceSeasonId,
         rate_plan_id: ratePlanId || '',
-        channel: channel, // Send the channel code directly ('all', 'holidayextras', etc.)
+        channel: 'all', // Always copy from 'all' channel for baseline
       });
 
       const response = await fetch(`/api/admin/pricing/matrix?${params}`, {
@@ -305,17 +306,19 @@ export default function LosMatrix({ seasonId, seasons }: LosMatrixProps) {
         return;
       }
 
-      // Copy rows
+      // Copy rows - when copying from 'all', we just copy the price (no basePrice needed)
       const newRows: LosRow[] = [];
       for (let i = 1; i <= MAX_DAYS; i++) {
-        const rowData = result.rows?.find((r: any) => r.days === i);
+        const rowData = result.rows?.find((r: any) => (r.days === i || r.day === i));
         newRows.push({
           days: i,
           price: rowData?.price ?? null,
+          basePrice: null, // When copying from 'all', basePrice is null
         });
       }
       setRows(newRows);
       setExtraDayPrice(result.extraDayPrice ?? null);
+      setBaseExtraPrice(null); // When copying from 'all', baseExtraPrice is null
       setHasChanges(true);
       setCopyDialogOpen(false);
       setCopySourceSeasonId('');
