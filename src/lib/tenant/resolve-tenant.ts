@@ -20,12 +20,19 @@ function stripPort(host: string | null): string {
 }
 
 export async function resolveTenantByHost(): Promise<TenantLite | null> {
-  const headersList = await headers()
-  const host = stripPort(headersList.get('host'))
-  if (!host) return null
+  try {
+    const headersList = await headers()
+    const host = stripPort(headersList.get('host'))
+    if (!host) return null
 
-  const base = process.env.NEXT_PUBLIC_APP_BASE_DOMAIN!
-  const admin = await createAdminClient()
+    const base = process.env.NEXT_PUBLIC_APP_BASE_DOMAIN
+    if (!base) {
+      // If base domain is not configured, skip subdomain resolution
+      // This is fine for localhost development
+      return null
+    }
+
+    const admin = createAdminClient()
 
   // 1) Exact custom domain match
   const { data: byDomain, error: dErr } = await admin
@@ -54,5 +61,10 @@ export async function resolveTenantByHost(): Promise<TenantLite | null> {
   }
 
   return null
+  } catch (error) {
+    // Log error but don't crash the app
+    console.error('[resolveTenantByHost] Error:', error)
+    return null
+  }
 }
 

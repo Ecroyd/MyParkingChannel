@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/server-admin';
 import { createServerClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { getDateRangeForQuery } from '@/lib/timezone';
+import { calculateCapacityForDate } from '@/lib/capacity/rolling';
 
 export const dynamic = "force-dynamic";
 
@@ -78,16 +79,26 @@ export async function GET(request: NextRequest) {
       .order('end_at', { ascending: false });
     
 
-    // Get currently parked cars (started before now, ending after now)
-    const now = new Date();
+    // Get bookings that overlap with the date range (for "currently parked" - shows who is/will be parked on each day)
+    // A booking overlaps if: start_at < endOfRange AND end_at > startOfRange
+    // Include all bookings that are meant to be in the car park (not cancelled)
     const { data: currentlyParked, error: currentlyParkedError } = await adminClient
       .from('bookings')
       .select('*')
       .eq('tenant_id', tenantId)
+      .lt('start_at', endOfDayUTC.toISOString())
+      .gt('end_at', startOfDayUTC.toISOString())
+      .neq('status', 'cancelled');
+
+    // Get currently parked right now (for KPI stat)
+    const now = new Date();
+    const { data: currentlyParkedNow } = await adminClient
+      .from('bookings')
+      .select('id')
+      .eq('tenant_id', tenantId)
       .lte('start_at', now.toISOString())
       .gte('end_at', now.toISOString())
-      .in('status', ['reserved', 'checked_in']);
-    
+      .in('status', ['reserved', 'confirmed', 'checked_in']);
 
     // Calculate revenue for the date range
     const { data: rangeBookings, error: revenueError } = await adminClient
@@ -100,12 +111,17 @@ export async function GET(request: NextRequest) {
 
     const totalRevenue = rangeBookings?.reduce((sum, booking) => sum + (booking.money_received || 0), 0) || 0;
 
+    // Calculate today's capacity using rolling capacity logic
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todayCapacity = await calculateCapacityForDate(tenantId, todayStr);
+    const totalCapacity = todayCapacity ?? 0;
+
     // Calculate KPIs
     const kpis = {
       arrivals: arrivals?.length || 0,
       departures: departures?.length || 0,
-      checkedIn: currentlyParked?.length || 0,
-      capacityLeft: (tenant.default_capacity || 0) - (currentlyParked?.length || 0),
+      checkedIn: currentlyParkedNow?.length || 0, // Currently parked right now
+      capacityLeft: Math.max(0, totalCapacity - (currentlyParkedNow?.length || 0)),
       totalRevenue
     };
 

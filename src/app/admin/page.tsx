@@ -7,7 +7,7 @@ export const runtime = 'nodejs';
 
 export default async function AdminPage() {
   const supabase = await createServerClient();
-  const adminClient = await createAdminClient();
+  const adminClient = createAdminClient();
 
   // Get current user
   const { data: { user }, error: userError } = await supabase.auth.getUser();

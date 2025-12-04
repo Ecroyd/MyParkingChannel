@@ -3,7 +3,7 @@ import { getServerSupabase } from '@/lib/supabase/server';
 import { getCurrentTenant } from "@/lib/tenant";
 import { startOfDay, endOfDay, addDays } from "date-fns";
 
-type Row = { start_at: string; end_at: string; source: string | null; tenant_id: string };
+type Row = { start_at: string; end_at: string; source: string | null; external_source: string | null; tenant_id: string };
 
 function daysBetween(start: Date, endExclusive: Date): Date[] {
   const days: Date[] = [];
@@ -65,7 +65,7 @@ export async function GET(req: Request) {
   // Overlap condition: start_at < end && end_at >= start
   const { data, error } = await supabase
     .from("bookings")
-    .select("start_at,end_at,source,tenant_id")
+    .select("start_at,end_at,source,external_source,tenant_id")
     .eq("tenant_id", tenantId)
     .lt("start_at", end.toISOString())
     .gte("end_at", start.toISOString());
@@ -82,7 +82,14 @@ export async function GET(req: Request) {
 
   // Aggregate per day per channel
   const out: { day: string; channel: string; occupancy: number }[] = [];
-  const norm = (s: string | null) => (s && s.trim() ? s : "other");
+  
+  // Get supplier name: prefer external_source, fallback to source
+  const getSupplierName = (r: Row): string => {
+    if (r.external_source && r.external_source.trim().length > 0) {
+      return r.external_source.trim();
+    }
+    return r.source || "other";
+  };
 
   for (const day of days) {
     const dayISO = day.toISOString().slice(0, 10);
@@ -91,7 +98,7 @@ export async function GET(req: Request) {
     for (const r of rows) {
       const book = { start: new Date(r.start_at), end: new Date(r.end_at) };
       if (!overlapsDay(book, day)) continue;
-      const key = norm(r.source);
+      const key = getSupplierName(r);
       byChannel.set(key, (byChannel.get(key) ?? 0) + 1);
     }
 

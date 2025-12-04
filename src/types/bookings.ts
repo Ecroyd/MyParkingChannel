@@ -32,3 +32,5 @@ export interface Booking {
   highlight_code: BookingHighlightCode;
 }
 
+
+

@@ -28,7 +28,36 @@ type Booking = {
   stripe_payment_intent_id?: string | null;
   payment_status?: string | null;
   highlight_code?: BookingHighlightCode;
+  source?: string | null;
+  external_source?: string | null;
 };
+
+function formatBookingSource(source?: string | null) {
+  if (!source) return 'Unknown';
+  switch (source) {
+    case 'manual':
+      return 'Manual';
+    case 'supplier_api':
+      return 'Supplier API';
+    case 'direct':
+      return 'Direct';
+    case 'parkvia':
+      return 'Parkvia';
+    case 'holidayextras':
+      return 'Holiday Extras';
+    default:
+      return source.replace(/_/g, ' ');
+  }
+}
+
+function getBookingSourceLabel(booking: Booking | null) {
+  if (!booking) return 'Unknown';
+  // Prefer external_source if available, otherwise format the enum source
+  if (booking.external_source && booking.external_source.trim().length > 0) {
+    return booking.external_source.trim();
+  }
+  return formatBookingSource(booking.source);
+}
 
 export default function BookingDetailsModal({
   booking,
@@ -94,6 +123,18 @@ export default function BookingDetailsModal({
                   <Info label="Make" value={booking.car_make || '—'} />
                   <Info label="Model" value={booking.car_model || '—'} />
                   <Info label="Colour" value={booking.car_color || '—'} />
+                  <Info label="Source/Channel" value={
+                    <div className="flex flex-col">
+                      <span className="text-sm font-medium">
+                        {getBookingSourceLabel(booking)}
+                      </span>
+                      {booking.external_source && booking.source && (
+                        <span className="text-xs text-gray-500">
+                          {formatBookingSource(booking.source)}
+                        </span>
+                      )}
+                    </div>
+                  } />
                   <Info label="Arrival Date & Time" value={new Date(booking.start_at).toLocaleString('en-GB', { 
                     day: '2-digit',
                     month: '2-digit',

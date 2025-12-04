@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
     
     const { data: bookings, error } = await adminSupabase
       .from('bookings')
-      .select('source, money_received')
+      .select('source, external_source, money_received')
       .eq('tenant_id', tenantId)
       .gte('start_at', `${start}T00:00:00.000Z`)
       .lt('start_at', `${end}T23:59:59.999Z`);
@@ -56,8 +56,16 @@ export async function GET(req: NextRequest) {
     // Process the data to match the expected format
     const channelData = new Map();
     
+    // Get supplier name: prefer external_source, fallback to source
+    const getSupplierName = (booking: any): string => {
+      if (booking.external_source && booking.external_source.trim().length > 0) {
+        return booking.external_source.trim();
+      }
+      return booking.source || 'Unknown';
+    };
+    
     bookings?.forEach(booking => {
-      const channel = booking.source || 'Unknown';
+      const channel = getSupplierName(booking);
       if (!channelData.has(channel)) {
         channelData.set(channel, {
           channel,

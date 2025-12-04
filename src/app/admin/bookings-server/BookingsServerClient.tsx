@@ -157,6 +157,32 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
     });
   };
 
+  const formatBookingSource = (source?: string | null) => {
+    if (!source) return 'Unknown';
+    switch (source) {
+      case 'manual':
+        return 'Manual';
+      case 'supplier_api':
+        return 'Supplier API';
+      case 'direct':
+        return 'Direct';
+      case 'parkvia':
+        return 'Parkvia';
+      case 'holidayextras':
+        return 'Holiday Extras';
+      default:
+        return source.replace(/_/g, ' ');
+    }
+  };
+
+  const getBookingSourceLabel = (booking: any) => {
+    // Prefer external_source if available, otherwise format the enum source
+    if (booking.external_source && booking.external_source.trim().length > 0) {
+      return booking.external_source.trim();
+    }
+    return formatBookingSource(booking.source);
+  };
+
   const handleBookingClick = (booking: any) => {
     setSelectedBookingId(booking.id);
   };
@@ -431,6 +457,16 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
                           </div>
                         </div>
                         <div className="mt-2 flex flex-wrap gap-4 text-sm text-gray-600">
+                          <div className="flex flex-col">
+                            <span className="font-medium text-gray-900">
+                              {getBookingSourceLabel(booking)}
+                            </span>
+                            {booking.external_source && booking.source && (
+                              <span className="text-xs text-gray-500">
+                                {formatBookingSource(booking.source)}
+                              </span>
+                            )}
+                          </div>
                           {booking.flight_number && (
                             <div>
                               <span className="font-medium">Flight:</span> {booking.flight_number}

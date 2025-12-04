@@ -13,6 +13,7 @@ import {
 } from 'recharts';
 import { createBrowserClient } from '@supabase/ssr';
 import { format, eachDayOfInterval } from 'date-fns';
+import { getSupplierLabel } from '@/lib/supplier/labels';
 
 type Row = { day: string; channel: string; occupancy: number };
 
@@ -47,7 +48,7 @@ export default function DailyOccupancyStacked({ tenantId, start, end, tz = 'UTC'
         // Fetch bookings - let RLS handle tenant isolation automatically
         const { data: allBookings, error: bookingsError } = await supabase
           .from('bookings')
-          .select('start_at, end_at, source')
+          .select('start_at, end_at, source, external_source')
           .order('start_at', { ascending: true });
 
         if (bookingsError) {
@@ -85,7 +86,11 @@ export default function DailyOccupancyStacked({ tenantId, start, end, tz = 'UTC'
             
             // Check if booking overlaps with this day
             if (startDate <= day && endDate >= day) {
-              const channel = booking.source || 'direct';
+              // Use external_source for display, fallback to source
+              const channel = getSupplierLabel({
+                external_source: booking.external_source,
+                source: booking.source
+              });
               channelCounts[channel] = (channelCounts[channel] || 0) + 1;
             }
           }

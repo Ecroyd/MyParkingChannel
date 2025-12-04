@@ -64,6 +64,7 @@ function generateStayDates(startAt: string, endAt: string): string[] {
 /**
  * Check if a booking overlaps a given date (YYYY-MM-DD).
  * We treat a booking as occupying all dates between floor(start_at) and floor(end_at).
+ * @deprecated Use bookingOverlapsTimeRange for time-based availability checking
  */
 function bookingTouchesDate(booking: BookingRow, dateStr: string): boolean {
   const start = new Date(booking.start_at);
@@ -74,6 +75,28 @@ function bookingTouchesDate(booking: BookingRow, dateStr: string): boolean {
 
   // Overlap if booking.start < dayEnd AND booking.end > dayStart
   return start < dayEnd && end > dayStart;
+}
+
+/**
+ * Check if a booking overlaps with a time range, accounting for a 1-hour buffer after the booking ends.
+ * A booking occupies space from start_at to (end_at + 1 hour).
+ * Two bookings overlap if: booking1.start < (booking2.end + 1 hour) AND booking1.end > booking2.start
+ */
+function bookingOverlapsTimeRange(
+  booking: BookingRow,
+  checkStartAt: string,
+  checkEndAt: string
+): boolean {
+  const bookingStart = new Date(booking.start_at);
+  const bookingEnd = new Date(booking.end_at);
+  const checkStart = new Date(checkStartAt);
+  const checkEnd = new Date(checkEndAt);
+
+  // Booking occupies space until 1 hour after end time
+  const bookingEndWithBuffer = new Date(bookingEnd.getTime() + 60 * 60 * 1000); // +1 hour
+
+  // Overlap if: checkStart < bookingEndWithBuffer AND checkEnd > bookingStart
+  return checkStart < bookingEndWithBuffer && checkEnd > bookingStart;
 }
 
 export async function calculateAvailability(
@@ -226,17 +249,31 @@ export async function calculateAvailability(
     };
   }
 
-  const usedByDate: Record<string, number> = {};
-  for (const d of stayDates) {
-    usedByDate[d] = 0;
-  }
-
-  (bookings ?? []).forEach((b: any) => {
+  // Time-based availability checking: count bookings that overlap the requested time range
+  // A booking occupies space from start_at to (end_at + 1 hour buffer)
+  const overlappingBookings = (bookings ?? []).filter((b: any) => {
     const bookingRow: BookingRow = {
       start_at: b.start_at,
       end_at: b.end_at,
       status: b.status,
     };
+    return bookingOverlapsTimeRange(bookingRow, startAt, endAt);
+  });
+
+  // Count overlapping bookings per date for capacity checking
+  // We still need per-date counts to check against daily capacity
+  const usedByDate: Record<string, number> = {};
+  for (const d of stayDates) {
+    usedByDate[d] = 0;
+  }
+
+  overlappingBookings.forEach((b: any) => {
+    const bookingRow: BookingRow = {
+      start_at: b.start_at,
+      end_at: b.end_at,
+      status: b.status,
+    };
+    // Count this booking for each date it touches (for daily capacity limits)
     for (const d of stayDates) {
       if (bookingTouchesDate(bookingRow, d)) {
         usedByDate[d] += 1;
@@ -309,113 +346,58 @@ export async function calculateAvailability(
     availability_status = 'sold_out';
   }
 
-  // Try to get channel-specific pricing using LOS matrix
-  // First, try to find season for the stay dates
-  let seasonId: string | null = null;
-  const firstDate = stayDates[0];
-
-  // Find season that covers these dates
-  const { data: seasonRanges } = await supabase
-    .from('season_ranges')
-    .select('season_id, range')
+  // Resolve product (prefer code='STANDARD', fallback to first active product)
+  let productId: string;
+  let { data: standardProduct } = await supabase
+    .from('products')
+    .select('id')
     .eq('tenant_id', tenantId)
-    .limit(100); // Get all ranges for tenant
+    .eq('code', 'STANDARD')
+    .eq('is_active', true)
+    .maybeSingle();
 
-  if (seasonRanges && seasonRanges.length > 0) {
-    // Check if any season range covers our dates
-    for (const sr of seasonRanges) {
-      const rangeStr = sr.range as string;
-      // Parse daterange format [start,end)
-      const match = rangeStr.match(/^[\[\(]([^,]+),([^,\)]+)[\)\]]$/);
-      if (match) {
-        const rangeStart = match[1];
-        const rangeEnd = match[2];
-        if (firstDate >= rangeStart && firstDate < rangeEnd) {
-          seasonId = sr.season_id;
-          break;
-        }
-      }
-    }
-  }
-
-  // Try to get LOS pricing for this channel with fallback chain:
-  // 1. Try specific channel (e.g., 'cavu')
-  // 2. Fallback to 'agent' channel
-  // 3. Fallback to 'all' channel
-  // 4. Final fallback to tenant_pricing (never free)
-  let base_price = 0;
-  let currencyFromPricing = currency;
-  
-  try {
-    const { getPriceForStay } = await import('@/lib/pricing/channel');
-    
-    // Try specific channel first
-    let losPrice = await getPriceForStay({
-      tenantId,
-      seasonId,
-      ratePlanId: null,
-      channelCode: effectiveChannelCode,
-      days,
-    });
-
-    // If not found and not already 'agent', try 'agent' channel
-    if (losPrice === null && effectiveChannelCode !== 'agent') {
-      losPrice = await getPriceForStay({
-        tenantId,
-        seasonId,
-        ratePlanId: null,
-        channelCode: 'agent',
-        days,
-      });
-    }
-
-    // If still not found, try 'all' channel
-    if (losPrice === null && effectiveChannelCode !== 'all') {
-      losPrice = await getPriceForStay({
-        tenantId,
-        seasonId,
-        ratePlanId: null,
-        channelCode: 'all',
-        days,
-      });
-    }
-
-    if (losPrice !== null && losPrice > 0) {
-      base_price = losPrice;
-    } else {
-      // Final fallback to tenant_pricing (ensures pricing is never free)
-      const { data: pricing } = await supabase
-        .from('tenant_pricing')
-        .select('daily_rate, currency')
-        .eq('tenant_id', tenantId)
-        .maybeSingle();
-
-      const basePricePerDay: number = Number(pricing?.daily_rate ?? 10);
-      base_price = basePricePerDay * days;
-      currencyFromPricing = pricing?.currency || currency;
-    }
-  } catch (error) {
-    console.error('Error getting channel-specific pricing, falling back to tenant_pricing:', error);
-    // Fallback to tenant_pricing (ensures pricing is never free)
-    const { data: pricing } = await supabase
-      .from('tenant_pricing')
-      .select('daily_rate, currency')
+  if (!standardProduct) {
+    const { data: altProduct } = await supabase
+      .from('products')
+      .select('id')
       .eq('tenant_id', tenantId)
+      .eq('is_active', true)
+      .order('created_at', { ascending: true })
+      .limit(1)
       .maybeSingle();
 
-    const basePricePerDay: number = Number(pricing?.daily_rate ?? 10);
-    base_price = basePricePerDay * days;
-    currencyFromPricing = pricing?.currency || currency;
+    standardProduct = altProduct || null;
   }
 
-  // Ensure pricing is never zero/free
-  if (base_price <= 0) {
-    base_price = 10 * days; // Minimum £10 per day fallback
+  if (!standardProduct) {
+    throw new Error('No active products found for tenant');
   }
 
-  // Ensure pricing is never zero/free (final safety check)
-  if (base_price <= 0) {
-    base_price = 10 * days; // Minimum £10 per day fallback
+  productId = standardProduct.id;
+
+  // Get pricing from LOS matrix (single source of truth)
+  let base_price: number;
+  let currencyFromPricing = currency;
+  let pricingSource: any = null;
+
+  try {
+    const { getMatrixPriceForStay } = await import('@/lib/pricing/matrix');
+    
+    const pricingInfo = await getMatrixPriceForStay({
+      tenantId,
+      productId,
+      startAt,
+      endAt,
+      currency,
+      channelCode: effectiveChannelCode,
+    });
+
+    base_price = pricingInfo.totalPrice;
+    currencyFromPricing = currency; // Currency comes from input or defaults to GBP
+    pricingSource = pricingInfo.source;
+  } catch (error: any) {
+    console.error('Error getting matrix pricing:', error);
+    throw new Error(`Failed to get pricing: ${error.message || String(error)}`);
   }
 
   // Apply dynamic pricing based on occupancy
@@ -481,7 +463,7 @@ export async function calculateAvailability(
     availability_status,
     remaining_capacity: overallRemaining,
     pricing: {
-      rate_plan: 'standard',
+      rate_plan: pricingSource?.ratePlanName || 'standard',
       days,
       base_price,
       surcharges,
@@ -492,6 +474,8 @@ export async function calculateAvailability(
       dynamicPricingMultiplier,
       dynamicPricingRuleId,
       dynamicPricingOccupancyPercent,
+      // Debug: pricing source (same as supplier API)
+      _pricingSource: pricingSource,
     },
   };
 }

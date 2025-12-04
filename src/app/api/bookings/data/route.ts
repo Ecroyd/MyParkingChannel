@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
     // Fetch bookings using admin client to bypass RLS
     const { data: bookings, error: bookingsError } = await adminClient
       .from('bookings')
-      .select('start_at, end_at, source, tenant_id')
+      .select('start_at, end_at, source, external_source, tenant_id')
       .eq('tenant_id', tenantId)
       .lte('start_at', to)
       .gte('end_at', from)

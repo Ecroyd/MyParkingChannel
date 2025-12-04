@@ -32,6 +32,7 @@ interface DashboardClientProps {
   }>;
   todayArrivals: any[];
   todayDepartures: any[];
+  demandCurveCapacityByDate?: Record<string, number | null>;
 }
 
 export default function DashboardClient({
@@ -44,7 +45,8 @@ export default function DashboardClient({
   revenueData,
   chartData,
   todayArrivals,
-  todayDepartures
+  todayDepartures,
+  demandCurveCapacityByDate
 }: DashboardClientProps) {
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const { isOpen, currentDateRange, openModal, closeModal, handleDateRangeChange } = useDateRangeModal();
@@ -255,7 +257,7 @@ export default function DashboardClient({
           <h3 className="text-lg font-medium text-gray-900 mb-4">Demand Curve</h3>
           <DemandCurve 
             tenantId={tenant.id}
-            capacity={capacityData.totalCapacity}
+            capacityByDate={demandCurveCapacityByDate}
             showCapacityLine={true}
           />
         </div>

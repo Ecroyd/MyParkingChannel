@@ -116,7 +116,7 @@ export async function GET(request: NextRequest) {
         startAt: start_at,
         endAt: end_at,
         currency,
-        channelCode: auth.channelCode,
+        channelCode: 'agent', // All supplier API requests use agent pricing
       });
     } catch (err: unknown) {
       // Handle product not found or other engine errors
@@ -139,6 +139,12 @@ export async function GET(request: NextRequest) {
           { status: 404 }
         );
       }
+      if (errorMessage.includes('No pricing rules found') || errorMessage.includes('configure LOS matrix')) {
+        return NextResponse.json(
+          { error: { code: 'PRICING_NOT_CONFIGURED', message: errorMessage } },
+          { status: 400 }
+        );
+      }
 
       // For all other errors (including Supabase query errors), return the actual error message
       console.error('Availability engine error:', err);
@@ -152,6 +158,19 @@ export async function GET(request: NextRequest) {
     }
 
     // 4. Build response
+    // Map surcharges/discounts from internal format to API format
+    const surcharges = (availabilityResult.pricing.surcharges || []).map(s => ({
+      code: s.type,
+      description: s.label,
+      amount: s.amount,
+    }));
+    
+    const discounts = (availabilityResult.pricing.discounts || []).map(d => ({
+      code: d.type,
+      description: d.label,
+      amount: d.amount,
+    }));
+
     const response: AvailabilityResponse = {
       product_id: availabilityResult.productId,
       start_at: availabilityResult.startAt,
@@ -163,9 +182,10 @@ export async function GET(request: NextRequest) {
         rate_plan: availabilityResult.pricing.ratePlanName,
         days: availabilityResult.pricing.days,
         base_price: availabilityResult.pricing.basePrice,
-        surcharges: availabilityResult.pricing.surcharges || [],
-        discounts: availabilityResult.pricing.discounts || [],
+        surcharges: surcharges.length > 0 ? surcharges : undefined,
+        discounts: discounts.length > 0 ? discounts : undefined,
         total_price: availabilityResult.pricing.totalPrice,
+        dynamicPricingApplied: availabilityResult.pricing.dynamicPricingApplied,
       },
     };
 
@@ -241,17 +261,17 @@ export async function GET(request: NextRequest) {
       const pricingSource = availabilityResult.pricing._pricingSource;
       const pricingSourceInfo = pricingSource ? {
         table: pricingSource.table,
+        pricing_rule_id: pricingSource.pricingRuleId || null,
         rate_plan_id: pricingSource.ratePlanId || null,
         rate_plan_name: pricingSource.ratePlanName,
-        price_per_day: pricingSource.pricePerDay,
-        days: availabilityResult.pricing.days,
-        base_price_total: availabilityResult.pricing.basePrice * availabilityResult.pricing.days,
-        season_id: pricingSource.seasonId || null,
-        channel_code: pricingSource.channelCode || null,
-        pricing_rule_id: pricingSource.pricingRuleId || null,
         tier_id: pricingSource.tierId || null,
         tier_type: pricingSource.tierType || null,
         tier_value: pricingSource.tierValue || null,
+        days: pricingSource.days || availabilityResult.pricing.days,
+        total_price: pricingSource.totalPrice || availabilityResult.pricing.basePrice,
+        derived_price_per_day: pricingSource.pricePerDay || (pricingSource.totalPrice ? pricingSource.totalPrice / (pricingSource.days || availabilityResult.pricing.days) : null),
+        season_id: pricingSource.seasonId || null,
+        channel_code: pricingSource.channelCode || null,
       } : null;
 
       (response as any).debug = {

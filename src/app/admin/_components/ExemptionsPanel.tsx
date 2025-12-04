@@ -59,7 +59,7 @@ export default function ExemptionsPanel() {
   const [isLoading, setLoading] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [resolving, setResolving] = useState(false);
-  const [isMinimized, setIsMinimized] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(true);
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [selectedExemption, setSelectedExemption] = useState<Exemption | null>(null);
@@ -349,6 +349,9 @@ export default function ExemptionsPanel() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <CardTitle className="text-lg font-semibold">Exemptions</CardTitle>
+              <Badge variant="secondary" className="text-xs font-bold text-red-600 bg-red-50 border-red-200">
+                {items.length}
+              </Badge>
               <Button
                 size="sm"
                 variant="ghost"
@@ -361,11 +364,6 @@ export default function ExemptionsPanel() {
                   <ChevronUp className="h-4 w-4" />
                 )}
               </Button>
-              {items.length > 0 && (
-                <Badge variant="secondary" className="text-xs">
-                  {items.length}
-                </Badge>
-              )}
             </div>
             <div className="flex gap-2 flex-wrap items-center">
               <div className="flex items-center gap-2">
@@ -413,7 +411,12 @@ export default function ExemptionsPanel() {
                 >
                   {f === "ALL" ? "All" : TYPE_META[f as Exemption["exemption_type"]].label}
                   {counts[f] > 0 && (
-                    <Badge className="ml-2 bg-white/20 text-white">
+                    <Badge className={cn(
+                      "ml-2 font-semibold",
+                      filter === f 
+                        ? "bg-white/30 text-white" 
+                        : "bg-gray-200 text-gray-800"
+                    )}>
                       {counts[f]}
                     </Badge>
                   )}

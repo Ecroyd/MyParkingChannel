@@ -1,5 +1,7 @@
 // lib/supplier/types.ts
 
+import type { PricingSource } from '@/lib/pricing/matrix';
+
 export type SupplierProduct = {
   id: string;
   code: string;
@@ -48,6 +50,8 @@ export type AvailabilityResponse = {
     dynamicPricingMultiplier?: number | null;
     dynamicPricingRuleId?: string | null;
     dynamicPricingOccupancyPercent?: number | null;
+    // Debug: pricing source (internal use only)
+    _pricingSource?: PricingSource;
   };
 };
 

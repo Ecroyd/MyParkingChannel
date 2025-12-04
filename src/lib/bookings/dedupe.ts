@@ -67,14 +67,14 @@ export async function checkDuplicateBooking(
   supabase: any,
   tenantId: string,
   dedupeKey: string | null
-): Promise<{ id: string; reference: string; status: string; created_at: string } | null> {
+): Promise<{ id: string; reference: string; status: string; created_at: string; source?: string } | null> {
   if (!dedupeKey) {
     return null;
   }
 
   const { data: existing, error } = await supabase
     .from('bookings')
-    .select('id, reference, status, created_at')
+    .select('id, reference, status, created_at, source')
     .eq('tenant_id', tenantId)
     .eq('dedupe_key', dedupeKey)
     .maybeSingle();

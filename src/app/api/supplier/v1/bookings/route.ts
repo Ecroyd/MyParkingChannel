@@ -50,6 +50,27 @@ function bookingTouchesDate(booking: { start_at: string; end_at: string }, dateS
   return start < dayEnd && end > dayStart;
 }
 
+/**
+ * Check if a booking overlaps with a time range, accounting for a 1-hour buffer after the booking ends.
+ * A booking occupies space from start_at to (end_at + 1 hour).
+ */
+function bookingOverlapsTimeRange(
+  booking: { start_at: string; end_at: string },
+  checkStartAt: string,
+  checkEndAt: string
+): boolean {
+  const bookingStart = new Date(booking.start_at);
+  const bookingEnd = new Date(booking.end_at);
+  const checkStart = new Date(checkStartAt);
+  const checkEnd = new Date(checkEndAt);
+
+  // Booking occupies space until 1 hour after end time
+  const bookingEndWithBuffer = new Date(bookingEnd.getTime() + 60 * 60 * 1000); // +1 hour
+
+  // Overlap if: checkStart < bookingEndWithBuffer AND checkEnd > bookingStart
+  return checkStart < bookingEndWithBuffer && checkEnd > bookingStart;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const rawKey = req.headers.get('x-api-key');
@@ -214,7 +235,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Check existing bookings for this product
+    // Check existing bookings for this product using time-based overlap checking
+    // Query bookings that might overlap (broad filter, then precise check)
     const { data: bookings } = await supabase
       .from('bookings')
       .select('start_at, end_at, status')
@@ -224,12 +246,18 @@ export async function POST(req: NextRequest) {
       .lt('start_at', body.end_at)
       .gt('end_at', body.start_at);
 
+    // Filter to bookings that actually overlap with the requested time range (with 1-hour buffer)
+    const overlappingBookings = (bookings ?? []).filter((booking: any) => {
+      return bookingOverlapsTimeRange(booking, body.start_at, body.end_at);
+    });
+
+    // Count overlapping bookings per date for capacity checking
     const occupancyByDate: Record<string, number> = {};
     for (const dateStr of stayDates) {
       occupancyByDate[dateStr] = 0;
     }
 
-    (bookings ?? []).forEach((booking: any) => {
+    overlappingBookings.forEach((booking: any) => {
       for (const dateStr of stayDates) {
         if (bookingTouchesDate(booking, dateStr)) {
           occupancyByDate[dateStr] += 1;
@@ -266,43 +294,79 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Calculate money_charged from rate plan
-    const days = stayDates.length;
-    const money_charged = body.price?.total ?? days * (ratePlan.base_price_cents / 100);
+    // 4) Prepare schema-safe insert payload
+    const rawBody = json; // Already have the raw JSON body
+    const customer = body.customer ?? {};
+    const vehicle = body.vehicle ?? {};
+    const total = Number(body?.price?.total ?? 0);
+
+    if (!Number.isFinite(total) || total <= 0) {
+      return NextResponse.json(
+        {
+          error: {
+            code: 'INVALID_PRICE',
+            message: 'price.total must be a positive number',
+          },
+        },
+        { status: 400 }
+      );
+    }
+
+    // Get partner name from auth
+    const partnerName = auth.partnerName ?? 'unknown partner';
+
+    // Optional external source string coming from body (if you want to allow it)
+    const externalSourceFromBody =
+      typeof rawBody.source === 'string' && rawBody.source.trim().length > 0
+        ? rawBody.source.trim()
+        : null;
+
+    // Optionally allow override from a header too (e.g. X-Booking-Source)
+    const externalSourceFromHeader = (() => {
+      const headerVal = req.headers.get('x-booking-source');
+      return headerVal && headerVal.trim().length > 0 ? headerVal.trim() : null;
+    })();
+
+    // Final external source label we'll store as free text
+    const externalSourceLabel =
+      externalSourceFromBody ??
+      externalSourceFromHeader ??
+      partnerName ??
+      'supplier_api';
+
+    const fullName = [customer.first_name, customer.last_name]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
 
     const reference = externalRef || generateInternalReference();
-    const customerName = `${body.customer.first_name} ${body.customer.last_name}`.trim();
-    const flightNumber = body.flight?.departure_number || body.flight?.arrival_number || null;
 
-    // 4) Insert booking with tenant_id, product_id, rate_plan_id, money_charged, status 'confirmed'
+    // Now the insert payload
+    const insertPayload = {
+      tenant_id: auth.tenantId,
+      reference,
+      customer_name: fullName || customer.email || 'Unknown customer',
+      customer_email: body.customer.email,
+      plate: vehicle.plate ?? '',
+      car_make: vehicle.make ?? null,
+      car_model: vehicle.model ?? null,
+      car_color: vehicle.colour ?? null,
+      start_at: rawBody.start_at,
+      end_at: rawBody.end_at,
+      status: 'reserved', // booking_status enum
+      source: 'supplier_api', // ✅ safe enum value, won't ever break inserts
+      external_source: externalSourceLabel, // ✅ free text for partner/billing
+      money_charged: total,
+      money_received: 0,
+      notes: `Supplier API booking from ${partnerName} (product_id=${rawBody.product_id ?? 'n/a'}, external_ref=${
+        rawBody.external_reference ?? 'n/a'
+      })`,
+    };
+
     const { data, error } = await supabase
       .from('bookings')
-      .insert({
-        tenant_id: auth.tenantId,
-        product_id: body.product_id,
-        rate_plan_id: ratePlan.id,
-        reference,
-        customer_name: customerName,
-        customer_email: body.customer.email,
-        customer_phone: body.customer.phone || null,
-        plate: body.vehicle?.plate ?? '',
-        car_make: body.vehicle?.make ?? null,
-        car_model: body.vehicle?.model ?? null,
-        car_color: body.vehicle?.colour ?? null,
-        start_at: body.start_at,
-        end_at: body.end_at,
-        status: 'confirmed',
-        money_charged,
-        money_received: 0,
-        notes: `Source: ${auth.partnerName}${externalRef ? `, external_reference: ${externalRef}` : ''}`,
-        source: partnerNameLower,
-        flight_number: flightNumber,
-        dedupe_key: externalRef ? makeDedupeKey({ external_reference: externalRef, partner: partnerNameLower }) : null,
-        is_incomplete: false,
-        missing_fields: [],
-        direction: 'arrival',
-      })
-      .select('created_at')
+      .insert(insertPayload)
+      .select('*')
       .single();
 
     if (error) {
@@ -314,7 +378,7 @@ export async function POST(req: NextRequest) {
             const resp: BookingCreateResponse = {
               reference: existing.reference,
               status: existing.status === 'reserved' ? 'confirmed' : (existing.status as any),
-              source: partnerNameLower,
+              source: (existing as any).source || 'agent',
               created_at: existing.created_at,
             };
             return NextResponse.json(resp, { status: 200 });
@@ -322,26 +386,28 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      console.error('Bookings insert error', error);
-      return NextResponse.json(
-        {
-          error: {
-            code: 'INTERNAL_ERROR',
-            message: 'Failed to create booking',
-          },
-        },
-        { status: 500 }
-      );
+      console.error('[SUPPLIER_BOOKING] Database insert error', {
+        error,
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        tenantId: auth.tenantId,
+        productId: body.product_id,
+        source: auth.partnerName,
+      });
+      throw error;
     }
 
-    const resp: BookingCreateResponse = {
-      reference,
-      status: 'confirmed',
-      source: partnerNameLower,
-      created_at: data.created_at,
-    };
-
-    return NextResponse.json(resp, { status: 201 });
+    return NextResponse.json(
+      {
+        reference: data.reference,
+        status: data.status,
+        source: data.source,
+        created_at: data.created_at,
+      },
+      { status: 201 }
+    );
   } catch (err: any) {
     if (err instanceof SupplierAuthError) {
       return NextResponse.json(
@@ -350,9 +416,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.error('Bookings handler error', err);
+    console.error('[SUPPLIER_BOOKING] Failed to create booking', {
+      err,
+      message: err?.message,
+      stack: err?.stack,
+      name: err?.name,
+      code: err?.code,
+    });
     return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: 'Unexpected error' } },
+      {
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to create booking',
+        },
+      },
       { status: 500 }
     );
   }

@@ -1,8 +1,14 @@
-// lib/availability/product.ts
-// Product-based availability calculation for supplier API
+// src/lib/availability/product.ts
+
+// Product-based availability + pricing for supplier API
+
+// Source of truth: seasons + LOS matrix in pricing_rules + price_tiers
+
+// Dynamic pricing: tenant_dynamic_pricing_settings + tenant_dynamic_pricing_rules
 
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { getMatrixPriceForStay, type PricingSource, findSeasonForDate } from '@/lib/pricing/matrix';
 
 const DAY_MS = 1000 * 60 * 60 * 24;
 
@@ -17,11 +23,22 @@ export type AvailabilityResult = {
     ratePlanId: string;
     ratePlanName: string;
     days: number;
-    basePrice: number; // decimal in GBP (daily rate)
-    surcharges: any[];
-    discounts: any[];
-    totalPrice: number;
-    _pricingSource?: PricingSource; // Internal field for debug
+    basePrice: number; // total price from matrix BEFORE dynamic pricing
+    surcharges: {
+      type: string;
+      label?: string;
+      amount: number;
+      meta?: Record<string, any>;
+    }[];
+    discounts: {
+      type: string;
+      label?: string;
+      amount: number;
+      meta?: Record<string, any>;
+    }[];
+    totalPrice: number; // final price after surcharges/discounts
+    dynamicPricingApplied?: boolean;
+    _pricingSource?: PricingSource; // internal debug only
   };
 };
 
@@ -35,37 +52,33 @@ type AvailabilityInput = {
   excludeBookingReference?: string; // For date change amendments
 };
 
-type PricingSource = {
-  table: string;
-  ratePlanId?: string | null;
-  ratePlanName: string;
-  pricePerDay: number;
-  seasonId?: string | null;
-  channelCode?: string;
-  pricingRuleId?: string;
-  tierId?: string;
-  tierType?: string;
-  tierValue?: number;
-};
+// PricingSource type is now imported from @/lib/pricing/matrix
 
 /**
- * Generate a list of dates (YYYY-MM-DD) covering the stay
+ * Generate a list of dates (YYYY-MM-DD) covering the stay (inclusive)
  */
 function generateStayDates(startAt: string, endAt: string): string[] {
   const start = new Date(startAt);
   const end = new Date(endAt);
+
+  // Normalise both to UTC midnight
   const startUTC = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
   const endUTC = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate()));
+
   const dates: string[] = [];
   let cursor = startUTC.getTime();
+
+  // Guard: if end is before start, clamp to start
   if (endUTC.getTime() < startUTC.getTime()) {
     endUTC.setTime(startUTC.getTime());
   }
+
   while (cursor <= endUTC.getTime()) {
     const d = new Date(cursor);
-    dates.push(d.toISOString().slice(0, 10));
+    dates.push(d.toISOString().slice(0, 10)); // YYYY-MM-DD
     cursor += DAY_MS;
   }
+
   return dates;
 }
 
@@ -81,111 +94,61 @@ function bookingTouchesDate(booking: { start_at: string; end_at: string }, dateS
 }
 
 /**
- * Find season ID for a given date range
+ * Check if a booking overlaps with a time range, accounting for a 1-hour buffer after the booking ends.
+ * A booking occupies space from start_at to (end_at + 1 hour).
+ */
+function bookingOverlapsTimeRange(
+  booking: { start_at: string; end_at: string },
+  checkStartAt: string,
+  checkEndAt: string
+): boolean {
+  const bookingStart = new Date(booking.start_at);
+  const bookingEnd = new Date(booking.end_at);
+  const checkStart = new Date(checkStartAt);
+  const checkEnd = new Date(checkEndAt);
+
+  // Booking occupies space until 1 hour after end time
+  const bookingEndWithBuffer = new Date(bookingEnd.getTime() + 60 * 60 * 1000); // +1 hour
+
+  // Overlap if: checkStart < bookingEndWithBuffer AND checkEnd > bookingStart
+  return checkStart < bookingEndWithBuffer && checkEnd > bookingStart;
+}
+
+/**
+ * Alias for findSeasonForDate to match the naming convention used in the new pricing function
  */
 async function findSeasonForDateRange(
   supabase: SupabaseClient,
   tenantId: string,
   firstDate: string
 ): Promise<string | null> {
-  const { data: seasonRanges } = await supabase
-    .from('season_ranges')
-    .select('season_id, range')
-    .eq('tenant_id', tenantId)
-    .limit(100);
-
-  if (!seasonRanges || seasonRanges.length === 0) {
-    return null;
-  }
-
-  // Check if any season range covers our date
-  for (const sr of seasonRanges) {
-    const rangeStr = sr.range as string;
-    // Parse daterange format [start,end) or (start,end)
-    const match = rangeStr.match(/^[\[\(]([^,]+),([^,\)]+)[\)\]]$/);
-    if (match) {
-      const rangeStart = match[1];
-      const rangeEnd = match[2];
-      if (firstDate >= rangeStart && firstDate < rangeEnd) {
-        return sr.season_id;
-      }
-    }
-  }
-
-  return null;
+  return findSeasonForDate(supabase, tenantId, firstDate);
 }
 
 /**
- * Get base price per day from pricing tables (source of truth from admin Pricing UI)
- * Implements proper pricing_rules and price_tiers resolution
+ * Load a single LOS (length-of-stay) pricing rule for EXACT `days`
+ * and return the rule plus its price_tier value.
+ *
+ * We assume:
+ * - min_stay = days
+ * - max_stay is either days or null (null = open-ended from that LOS upwards)
  */
-async function getProductBasePricePerDay(
-  supabase: SupabaseClient,
-  params: {
-    tenantId: string;
-    productId: string;
-    startAt: string;
-    endAt: string;
-    currency: string;
-    channelCode?: string;
-    days: number;
-  }
-): Promise<{ ratePlanName: string; pricePerDay: number; source: PricingSource }> {
-  const { tenantId, productId, startAt, endAt, currency, channelCode, days } = params;
-  const stayDates = generateStayDates(startAt, endAt);
-  const firstDate = stayDates[0];
+async function loadLosRuleForDays(params: {
+  supabase: SupabaseClient;
+  tenantId: string;
+  seasonId: string | null;
+  ratePlanId: string | null;
+  channelCode: string; // e.g. 'agent' or 'web'
+  days: number;
+}): Promise<{
+  rule: any;
+  tierValue: number;
+  tierType: string;
+}> {
+  const { supabase, tenantId, seasonId, ratePlanId, channelCode, days } = params;
 
-  // Default channel code for supplier API
-  const effectiveChannelCode = channelCode || 'agent';
-
-  // Step 1: Get base daily rate from rate_plan or tenant_pricing
-  let baseDailyRate: number;
-  let ratePlanId: string | null = null;
-  let ratePlanName = 'standard';
-
-  // Try to get rate plan from product_rate_plans
-  const { data: ratePlan } = await supabase
-    .from('product_rate_plans')
-    .select('id, name, base_price_cents, currency')
-    .eq('product_id', productId)
-    .limit(1)
-    .maybeSingle();
-
-  if (ratePlan) {
-    baseDailyRate = ratePlan.base_price_cents / 100;
-    ratePlanId = ratePlan.id;
-    ratePlanName = ratePlan.name || 'standard';
-  } else {
-    // Fallback to tenant_pricing for base rate
-    const { data: tenantPricing, error: pricingError } = await supabase
-      .from('tenant_pricing')
-      .select('daily_rate, currency')
-      .eq('tenant_id', tenantId)
-      .maybeSingle();
-
-    if (pricingError) {
-      throw new Error(`Failed to get base pricing: ${pricingError.message || JSON.stringify(pricingError)}`);
-    }
-
-    if (!tenantPricing || !tenantPricing.daily_rate) {
-      throw new Error('No base pricing configured. Please configure pricing in the admin Pricing UI.');
-    }
-
-    baseDailyRate = Number(tenantPricing.daily_rate);
-    if (isNaN(baseDailyRate) || baseDailyRate <= 0) {
-      throw new Error(`Invalid daily_rate in tenant_pricing: ${tenantPricing.daily_rate}`);
-    }
-    ratePlanId = 'tenant-default';
-  }
-
-  // Step 2: Find season for the date range
-  const seasonId = await findSeasonForDateRange(supabase, tenantId, firstDate);
-
-  // Step 3: Query pricing_rules with proper filters
-  // For LOS matrix, we need to match rules where the stay length falls within min_stay and max_stay
-  // Typically: min_stay <= days AND (max_stay >= days OR max_stay IS NULL)
-  // But also support exact matches: min_stay = days AND (max_stay = days OR max_stay IS NULL)
-  let pricingRulesQuery = supabase
+  // Base query: exact min_stay = days
+  let query = supabase
     .from('pricing_rules')
     .select(`
       id,
@@ -197,210 +160,321 @@ async function getProductBasePricePerDay(
       min_stay,
       max_stay,
       priority,
-      is_active
+      is_active,
+      created_at
     `)
     .eq('tenant_id', tenantId)
     .eq('is_active', true)
-    .lte('min_stay', days)
-    .or(`max_stay.is.null,max_stay.gte.${days}`);
+    .eq('min_stay', days);
 
-  // Filter by season
+  // Scope by season
   if (seasonId) {
-    pricingRulesQuery = pricingRulesQuery.eq('season_id', seasonId);
+    query = query.eq('season_id', seasonId);
   } else {
-    pricingRulesQuery = pricingRulesQuery.is('season_id', null);
+    query = query.is('season_id', null);
   }
 
-  // Filter by rate_plan (if we have one)
-  if (ratePlanId && ratePlanId !== 'tenant-default') {
-    pricingRulesQuery = pricingRulesQuery.eq('rate_plan_id', ratePlanId);
+  // Scope by rate plan
+  if (ratePlanId) {
+    query = query.eq('rate_plan_id', ratePlanId);
   } else {
-    pricingRulesQuery = pricingRulesQuery.is('rate_plan_id', null);
+    query = query.is('rate_plan_id', null);
   }
 
-  // Note: We'll fetch all matching rules and filter by channel in JavaScript
-  // This is because Supabase .or() with nulls can be tricky
+  const { data: allRules, error } = await query;
 
-  const { data: allRules, error: rulesError } = await pricingRulesQuery.order('priority', { ascending: true });
-
-  if (rulesError) {
-    console.error('[AVAILABILITY] Error querying pricing_rules:', rulesError);
-    // Fallback to base rate without rule
-    return {
-      ratePlanName,
-      pricePerDay: baseDailyRate,
-      source: {
-        table: ratePlanId === 'tenant-default' ? 'tenant_pricing' : 'product_rate_plans',
-        ratePlanId,
-        ratePlanName,
-        pricePerDay: baseDailyRate,
-        channelCode: effectiveChannelCode,
-        seasonId,
-      },
-    };
+  if (error) {
+    console.error('[PRICING] loadLosRuleForDays error:', error);
+    throw new Error(`Failed to query pricing_rules for ${days} days: ${error.message || JSON.stringify(error)}`);
   }
 
   if (!allRules || allRules.length === 0) {
-    // No pricing rules found, use base rate
-    return {
-      ratePlanName,
-      pricePerDay: baseDailyRate,
-      source: {
-        table: ratePlanId === 'tenant-default' ? 'tenant_pricing' : 'product_rate_plans',
-        ratePlanId,
-        ratePlanName,
-        pricePerDay: baseDailyRate,
-        channelCode: effectiveChannelCode,
-        seasonId,
-      },
-    };
+    throw new Error(`No LOS pricing rule found for ${days} days`);
   }
 
-  // Step 4: Filter by channel and apply channel precedence
-  // First, prioritize exact day matches (min_stay === days), then range matches
-  // Filter rules where channel matches or is null
-  const exactDayMatches = allRules.filter(r => 
-    r.min_stay === days && (r.max_stay === null || r.max_stay === days) &&
-    (!r.channel || r.channel === effectiveChannelCode || r.channel === 'agent' || r.channel === 'all')
-  );
-  
-  const rangeMatches = allRules.filter(r => 
-    r.min_stay !== days && r.min_stay <= days && (r.max_stay === null || r.max_stay >= days) &&
-    (!r.channel || r.channel === effectiveChannelCode || r.channel === 'agent' || r.channel === 'all')
-  );
-  
-  // Prefer exact day matches over range matches
-  const channelFilteredRules = exactDayMatches.length > 0 ? exactDayMatches : rangeMatches;
+  // Filter to rules whose channel matches precedence
+  const channelMatches = allRules.filter((r) => r.channel === channelCode);
+  const agentMatches = allRules.filter((r) => r.channel === 'agent');
+  const allMatches = allRules.filter((r) => r.channel === 'all');
+  const nullMatches = allRules.filter((r) => !r.channel);
 
-  if (channelFilteredRules.length === 0) {
-    // No matching channel rules, use base rate
-    return {
-      ratePlanName,
-      pricePerDay: baseDailyRate,
-      source: {
-        table: ratePlanId === 'tenant-default' ? 'tenant_pricing' : 'product_rate_plans',
-        ratePlanId,
-        ratePlanName,
-        pricePerDay: baseDailyRate,
-        channelCode: effectiveChannelCode,
-        seasonId,
-      },
-    };
+  // Use the first non-empty bucket by precedence
+  let candidates =
+    channelMatches.length > 0
+      ? channelMatches
+      : agentMatches.length > 0
+      ? agentMatches
+      : allMatches.length > 0
+      ? allMatches
+      : nullMatches;
+
+  if (!candidates || candidates.length === 0) {
+    throw new Error(`No LOS pricing rule found for ${days} days after channel precedence`);
   }
 
-  // Apply channel precedence and select best rule
-  // Precedence: channel-specific > 'agent' > 'all' > null
-  let selectedRule = null;
-  
-  // Try channel-specific first
-  selectedRule = channelFilteredRules.find(r => r.channel === effectiveChannelCode);
-  
-  // Try 'agent' channel
-  if (!selectedRule && effectiveChannelCode !== 'agent') {
-    selectedRule = channelFilteredRules.find(r => r.channel === 'agent');
-  }
-  
-  // Try 'all' channel
-  if (!selectedRule && effectiveChannelCode !== 'all') {
-    selectedRule = channelFilteredRules.find(r => r.channel === 'all');
-  }
-  
-  // Try null channel
-  if (!selectedRule) {
-    selectedRule = channelFilteredRules.find(r => !r.channel);
-  }
-  
-  // If still no rule, use first one (already sorted by priority)
-  if (!selectedRule) {
-    selectedRule = channelFilteredRules[0];
-  }
+  // Sort by priority (lowest first) then created_at (oldest first)
+  candidates.sort((a, b) => {
+    const pa = a.priority ?? 100;
+    const pb = b.priority ?? 100;
+    if (pa !== pb) return pa - pb;
+    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+  });
 
-  // Step 5: Get price_tier for the selected rule
+  const selectedRule = candidates[0];
+
+  // Load the tier for this rule
   const { data: tier, error: tierError } = await supabase
     .from('price_tiers')
-    .select('id, type, value')
+    .select('id, type, value, code, label')
     .eq('id', selectedRule.tier_id)
     .eq('tenant_id', tenantId)
     .maybeSingle();
 
   if (tierError || !tier) {
-    console.error('[AVAILABILITY] Error getting price_tier:', tierError);
-    // Fallback to base rate
-    return {
-      ratePlanName,
-      pricePerDay: baseDailyRate,
-      source: {
-        table: ratePlanId === 'tenant-default' ? 'tenant_pricing' : 'product_rate_plans',
-        ratePlanId,
-        ratePlanName,
-        pricePerDay: baseDailyRate,
-        channelCode: effectiveChannelCode,
-        seasonId,
-      },
-    };
+    console.error('[PRICING] loadLosRuleForDays tier error:', tierError);
+    throw new Error(`Failed to load price_tier for rule ${selectedRule.id}`);
   }
 
-  // Step 6: Calculate price_per_day based on tier type
-  // IMPORTANT: For LOS matrix pricing rules (where min_stay === max_stay === days),
-  // the tier.value stored in the database is the TOTAL price for that stay length,
-  // even though tier.type is 'multiplier'. This is how the admin Pricing UI stores LOS prices.
-  // For example: if admin sets "2 per day for 3 days", it stores tier.value = 6 (total).
-  let pricePerDay: number;
   const tierValue = Number(tier.value);
-  
-  // Check if this is a LOS matrix rule (exact day match: min_stay === max_stay === days)
-  const isLosMatrixRule = selectedRule.min_stay === days && (selectedRule.max_stay === null || selectedRule.max_stay === days);
-  
-  if (isLosMatrixRule) {
-    // LOS matrix rule: tier.value is the TOTAL price for this exact stay length
-    // Divide by days to get per-day rate
-    pricePerDay = tierValue / days;
-  } else if (tier.type === 'flat' || tier.type === 'absolute') {
-    // Flat/Absolute: tier.value is the final per-day price
-    pricePerDay = tierValue;
-  } else if (tier.type === 'multiplier') {
-    // Regular multiplier (for non-LOS rules): base_daily_rate * tier.value
-    pricePerDay = baseDailyRate * tierValue;
-  } else {
-    // Unknown type: try to infer from rule structure
-    if (selectedRule.min_stay === days && (selectedRule.max_stay === null || selectedRule.max_stay === days)) {
-      // Looks like LOS matrix rule, treat as total price
-      pricePerDay = tierValue / days;
-    } else {
-      // Fallback to multiplier behavior
-      console.warn(`[AVAILABILITY] Unknown tier type: ${tier.type}, treating as multiplier`);
-      pricePerDay = baseDailyRate * tierValue;
-    }
-  }
-
-  if (isNaN(pricePerDay) || pricePerDay <= 0) {
-    throw new Error(`Invalid price calculation: baseDailyRate=${baseDailyRate}, tier.type=${tier.type}, tier.value=${tier.value}`);
+  if (Number.isNaN(tierValue) || tierValue < 0) {
+    throw new Error(`Invalid tier value for rule ${selectedRule.id}: ${tier.value}`);
   }
 
   return {
-    ratePlanName,
-    pricePerDay,
-    source: {
-      table: 'pricing_rules',
-      ratePlanId: selectedRule.rate_plan_id,
-      ratePlanName,
-      pricePerDay,
-      seasonId: selectedRule.season_id,
-      channelCode: selectedRule.channel || effectiveChannelCode,
-      pricingRuleId: selectedRule.id,
-      tierId: selectedRule.tier_id,
-      tierType: tier.type,
-      tierValue: tierValue,
-    },
+    rule: selectedRule,
+    tierValue,
+    tierType: tier.type,
   };
 }
 
 /**
- * Calculate availability for a product using tenant capacity and pricing
+ * Get total price for stay from pricing tables (LOS matrix model).
+ *
+ * Rules:
+ * - "days" = number of calendar dates touched by the stay (inclusive).
+ * - LOS matrix has explicit prices for 1–30 days.
+ * - For >30 days, we use:
+ *     price_for_30_days + (days - 30) * extra_day_price
+ *   where:
+ *     - price_for_30_days comes from LOS = 30 row
+ *     - extra_day_price comes from a special LOS = 31 row
  */
-export async function calculateProductAvailability(
-  input: AvailabilityInput
-): Promise<AvailabilityResult> {
+async function getProductPricingForStay(
+  supabase: SupabaseClient,
+  params: {
+    tenantId: string;
+    productId: string;
+    startAt: string;
+    endAt: string;
+    currency: string;
+    channelCode?: string;
+    days: number;
+  }
+): Promise<{ ratePlanName: string; totalPrice: number; pricePerDay: number; source: PricingSource }> {
+  const { tenantId, productId, startAt, endAt, currency, channelCode, days } = params;
+
+  const stayDates = generateStayDates(startAt, endAt);
+  const actualDays = stayDates.length;
+
+  if (actualDays <= 0) {
+    throw new Error('Stay must cover at least one day');
+  }
+
+  // We trust the days passed in from caller, but we sanity check
+  let losDays = days;
+  if (losDays !== actualDays) {
+    // If they ever drift, we force LOS to be based on dates
+    losDays = actualDays;
+  }
+
+  const firstDate = stayDates[0];
+
+  // Default channel code
+  const effectiveChannelCode = channelCode || 'agent';
+
+  // 1) Find the season that covers the arrival date
+  const seasonId = await findSeasonForDateRange(supabase, tenantId, firstDate);
+
+  // 2) Get rate plan info (for metadata only)
+  let ratePlanId: string | null = null;
+  let ratePlanName = 'Standard Rate';
+
+  const { data: ratePlan } = await supabase
+    .from('product_rate_plans')
+    .select('id, name')
+    .eq('product_id', productId)
+    .limit(1)
+    .maybeSingle();
+
+  if (ratePlan) {
+    ratePlanId = ratePlan.id;
+    ratePlanName = ratePlan.name || 'Standard Rate';
+  }
+
+  // 3) Load LOS pricing according to matrix rules
+
+  // A) For LOS 1–30: direct lookup in matrix (exact LOS)
+  if (losDays >= 1 && losDays <= 30) {
+    const { rule, tierValue, tierType } = await loadLosRuleForDays({
+      supabase,
+      tenantId,
+      seasonId,
+      ratePlanId,
+      channelCode: effectiveChannelCode,
+      days: losDays,
+    });
+
+    // For matrix entries, tierValue is TOTAL price for the whole stay
+    const totalPrice = tierValue;
+    if (Number.isNaN(totalPrice) || totalPrice <= 0) {
+      throw new Error(`Invalid total price for ${losDays} days (rule ${rule.id})`);
+    }
+
+    const pricePerDay = totalPrice / losDays;
+
+    return {
+      ratePlanName,
+      totalPrice,
+      pricePerDay,
+      source: {
+        table: 'pricing_rules',
+        ratePlanId: rule.rate_plan_id,
+        ratePlanName,
+        totalPrice,
+        pricePerDay,
+        seasonId: rule.season_id,
+        channelCode: rule.channel || effectiveChannelCode,
+        pricingRuleId: rule.id,
+        tierId: rule.tier_id,
+        tierType,
+        tierValue,
+        days: losDays,
+      },
+    };
+  }
+
+  // B) For LOS > 30:
+  //    total = price_for_30_days + (days - 30) * extra_day_price
+  //    where:
+  //      - LOS = 30 row is the 30-day matrix price
+  //      - LOS = 31 row's tierValue is "extra_day_price" (per extra day)
+  if (losDays > 30) {
+    // Get 30-day LOS price
+    const { rule: rule30, tierValue: priceFor30, tierType: tierType30 } = await loadLosRuleForDays({
+      supabase,
+      tenantId,
+      seasonId,
+      ratePlanId,
+      channelCode: effectiveChannelCode,
+      days: 30,
+    });
+
+    if (Number.isNaN(priceFor30) || priceFor30 <= 0) {
+      throw new Error(`Invalid 30-day matrix price (rule ${rule30.id})`);
+    }
+
+    // Get extra-day price from LOS = 31 row
+    const { rule: extraRule, tierValue: extraDayPrice, tierType: extraTierType } = await loadLosRuleForDays({
+      supabase,
+      tenantId,
+      seasonId,
+      ratePlanId,
+      channelCode: effectiveChannelCode,
+      days: 31,
+    });
+
+    if (Number.isNaN(extraDayPrice) || extraDayPrice < 0) {
+      throw new Error(`Invalid extra-day price (LOS=31, rule ${extraRule.id})`);
+    }
+
+    const extraDays = losDays - 30;
+    const totalPrice = priceFor30 + extraDays * extraDayPrice;
+
+    if (Number.isNaN(totalPrice) || totalPrice <= 0) {
+      throw new Error(`Invalid total price for ${losDays} days (30-day+extra-day calculation)`);
+    }
+
+    const pricePerDay = totalPrice / losDays;
+
+    return {
+      ratePlanName,
+      totalPrice,
+      pricePerDay,
+      source: {
+        table: 'pricing_rules',
+        ratePlanId: rule30.rate_plan_id,
+        ratePlanName,
+        totalPrice,
+        pricePerDay,
+        seasonId: rule30.season_id,
+        channelCode: rule30.channel || effectiveChannelCode,
+        pricingRuleId: rule30.id, // main LOS anchor
+        tierId: rule30.tier_id,
+        tierType: `${tierType30} + extra(${extraTierType})`,
+        tierValue: priceFor30,
+        days: losDays,
+      },
+    };
+  }
+
+  // Just in case something weird happens
+  throw new Error(`Unsupported LOS days value: ${losDays}`);
+}
+
+/**
+ * Apply dynamic pricing (if enabled) based on occupancy percentage.
+ * Returns { increaseAmount, appliedRule }.
+ */
+async function applyDynamicPricing(params: {
+  supabase: SupabaseClient;
+  tenantId: string;
+  baseTotal: number;
+  occupancyPercent: number;
+}): Promise<{ increaseAmount: number; appliedRule: any | null }> {
+  const { supabase, tenantId, baseTotal, occupancyPercent } = params;
+
+  const { data: settings, error: settingsError } = await supabase
+    .from('tenant_dynamic_pricing_settings')
+    .select('id, is_enabled, scope')
+    .eq('tenant_id', tenantId)
+    .maybeSingle();
+
+  if (settingsError || !settings || !settings.is_enabled) {
+    return { increaseAmount: 0, appliedRule: null };
+  }
+
+  const { data: rules, error: rulesError } = await supabase
+    .from('tenant_dynamic_pricing_rules')
+    .select('id, threshold_percent, price_increase_percent, sort_order, is_active')
+    .eq('tenant_id', tenantId)
+    .eq('settings_id', settings.id)
+    .eq('is_active', true)
+    .order('threshold_percent', { ascending: true });
+
+  if (rulesError || !rules || rules.length === 0) {
+    return { increaseAmount: 0, appliedRule: null };
+  }
+
+  // Find the highest threshold <= occupancyPercent
+  const eligible = rules.filter((r: any) => Number(r.threshold_percent) <= occupancyPercent);
+  if (eligible.length === 0) {
+    return { increaseAmount: 0, appliedRule: null };
+  }
+
+  const appliedRule = eligible[eligible.length - 1];
+  const increasePercent = Number(appliedRule.price_increase_percent) || 0;
+  if (increasePercent <= 0) {
+    return { increaseAmount: 0, appliedRule: null };
+  }
+
+  const increaseAmount = (baseTotal * increasePercent) / 100;
+  return { increaseAmount, appliedRule };
+}
+
+/**
+ * Calculate availability for a product using tenant capacity + LOS matrix + dynamic pricing.
+ */
+export async function calculateProductAvailability(input: AvailabilityInput): Promise<AvailabilityResult> {
   const {
     tenantId,
     productId: inputProductId,
@@ -414,19 +488,18 @@ export async function calculateProductAvailability(
   const supabase = createAdminClient();
   const currency = inputCurrency ?? 'GBP';
 
-  // 1) Get or find "Standard Parking" product
+  // 1) Resolve product (prefer code='STANDARD', fallback to first active product)
   let productId: string | null = null;
   let product: any;
 
   if (inputProductId) {
-    // Validate provided product_id belongs to tenant
     const { data: p, error: productError } = await supabase
       .from('products')
       .select('*')
       .eq('id', inputProductId)
       .eq('tenant_id', tenantId)
       .eq('is_active', true)
-      .single();
+      .maybeSingle();
 
     if (productError || !p) {
       throw new Error('Product not found or is not active');
@@ -435,8 +508,6 @@ export async function calculateProductAvailability(
     product = p;
     productId = p.id;
   } else {
-    // Default to "Standard Parking" product - try multiple strategies
-    // First try code = 'STANDARD'
     let { data: standardProduct } = await supabase
       .from('products')
       .select('*')
@@ -446,12 +517,10 @@ export async function calculateProductAvailability(
       .maybeSingle();
 
     if (!standardProduct) {
-      // Try name contains "Standard"
       const { data: altProduct } = await supabase
         .from('products')
         .select('*')
         .eq('tenant_id', tenantId)
-        .ilike('name', '%standard%')
         .eq('is_active', true)
         .order('created_at', { ascending: true })
         .limit(1)
@@ -461,47 +530,27 @@ export async function calculateProductAvailability(
     }
 
     if (!standardProduct) {
-      // If no "Standard" product found, use the first active product
-      const { data: firstProduct } = await supabase
-        .from('products')
-        .select('*')
-        .eq('tenant_id', tenantId)
-        .eq('is_active', true)
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .maybeSingle();
-
-      if (!firstProduct) {
-        throw new Error('No active products found for tenant');
-      }
-
-      product = firstProduct;
-      productId = firstProduct.id;
-    } else {
-      product = standardProduct;
-      productId = standardProduct.id;
+      throw new Error('No active products found for tenant');
     }
+
+    product = standardProduct;
+    productId = standardProduct.id;
   }
 
-  // At this point, productId should always be set (we throw if no product found)
   if (!productId) {
     throw new Error('Product ID is required but was not found');
   }
 
-  // 2) Get pricing from database (source of truth from admin Pricing UI)
+  // 2) Stay dates + LOS
   const stayDates = generateStayDates(startAt, endAt);
   const days = stayDates.length;
 
-  let pricingInfo: { ratePlanName: string; pricePerDay: number; source: PricingSource };
-  let pricingCurrency: string = currency;
-
-  if (stayDates.length === 0) {
-    // Return early with zero pricing if no dates
+  if (days <= 0) {
     return {
       productId,
       startAt,
       endAt,
-      currency: pricingCurrency,
+      currency,
       availabilityStatus: 'closed',
       remainingCapacity: null,
       pricing: {
@@ -512,45 +561,37 @@ export async function calculateProductAvailability(
         totalPrice: 0,
         surcharges: [],
         discounts: [],
+        dynamicPricingApplied: false,
       },
     };
   }
 
+  // 3) Base LOS price from matrix
+  let pricingInfo: { ratePlanName: string; totalPrice: number; pricePerDay: number; source: PricingSource };
+
   try {
-    pricingInfo = await getProductBasePricePerDay(supabase, {
+    pricingInfo = await getMatrixPriceForStay({
       tenantId,
       productId,
       startAt,
       endAt,
       currency,
       channelCode,
-      days,
     });
-
-    // Get currency from tenant_pricing if we used that source
-    if (pricingInfo.source.table === 'tenant_pricing') {
-      const { data: tenantPricing } = await supabase
-        .from('tenant_pricing')
-        .select('currency')
-        .eq('tenant_id', tenantId)
-        .maybeSingle();
-      pricingCurrency = tenantPricing?.currency || currency;
-    }
   } catch (error: any) {
     throw new Error(`Failed to get pricing: ${error.message || String(error)}`);
   }
 
-  // 3) Determine capacity for each date
-  // Priority: tenant_capacity > tenant_settings > closed
+  // 4) Capacity / occupancy
 
-  // Load tenant_capacity rows
+  // Tenant capacity rows for these dates (per tenant)
   const { data: tenantCapRows } = await supabase
     .from('tenant_capacity')
     .select('date, capacity')
     .eq('tenant_id', tenantId)
     .in('date', stayDates);
 
-  // Load tenant_settings for rolling capacity defaults
+  // Tenant settings for default capacity
   const { data: tenantSettings } = await supabase
     .from('tenant_settings')
     .select('rolling_capacity_months, default_daily_capacity')
@@ -560,13 +601,11 @@ export async function calculateProductAvailability(
   const rollingMonths = tenantSettings?.rolling_capacity_months ?? 12;
   const defaultDailyCapacity = tenantSettings?.default_daily_capacity ?? 250;
 
-  // Calculate booking horizon
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
   const horizonDate = new Date(today);
   horizonDate.setUTCMonth(horizonDate.getUTCMonth() + rollingMonths);
 
-  // Build capacity map
   const capacityByDate: Record<string, number | null> = {};
   const tenantCapByDate: Record<string, number> = {};
 
@@ -582,13 +621,12 @@ export async function calculateProductAvailability(
       if (dateObj <= horizonDate) {
         capacityByDate[dateStr] = defaultDailyCapacity;
       } else {
-        capacityByDate[dateStr] = null; // closed
+        capacityByDate[dateStr] = null; // closed beyond horizon
       }
     }
   }
 
-  // 4) Calculate occupancy - query bookings that overlap the period
-  // Capacity is per tenant, not per product, so we count ALL bookings for the tenant
+  // Bookings that overlap the stay
   let bookingsQuery = supabase
     .from('bookings')
     .select('start_at, end_at, status')
@@ -612,28 +650,32 @@ export async function calculateProductAvailability(
       endAt,
     });
 
-    // Rethrow the original error so the route can see the actual message
     if (bookingsError instanceof Error) {
       throw bookingsError;
-    } else {
-      // If bookingsError is not an Error object, create one with the message
-      // Supabase errors typically have a message property
-      const errorObj = bookingsError as { message?: string } | null | undefined;
-      const errorMessage = 
-        (errorObj && typeof errorObj === 'object' && 'message' in errorObj && errorObj.message)
-          ? String(errorObj.message)
-          : JSON.stringify(bookingsError);
-      throw new Error(`Failed to check bookings: ${errorMessage}`);
     }
+
+    const errorObj = bookingsError as { message?: string } | null | undefined;
+    const errorMessage =
+      errorObj && typeof errorObj === 'object' && 'message' in errorObj && errorObj.message
+        ? String(errorObj.message)
+        : JSON.stringify(bookingsError);
+
+    throw new Error(`Failed to check bookings: ${errorMessage}`);
   }
 
-  // Count occupancy per date
+  // Time-based availability checking: filter to bookings that overlap the requested time range
+  // A booking occupies space from start_at to (end_at + 1 hour buffer)
+  const overlappingBookings = (bookings ?? []).filter((booking: any) => {
+    return bookingOverlapsTimeRange(booking, startAt, endAt);
+  });
+
+  // Count overlapping bookings per date for capacity checking
   const occupancyByDate: Record<string, number> = {};
   for (const dateStr of stayDates) {
     occupancyByDate[dateStr] = 0;
   }
 
-  (bookings ?? []).forEach((booking: any) => {
+  overlappingBookings.forEach((booking: any) => {
     for (const dateStr of stayDates) {
       if (bookingTouchesDate(booking, dateStr)) {
         occupancyByDate[dateStr] += 1;
@@ -641,22 +683,27 @@ export async function calculateProductAvailability(
     }
   });
 
-  // 5) Calculate remaining_capacity = capacity - occupancy
   let overallRemaining: number | null = null;
   let availabilityStatus: 'available' | 'sold_out' | 'closed' = 'available';
+  let maxOccupancyRatio = 0; // for dynamic pricing
 
   for (const dateStr of stayDates) {
     const capacity = capacityByDate[dateStr];
 
-    // 6) availability_status logic
     if (capacity === null) {
       availabilityStatus = 'closed';
       overallRemaining = null;
+      maxOccupancyRatio = 1; // treat as fully occupied for dynamic, though it's closed anyway
       break;
     }
 
     const occupancy = occupancyByDate[dateStr] ?? 0;
     const remaining = capacity - occupancy;
+
+    const ratio = capacity > 0 ? occupancy / capacity : 1;
+    if (ratio > maxOccupancyRatio) {
+      maxOccupancyRatio = ratio;
+    }
 
     if (remaining <= 0) {
       availabilityStatus = 'sold_out';
@@ -671,34 +718,61 @@ export async function calculateProductAvailability(
     availabilityStatus = 'sold_out';
   }
 
-  // 7) pricing - base_price is the daily rate
-  const basePricePerDay = pricingInfo.pricePerDay; // Daily rate (e.g., 7 GBP per day)
-  const surcharges: any[] = [];
-  const discounts: any[] = [];
-  
-  // Calculate total: base_price * days + surcharges - discounts
+  // 5) Pricing: base + dynamic + surcharges/discounts
+
+  const baseTotal = pricingInfo.totalPrice;
+
+  const surcharges: AvailabilityResult['pricing']['surcharges'] = [];
+  const discounts: AvailabilityResult['pricing']['discounts'] = [];
+  let dynamicPricingApplied = false;
+
+  // Only apply dynamic pricing if the product is actually available
+  if (availabilityStatus === 'available' && baseTotal > 0) {
+    const occupancyPercent = maxOccupancyRatio * 100;
+    const { increaseAmount, appliedRule } = await applyDynamicPricing({
+      supabase,
+      tenantId,
+      baseTotal,
+      occupancyPercent,
+    });
+
+    if (increaseAmount > 0 && appliedRule) {
+      dynamicPricingApplied = true;
+      surcharges.push({
+        type: 'dynamic_pricing',
+        label: `Dynamic pricing +${appliedRule.price_increase_percent}%`,
+        amount: increaseAmount,
+        meta: {
+          ruleId: appliedRule.id,
+          thresholdPercent: appliedRule.threshold_percent,
+          priceIncreasePercent: appliedRule.price_increase_percent,
+          occupancyPercent,
+        },
+      });
+    }
+  }
+
   const surchargesTotal = surcharges.reduce((sum, s) => sum + (s.amount || 0), 0);
   const discountsTotal = discounts.reduce((sum, d) => sum + (d.amount || 0), 0);
-  const totalPrice = basePricePerDay * days + surchargesTotal - discountsTotal;
+  const finalTotalPrice = baseTotal + surchargesTotal - discountsTotal;
 
   return {
     productId,
     startAt,
     endAt,
-    currency: pricingCurrency,
+    currency,
     availabilityStatus,
     remainingCapacity: overallRemaining,
     pricing: {
-      ratePlanId: pricingInfo.source.ratePlanId || 'tenant-default',
+      ratePlanId: pricingInfo.source.ratePlanId || 'standard',
       ratePlanName: pricingInfo.ratePlanName,
       days,
-      basePrice: basePricePerDay,
-      totalPrice,
+      basePrice: baseTotal,
+      totalPrice: finalTotalPrice,
       surcharges,
       discounts,
-      // Include pricing source for debug
+      dynamicPricingApplied,
       _pricingSource: pricingInfo.source,
     },
   };
 }
-

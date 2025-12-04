@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useTransition, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { LogIn, LogOut, Car, DollarSign, ArrowUpDown } from 'lucide-react';
+import { LogIn, LogOut, Car, DollarSign, ArrowUpDown, ChevronDown, ChevronUp } from 'lucide-react';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
 import DateRangeSelector from '@/components/admin/DateRangeSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -92,6 +92,13 @@ export default function TodayServerClient({
   const [parkedSort, setParkedSort] = useState<'closest' | 'most_recent'>('closest');
   const [highlightMode, setHighlightMode] = useState(false);
   const [updatingHighlightId, setUpdatingHighlightId] = useState<string | null>(null);
+  const [arrivalsDeparturesCollapsed, setArrivalsDeparturesCollapsed] = useState(false);
+  const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
+  const [collapsedParkedDates, setCollapsedParkedDates] = useState<Set<string>>(new Set());
+  // Initialize date range to today
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+  const [currentDateRange, setCurrentDateRange] = useState<{ from: string; to: string }>({ from: todayStr, to: todayStr });
 
   const handleBookingClick = (booking: Booking) => {
     setSelectedBookingId(booking.id);
@@ -173,6 +180,7 @@ export default function TodayServerClient({
   };
 
   const handleDateRangeChange = (dateRange: { from: string; to: string }) => {
+    setCurrentDateRange(dateRange);
     fetchDataForDateRange(dateRange.from, dateRange.to);
   };
 
@@ -242,9 +250,95 @@ export default function TodayServerClient({
     return groupBookingsByDate(sortedDepartures, 'end_at');
   }, [sortedDepartures]);
 
+  // Group currently parked by day - shows who is/will be parked on each day in the date range
   const groupedCurrentlyParked = useMemo(() => {
-    return groupBookingsByDate(sortedCurrentlyParked, 'start_at');
-  }, [sortedCurrentlyParked]);
+    // Debug: log if we have bookings but they're not showing
+    if (sortedCurrentlyParked.length > 0) {
+      console.log('Currently Parked - Total bookings:', sortedCurrentlyParked.length, {
+        sample: sortedCurrentlyParked[0] ? {
+          id: sortedCurrentlyParked[0].id,
+          start: sortedCurrentlyParked[0].start_at,
+          end: sortedCurrentlyParked[0].end_at,
+          status: sortedCurrentlyParked[0].status
+        } : null
+      });
+    }
+
+    if (sortedCurrentlyParked.length === 0) {
+      return [];
+    }
+
+    // Get date range
+    const fromDate = currentDateRange.from;
+    const toDate = currentDateRange.to;
+
+    // Generate all days in the date range
+    const days: string[] = [];
+    const start = new Date(fromDate + 'T00:00:00.000Z');
+    const end = new Date(toDate + 'T00:00:00.000Z');
+    const current = new Date(start);
+    
+    while (current <= end) {
+      days.push(current.toISOString().split('T')[0]);
+      current.setDate(current.getDate() + 1);
+    }
+
+    // For each day, find bookings that are active on that day
+    const grouped: Record<string, Booking[]> = {};
+    
+    const DAY_MS = 1000 * 60 * 60 * 24;
+    
+    days.forEach(dayStr => {
+      const dayStart = new Date(dayStr + 'T00:00:00Z');
+      const dayEnd = new Date(dayStart.getTime() + DAY_MS);
+      
+      const activeBookings = sortedCurrentlyParked.filter(booking => {
+        const bookingStart = new Date(booking.start_at);
+        const bookingEnd = new Date(booking.end_at);
+        
+        // Booking is active on this day if it overlaps: start < dayEnd AND end > dayStart
+        // (matches bookingTouchesDate logic from engine.ts)
+        const isActive = bookingStart < dayEnd && bookingEnd > dayStart;
+        return isActive;
+      });
+      
+      if (activeBookings.length > 0) {
+        grouped[dayStr] = activeBookings;
+      }
+    });
+
+    // Sort dates and format
+    const sortedDates = Object.keys(grouped).sort();
+    
+    const result = sortedDates.map(date => ({
+      date,
+      bookings: grouped[date],
+      displayDate: new Date(date).toLocaleDateString('en-GB', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      })
+    }));
+
+    // If we have bookings but no grouped dates, show them all under today as fallback
+    if (result.length === 0 && sortedCurrentlyParked.length > 0) {
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+      return [{
+        date: todayStr,
+        bookings: sortedCurrentlyParked,
+        displayDate: new Date(todayStr).toLocaleDateString('en-GB', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric'
+        })
+      }];
+    }
+
+    return result;
+  }, [sortedCurrentlyParked, currentDateRange]);
 
   // Group arrivals and departures by date, showing arrivals first then departures for each day
   const groupedByDay = useMemo(() => {
@@ -722,6 +816,24 @@ export default function TodayServerClient({
                 <p className="text-sm text-gray-600">Organized by day</p>
               </div>
               <div className="flex items-center gap-4">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setArrivalsDeparturesCollapsed(!arrivalsDeparturesCollapsed)}
+                  className="flex items-center gap-2"
+                >
+                  {arrivalsDeparturesCollapsed ? (
+                    <>
+                      <ChevronDown className="h-4 w-4" />
+                      <span>Expand</span>
+                    </>
+                  ) : (
+                    <>
+                      <ChevronUp className="h-4 w-4" />
+                      <span>Minimize</span>
+                    </>
+                  )}
+                </Button>
                 <div className="flex items-center gap-2">
                   <Label htmlFor="arrivalsSort" className="text-sm text-gray-600">Arrivals Sort:</Label>
                   <Select value={arrivalsSort} onValueChange={(value: 'closest' | 'most_recent') => setArrivalsSort(value)}>
@@ -755,74 +867,107 @@ export default function TodayServerClient({
               </div>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Plate</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Flight</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Arrival & Departure</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Days</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {groupedByDay.length === 0 ? (
+          {!arrivalsDeparturesCollapsed && (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                      No arrivals or departures in this period
-                    </td>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Plate</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Flight</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Arrival & Departure</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Days</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                   </tr>
-                ) : (
-                  groupedByDay.map((dayGroup) => (
-                    <React.Fragment key={dayGroup.date}>
-                      {/* Date Header */}
-                      <tr className="bg-gray-100 border-t-2 border-gray-300">
-                        <td colSpan={7} className="px-4 py-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-700">
-                              {dayGroup.displayDate}
-                            </span>
-                            <span className="text-xs text-gray-500">
-                              {dayGroup.arrivals.length} {dayGroup.arrivals.length === 1 ? 'arrival' : 'arrivals'}, {dayGroup.departures.length} {dayGroup.departures.length === 1 ? 'departure' : 'departures'}
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
-                      {/* Arrivals for this date */}
-                      {dayGroup.arrivals.length > 0 && (
-                        <>
-                          <tr className="bg-blue-50">
-                            <td colSpan={7} className="px-4 py-2">
-                              <span className="text-xs font-semibold text-blue-800">Arrivals</span>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {groupedByDay.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                        No arrivals or departures in this period
+                      </td>
+                    </tr>
+                  ) : (
+                    groupedByDay.map((dayGroup) => {
+                      const isCollapsed = collapsedDates.has(dayGroup.date);
+                      return (
+                        <React.Fragment key={dayGroup.date}>
+                          {/* Date Header */}
+                          <tr className="bg-gray-100 border-t-2 border-gray-300">
+                            <td colSpan={7} className="px-4 py-3">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                  <span className="text-sm font-semibold text-gray-700">
+                                    {dayGroup.displayDate}
+                                  </span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      setCollapsedDates(prev => {
+                                        const next = new Set(prev);
+                                        if (next.has(dayGroup.date)) {
+                                          next.delete(dayGroup.date);
+                                        } else {
+                                          next.add(dayGroup.date);
+                                        }
+                                        return next;
+                                      });
+                                    }}
+                                    className="h-6 w-6 p-0"
+                                  >
+                                    {isCollapsed ? (
+                                      <ChevronDown className="h-4 w-4" />
+                                    ) : (
+                                      <ChevronUp className="h-4 w-4" />
+                                    )}
+                                  </Button>
+                                </div>
+                                <span className="text-xs text-gray-500">
+                                  {dayGroup.arrivals.length} {dayGroup.arrivals.length === 1 ? 'arrival' : 'arrivals'}, {dayGroup.departures.length} {dayGroup.departures.length === 1 ? 'departure' : 'departures'}
+                                </span>
+                              </div>
                             </td>
                           </tr>
-                          {dayGroup.arrivals.map((booking) => (
-                            <BookingRow key={`arrival-${booking.id}`} booking={booking} type="arrival" />
-                          ))}
-                        </>
-                      )}
-                      {/* Departures for this date */}
-                      {dayGroup.departures.length > 0 && (
-                        <>
-                          <tr className="bg-red-50">
-                            <td colSpan={7} className="px-4 py-2">
-                              <span className="text-xs font-semibold text-red-800">Departures</span>
-                            </td>
-                          </tr>
-                          {dayGroup.departures.map((booking) => (
-                            <BookingRow key={`departure-${booking.id}`} booking={booking} type="departure" />
-                          ))}
-                        </>
-                      )}
-                    </React.Fragment>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                          {!isCollapsed && (
+                            <>
+                              {/* Arrivals for this date */}
+                              {dayGroup.arrivals.length > 0 && (
+                                <>
+                                  <tr className="bg-blue-50">
+                                    <td colSpan={7} className="px-4 py-2">
+                                      <span className="text-xs font-semibold text-blue-800">Arrivals</span>
+                                    </td>
+                                  </tr>
+                                  {dayGroup.arrivals.map((booking) => (
+                                    <BookingRow key={`arrival-${booking.id}`} booking={booking} type="arrival" />
+                                  ))}
+                                </>
+                              )}
+                              {/* Departures for this date */}
+                              {dayGroup.departures.length > 0 && (
+                                <>
+                                  <tr className="bg-red-50">
+                                    <td colSpan={7} className="px-4 py-2">
+                                      <span className="text-xs font-semibold text-red-800">Departures</span>
+                                    </td>
+                                  </tr>
+                                  {dayGroup.departures.map((booking) => (
+                                    <BookingRow key={`departure-${booking.id}`} booking={booking} type="departure" />
+                                  ))}
+                                </>
+                              )}
+                            </>
+                          )}
+                        </React.Fragment>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
 
         {/* Currently Parked */}
@@ -871,27 +1016,58 @@ export default function TodayServerClient({
                     </td>
                   </tr>
                 ) : (
-                  groupedCurrentlyParked.map((group, groupIndex) => (
-                    <React.Fragment key={group.date}>
-                      {/* Date Header */}
-                      <tr className="bg-gray-100 border-t-2 border-gray-300">
-                        <td colSpan={7} className="px-4 py-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-gray-700">
-                              {group.displayDate}
-                            </span>
-                            <span className="text-xs text-gray-500">
-                              {group.bookings.length} {group.bookings.length === 1 ? 'vehicle' : 'vehicles'}
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
-                      {/* Bookings for this date */}
-                      {group.bookings.map((booking) => (
-                        <BookingRow key={booking.id} booking={booking} type="parked" />
-                      ))}
-                    </React.Fragment>
-                  ))
+                  groupedCurrentlyParked.map((group, groupIndex) => {
+                    const isCollapsed = collapsedParkedDates.has(group.date);
+                    return (
+                      <React.Fragment key={group.date}>
+                        {/* Date Header */}
+                        <tr className="bg-gray-100 border-t-2 border-gray-300">
+                          <td colSpan={7} className="px-4 py-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <span className="text-sm font-semibold text-gray-700">
+                                  {group.displayDate}
+                                </span>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setCollapsedParkedDates(prev => {
+                                      const next = new Set(prev);
+                                      if (next.has(group.date)) {
+                                        next.delete(group.date);
+                                      } else {
+                                        next.add(group.date);
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                  className="h-6 w-6 p-0"
+                                >
+                                  {isCollapsed ? (
+                                    <ChevronDown className="h-4 w-4" />
+                                  ) : (
+                                    <ChevronUp className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              </div>
+                              <span className="text-xs text-gray-500">
+                                {group.bookings.length} {group.bookings.length === 1 ? 'vehicle' : 'vehicles'}
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                        {!isCollapsed && (
+                          <>
+                            {/* Bookings for this date */}
+                            {group.bookings.map((booking) => (
+                              <BookingRow key={booking.id} booking={booking} type="parked" />
+                            ))}
+                          </>
+                        )}
+                      </React.Fragment>
+                    );
+                  })
                 )}
               </tbody>
             </table>

@@ -16,11 +16,13 @@ import { format, eachDayOfInterval } from "date-fns";
 import DateRangeModal from '@/components/admin/DateRangeModal';
 import { useDateRangeModal } from '@/hooks/useDateRangeModal';
 import { Calendar } from 'lucide-react';
+import { getSupplierLabel } from '@/lib/supplier/labels';
 
 type Booking = {
   start_at: string;  // timestamptz
   end_at: string;    // timestamptz
-  source: string | null; // channel
+  source: string | null; // channel enum
+  external_source: string | null; // supplier name (e.g. "CAVU TEST")
   tenant_id?: string;
 };
 
@@ -52,14 +54,17 @@ const colorFor = (key: string) => {
 
 export default function DemandCurve({
   tenantId,
-  capacity = 100, // default; replace via prop or wire to your settings table later
+  capacity, // deprecated: single capacity value (for backward compatibility)
+  capacityByDate, // per-date capacity (preferred)
   showCapacityLine = true,
 }: {
   tenantId: string;
-  capacity?: number;
+  capacity?: number; // deprecated, use capacityByDate instead
+  capacityByDate?: Record<string, number | null>; // per-date capacity using rolling capacity logic
   showCapacityLine?: boolean;
 }) {
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [fetchedCapacityByDate, setFetchedCapacityByDate] = useState<Record<string, number | null>>({});
   const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState('next14days');
   const { isOpen, currentDateRange, openModal, closeModal, handleDateRangeChange } = useDateRangeModal();
@@ -133,6 +138,37 @@ export default function DemandCurve({
     })();
   }, [from, to]);
 
+  // Fetch capacity data for the date range if not provided via props
+  useEffect(() => {
+    if (capacityByDate) {
+      // Capacity provided via props, no need to fetch
+      return;
+    }
+
+    (async () => {
+      try {
+        // Generate date range
+        const start = new Date(from);
+        const end = new Date(to);
+        const dates: string[] = [];
+        const current = new Date(start);
+        while (current <= end) {
+          dates.push(current.toISOString().split('T')[0]);
+          current.setDate(current.getDate() + 1);
+        }
+
+        // Fetch capacity for all dates
+        const response = await fetch(`/api/capacity/by-date?tenant_id=${tenantId}&dates=${dates.join(',')}`);
+        if (response.ok) {
+          const result = await response.json();
+          setFetchedCapacityByDate(result.capacityByDate || {});
+        }
+      } catch (error) {
+        console.error("Error fetching capacity data:", error);
+      }
+    })();
+  }, [from, to, tenantId, capacityByDate]);
+
   // 2) Build day list
   const days = useMemo(() => {
     const start = new Date(from);
@@ -158,22 +194,30 @@ export default function DemandCurve({
   }, [from, to]);
 
   // 3) Aggregate per day per channel
-  const { data, channelKeys, maxY } = useMemo(() => {
+  const { data, channelKeys, maxY, channelNameMap } = useMemo(() => {
     const rows: DayRow[] = [];
     const chSet = new Set<string>();
+    const nameMap = new Map<string, string>(); // Map normalized key -> display name
+
+    // Use provided capacityByDate or fetched capacityByDate, fallback to single capacity or default
+    const effectiveCapacityByDate = capacityByDate || fetchedCapacityByDate;
+    const defaultCapacity = capacity ?? 100;
 
     console.log('DemandCurve: Processing', bookings.length, 'bookings for', days.length, 'days');
     if (bookings.length > 0) {
       console.log('DemandCurve: Sample booking:', {
         start: bookings[0].start_at,
         end: bookings[0].end_at,
-        source: bookings[0].source
+        source: bookings[0].source,
+        external_source: bookings[0].external_source
       });
     }
 
     for (const day of days) {
       const dayStr = format(day, "yyyy-MM-dd");
-      const row: DayRow = { date: dayStr, capacity, total: 0 };
+      // Get capacity for this day from capacityByDate, or use default
+      const dayCapacity = effectiveCapacityByDate[dayStr] ?? defaultCapacity;
+      const row: DayRow = { date: dayStr, capacity: dayCapacity, total: 0 };
 
       for (const b of bookings) {
         const s = new Date(b.start_at);
@@ -189,8 +233,15 @@ export default function DemandCurve({
         // This means: booking started before end of day AND booking ends after start of day
         // This gives us cumulative occupancy (cars parked on this day)
         if (s <= dayEnd && e >= dayStart) {
-          const name = keyFromSource((b.source ?? "unknown").trim() || "unknown");
+          // Use external_source for display, fallback to source
+          const supplierName = getSupplierLabel({
+            external_source: b.external_source,
+            source: b.source
+          });
+          const name = keyFromSource(supplierName);
           chSet.add(name);
+          // Store the mapping from normalized key to display name
+          nameMap.set(name, supplierName);
           row[name] = (row[name] as number | undefined ?? 0) + 1;
           row.total += 1;
         }
@@ -207,8 +258,13 @@ export default function DemandCurve({
     let m = 0;
     for (const r of rows) m = Math.max(m, r.total, r.capacity as number);
 
-    return { data: rows, channelKeys: Array.from(chSet).sort(), maxY: Math.max(5, m) };
-  }, [bookings, days, capacity]);
+    return { 
+      data: rows, 
+      channelKeys: Array.from(chSet).sort(), 
+      maxY: Math.max(5, m),
+      channelNameMap: nameMap
+    };
+  }, [bookings, days, capacity, capacityByDate, fetchedCapacityByDate]);
 
   if (loading) {
     return (
@@ -298,16 +354,20 @@ export default function DemandCurve({
           />
           <Legend />
 
-          {channelKeys.map((ck) => (
-            <Bar
-              key={ck}
-              dataKey={ck}
-              stackId="occ"
-              fill={colorFor(ck)}
-              name={ck.replace(/_/g, " ")}
-              maxBarSize={28}
-            />
-          ))}
+          {channelKeys.map((ck) => {
+            // Get the original supplier name from the map, or fallback to formatted key
+            const displayName = channelNameMap.get(ck) || ck.replace(/_/g, " ");
+            return (
+              <Bar
+                key={ck}
+                dataKey={ck}
+                stackId="occ"
+                fill={colorFor(ck)}
+                name={displayName}
+                maxBarSize={28}
+              />
+            );
+          })}
 
           {/* Optional capacity reference line */}
           {showCapacityLine && (

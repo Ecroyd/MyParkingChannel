@@ -79,6 +79,22 @@ async function apiGet<T>(path: string): Promise<T> {
 
   if (!res.ok) {
     const text = await res.text();
+    let errorBody;
+    try {
+      errorBody = JSON.parse(text);
+    } catch {
+      errorBody = { message: text };
+    }
+    
+    // Handle missing pricing configuration gracefully
+    if (res.status === 400 && errorBody.error?.code === 'PRICING_NOT_CONFIGURED') {
+      throw new Error(
+        `PRICING_NOT_CONFIGURED: No pricing rules found for this date range. ` +
+        `Please configure LOS matrix in the Pricing UI for the requested dates. ` +
+        `Path: ${path}`
+      );
+    }
+    
     throw new Error(`GET ${path} failed: ${res.status} ${res.statusText} - ${text}`);
   }
 
@@ -331,6 +347,9 @@ async function main() {
   console.log('Running Supplier API torture tests against', BASE_URL);
   console.log('Product ID:', PRODUCT_ID);
   console.log('Test window:', TEST_START, '->', TEST_END);
+  console.log('\n⚠️  NOTE: This test requires pricing rules to be configured in the Pricing UI');
+  console.log('   for the test dates. If you see PRICING_NOT_CONFIGURED errors,');
+  console.log('   configure LOS matrix pricing for the requested date ranges.\n');
 
   try {
     const ref = await scenarioBasicCapacity();
@@ -341,7 +360,17 @@ async function main() {
     console.log('\n✅ All torture-test scenarios passed.');
     process.exit(0);
   } catch (err: any) {
-    console.error('\n❌ Torture-test failed:', err?.message || err);
+    const errorMsg = err?.message || String(err);
+    
+    if (errorMsg.includes('PRICING_NOT_CONFIGURED')) {
+      console.error('\n❌ Torture-test failed: Pricing not configured');
+      console.error('   Error:', errorMsg);
+      console.error('\n   SOLUTION: Configure LOS matrix pricing in the Pricing UI');
+      console.error('   for the test date ranges before running the torture test.');
+      process.exit(1);
+    }
+    
+    console.error('\n❌ Torture-test failed:', errorMsg);
     process.exit(1);
   }
 }

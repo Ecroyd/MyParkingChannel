@@ -2,6 +2,7 @@
 import { createServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
 import { getTenantDateRange } from '@/lib/timezone';
+import { calculateCapacityByDate, calculateCapacityForDate } from '@/lib/capacity/rolling';
 import DashboardClient from './DashboardClient';
 
 // Process chart data from bookings
@@ -149,7 +150,7 @@ export default async function DashboardServerPage() {
     
     adminClient
       .from('bookings')
-      .select('start_at, end_at, source')
+      .select('start_at, end_at, source, external_source')
       .eq('tenant_id', tenant.id)
       .gte('start_at', `${chartStartStr}T00:00:00.000Z`)
       .order('start_at', { ascending: true }),
@@ -185,11 +186,36 @@ export default async function DashboardServerPage() {
   // Process chart data
   const chartData = processChartData(chartBookings, chartStartDate, today);
 
-  // Calculate capacity data
+  // Calculate capacity data using rolling capacity logic
+  const todayCapacity = await calculateCapacityForDate(tenant.id, todayStr);
+  const totalCapacity = todayCapacity ?? 0;
+  
+  // Get active bookings for today (bookings that overlap with today)
+  const { data: activeBookings } = await adminClient
+    .from('bookings')
+    .select('id')
+    .eq('tenant_id', tenant.id)
+    .in('status', ['reserved', 'confirmed', 'checked_in'])
+    .lte('start_at', `${tomorrowStr}T00:00:00.000Z`)
+    .gte('end_at', `${todayStr}T00:00:00.000Z`);
+
+  const activeBookingsCount = activeBookings?.length || 0;
+
   const capacityData = {
-    totalCapacity: tenant.default_capacity || 100,
-    capacityRemaining: (tenant.default_capacity || 100) - bookings.length
+    totalCapacity,
+    capacityRemaining: Math.max(0, totalCapacity - activeBookingsCount)
   };
+
+  // Calculate capacity for demand curve date range (next 14 days by default)
+  const demandCurveEndDate = new Date(today);
+  demandCurveEndDate.setDate(demandCurveEndDate.getDate() + 14);
+  const demandCurveDates: string[] = [];
+  const currentDate = new Date(today);
+  while (currentDate <= demandCurveEndDate) {
+    demandCurveDates.push(currentDate.toISOString().split('T')[0]);
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+  const demandCurveCapacityByDate = await calculateCapacityByDate(tenant.id, demandCurveDates);
 
   // Calculate revenue data
   const revenueData = {
@@ -209,6 +235,7 @@ export default async function DashboardServerPage() {
       chartData={chartData}
       todayArrivals={todayArrivals}
       todayDepartures={todayDepartures}
+      demandCurveCapacityByDate={demandCurveCapacityByDate}
     />
   );
 }

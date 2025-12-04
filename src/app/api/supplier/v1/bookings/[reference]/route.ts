@@ -216,7 +216,7 @@ export async function PATCH(
         startAt: newStart,
         endAt: newEnd,
         currency: 'GBP',
-        channel: 'partner',
+        channelCode: 'agent', // All supplier API requests use agent pricing
         excludeReference: existing.reference,
       });
 
