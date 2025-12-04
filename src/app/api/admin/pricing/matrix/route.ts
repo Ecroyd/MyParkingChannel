@@ -180,8 +180,9 @@ export async function GET(req: NextRequest) {
     }
   } catch (error) {
     console.error('Error in GET /api/admin/pricing/matrix:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', details: errorMessage },
       { status: 500 }
     );
   }
@@ -713,14 +714,38 @@ export async function PUT(req: NextRequest) {
     }
 
     // Return updated matrix
-    const params = new URLSearchParams({
-      season_id: seasonId,
-      rate_plan_id: ratePlanId || '',
-      channel: channelCode,
-    });
+    try {
+      const params = new URLSearchParams({
+        season_id: seasonId,
+        rate_plan_id: ratePlanId || '',
+        channel: channelCode,
+      });
 
-    const getReq = new NextRequest(`${req.nextUrl.origin}/api/admin/pricing/matrix?${params}`);
-    return GET(getReq);
+      const getReq = new NextRequest(`${req.nextUrl.origin}/api/admin/pricing/matrix?${params}`);
+      const getResponse = await GET(getReq);
+      
+      // If GET returns an error, return it
+      if (getResponse.status !== 200) {
+        const getError = await getResponse.json().catch(() => ({ error: 'Failed to load updated matrix' }));
+        return NextResponse.json(
+          { error: 'Matrix saved but failed to reload', details: getError.error || 'Unknown error' },
+          { status: 500 }
+        );
+      }
+      
+      return getResponse;
+    } catch (getError) {
+      console.error('Error reloading matrix after save:', getError);
+      // Still return success since the save worked, but log the reload error
+      return NextResponse.json(
+        { 
+          error: null, 
+          message: 'Matrix saved successfully',
+          warning: 'Failed to reload updated matrix - please refresh the page'
+        },
+        { status: 200 }
+      );
+    }
 
   } catch (error) {
     console.error('Error in PUT /api/admin/pricing/matrix:', error);

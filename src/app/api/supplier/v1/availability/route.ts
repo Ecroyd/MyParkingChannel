@@ -53,6 +53,7 @@ export async function GET(request: NextRequest) {
     const start_at = searchParams.get('start_at');
     const end_at = searchParams.get('end_at');
     const currency = searchParams.get('currency') || 'GBP';
+    const channel_code = searchParams.get('channel_code') || 'agent'; // Default to 'agent' for supplier API
     const debug = searchParams.get('debug') === '1';
 
     // Validation: product_id (required, UUID)
@@ -116,7 +117,7 @@ export async function GET(request: NextRequest) {
         startAt: start_at,
         endAt: end_at,
         currency,
-        channelCode: 'agent', // All supplier API requests use agent pricing
+        channelCode: channel_code, // Use channel_code from query params, default to 'agent'
       });
     } catch (err: unknown) {
       // Handle product not found or other engine errors

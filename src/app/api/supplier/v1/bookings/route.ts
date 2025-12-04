@@ -1,5 +1,6 @@
 // app/api/supplier/v1/bookings/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
 import {
   authenticateSupplierApi,
@@ -12,6 +13,50 @@ import {
 import { makeDedupeKey, checkDuplicateBooking } from '@/lib/bookings/dedupe';
 
 const DAY_MS = 1000 * 60 * 60 * 24;
+
+// Zod validation schema for booking creation
+const bookingCreateSchema = z.object({
+  external_reference: z.string().max(128).optional(),
+  product_id: z.string().uuid('product_id must be a valid UUID'),
+  start_at: z.string().refine(
+    (val) => {
+      const date = new Date(val);
+      return !isNaN(date.getTime());
+    },
+    { message: 'start_at must be a valid ISO 8601 timestamp' }
+  ),
+  end_at: z.string().refine(
+    (val) => {
+      const date = new Date(val);
+      return !isNaN(date.getTime());
+    },
+    { message: 'end_at must be a valid ISO 8601 timestamp' }
+  ),
+  customer: z.object({
+    first_name: z.string().min(1, 'first_name is required'),
+    last_name: z.string().min(1, 'last_name is required'),
+    email: z.string().email('customer.email must be a valid email address'),
+    phone: z.string().optional(),
+  }),
+  vehicle: z.object({
+    plate: z.string().min(1, 'vehicle.plate is required'),
+    make: z.string().optional(),
+    model: z.string().optional(),
+    colour: z.string().optional(),
+  }),
+  flight: z
+    .object({
+      departure_number: z.string().optional(),
+      arrival_number: z.string().optional(),
+    })
+    .optional(),
+  price: z.object({
+    currency: z.string().refine((val) => val === 'GBP', {
+      message: 'price.currency must be "GBP"',
+    }),
+    total: z.number().min(0, 'price.total must be >= 0'),
+  }),
+});
 
 function parseBody(body: any): BookingCreateRequest {
   return body as BookingCreateRequest;
@@ -101,14 +146,45 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const body = parseBody(json);
-
-    if (!body.product_id || !body.start_at || !body.end_at || !body.customer) {
+    // Validate input with Zod schema
+    const validationResult = bookingCreateSchema.safeParse(json);
+    if (!validationResult.success) {
       return NextResponse.json(
         {
           error: {
             code: 'INVALID_REQUEST',
-            message: 'product_id, start_at, end_at, and customer are required',
+            message: 'One or more fields are invalid.',
+            details: validationResult.error.flatten(),
+          },
+        },
+        { status: 400 }
+      );
+    }
+
+    const body = validationResult.data;
+
+    // Validate date formats and range
+    const startDate = new Date(body.start_at);
+    const endDate = new Date(body.end_at);
+
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return NextResponse.json(
+        {
+          error: {
+            code: 'INVALID_DATE_FORMAT',
+            message: 'start_at and end_at must be valid ISO 8601 timestamps.',
+          },
+        },
+        { status: 400 }
+      );
+    }
+
+    if (endDate <= startDate) {
+      return NextResponse.json(
+        {
+          error: {
+            code: 'INVALID_DATE_RANGE',
+            message: 'end_at must be after start_at and both must be valid ISO 8601 timestamps.',
           },
         },
         { status: 400 }
@@ -295,22 +371,11 @@ export async function POST(req: NextRequest) {
     }
 
     // 4) Prepare schema-safe insert payload
-    const rawBody = json; // Already have the raw JSON body
-    const customer = body.customer ?? {};
-    const vehicle = body.vehicle ?? {};
-    const total = Number(body?.price?.total ?? 0);
-
-    if (!Number.isFinite(total) || total <= 0) {
-      return NextResponse.json(
-        {
-          error: {
-            code: 'INVALID_PRICE',
-            message: 'price.total must be a positive number',
-          },
-        },
-        { status: 400 }
-      );
-    }
+    // Note: body is already validated by Zod, so all required fields are present
+    const rawBody = json; // Keep raw body for optional fields not in schema
+    const customer = body.customer;
+    const vehicle = body.vehicle;
+    const total = body.price.total; // Already validated as number >= 0
 
     // Get partner name from auth
     const partnerName = auth.partnerName ?? 'unknown partner';
@@ -342,17 +407,18 @@ export async function POST(req: NextRequest) {
     const reference = externalRef || generateInternalReference();
 
     // Now the insert payload
+    // Use validated body values for dates (they're already validated as valid ISO 8601)
     const insertPayload = {
       tenant_id: auth.tenantId,
       reference,
       customer_name: fullName || customer.email || 'Unknown customer',
-      customer_email: body.customer.email,
-      plate: vehicle.plate ?? '',
+      customer_email: customer.email, // Already validated as required and valid email
+      plate: vehicle.plate, // Already validated as required
       car_make: vehicle.make ?? null,
       car_model: vehicle.model ?? null,
       car_color: vehicle.colour ?? null,
-      start_at: rawBody.start_at,
-      end_at: rawBody.end_at,
+      start_at: body.start_at, // Use validated value
+      end_at: body.end_at, // Use validated value
       status: 'reserved', // booking_status enum
       source: 'supplier_api', // ✅ safe enum value, won't ever break inserts
       external_source: externalSourceLabel, // ✅ free text for partner/billing
@@ -370,8 +436,20 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (error) {
-      // Handle duplicate key errors
-      if (error.code === '23505' || error.message?.includes('duplicate') || error.message?.includes('unique')) {
+      // Map Postgres error codes to clean HTTP responses
+      if (error.code === '23505') {
+        // Duplicate key violation (e.g. uniq_bookings_tenant_ref)
+        console.error('[SUPPLIER_BOOKING] Duplicate key error', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          tenantId: auth.tenantId,
+          productId: body.product_id,
+          source: auth.partnerName,
+        });
+
+        // Try to find existing booking by external_reference if provided
         if (externalRef) {
           const existing = await checkDuplicateBooking(supabase, auth.tenantId, externalRef);
           if (existing) {
@@ -384,10 +462,66 @@ export async function POST(req: NextRequest) {
             return NextResponse.json(resp, { status: 200 });
           }
         }
+
+        return NextResponse.json(
+          {
+            error: {
+              code: 'REFERENCE_ALREADY_EXISTS',
+              message: 'A booking with this reference already exists for this tenant.',
+            },
+          },
+          { status: 409 }
+        );
       }
 
-      console.error('[SUPPLIER_BOOKING] Database insert error', {
-        error,
+      if (error.code === '23502') {
+        // NOT NULL violation (e.g. customer_email)
+        console.error('[SUPPLIER_BOOKING] NOT NULL violation', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          tenantId: auth.tenantId,
+          productId: body.product_id,
+          source: auth.partnerName,
+        });
+
+        return NextResponse.json(
+          {
+            error: {
+              code: 'MISSING_REQUIRED_FIELD',
+              message: 'A required field was missing (e.g. customer_email).',
+            },
+          },
+          { status: 400 }
+        );
+      }
+
+      if (error.code === '22007') {
+        // Invalid datetime syntax
+        console.error('[SUPPLIER_BOOKING] Invalid datetime format', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          tenantId: auth.tenantId,
+          productId: body.product_id,
+          source: auth.partnerName,
+        });
+
+        return NextResponse.json(
+          {
+            error: {
+              code: 'INVALID_DATE_FORMAT',
+              message: 'start_at and end_at must be valid ISO 8601 timestamps.',
+            },
+          },
+          { status: 400 }
+        );
+      }
+
+      // For any other unhandled error code, log it and return generic error
+      console.error('[SUPPLIER_BOOKING] Unexpected DB error', {
         code: error.code,
         message: error.message,
         details: error.details,
@@ -396,7 +530,16 @@ export async function POST(req: NextRequest) {
         productId: body.product_id,
         source: auth.partnerName,
       });
-      throw error;
+
+      return NextResponse.json(
+        {
+          error: {
+            code: 'INTERNAL_ERROR',
+            message: 'An unexpected error occurred while creating the booking.',
+          },
+        },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json(

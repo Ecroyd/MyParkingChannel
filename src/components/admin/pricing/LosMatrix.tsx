@@ -236,19 +236,41 @@ export default function LosMatrix({ seasonId, seasons }: LosMatrixProps) {
       });
 
       if (!response.ok) {
-        let result;
+        let result: any = {};
+        let responseText = '';
+        
         try {
-          result = await response.json();
+          // Try to get response as text first to see what we're dealing with
+          responseText = await response.text();
+          
+          // Try to parse as JSON
+          if (responseText) {
+            try {
+              result = JSON.parse(responseText);
+            } catch (parseError) {
+              // Not valid JSON, use text as error message
+              result = { error: responseText || `HTTP ${response.status}: ${response.statusText}` };
+            }
+          } else {
+            // Empty response body
+            result = { error: `HTTP ${response.status}: ${response.statusText}` };
+          }
         } catch (e) {
-          console.error('[LosMatrix] Failed to parse error response:', e);
+          console.error('[LosMatrix] Failed to read error response:', e);
           result = { error: `HTTP ${response.status}: ${response.statusText}` };
         }
+        
         console.error('[LosMatrix] Save error:', {
           status: response.status,
           statusText: response.statusText,
+          responseText,
           result,
+          hasError: !!result.error,
+          hasDetails: !!result.details,
         });
-        toast.error(result.details || result.error || 'Failed to save pricing matrix');
+        
+        const errorMessage = result.details || result.error || `Failed to save pricing matrix (HTTP ${response.status})`;
+        toast.error(errorMessage);
         return;
       }
 
