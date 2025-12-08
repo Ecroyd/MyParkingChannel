@@ -228,12 +228,14 @@ export async function POST(req: NextRequest) {
 
       // Get existing credentials to preserve password if not provided
       const existingCredentials = await getAphSftpCredentials(tenantId);
+      // Handle backward compatibility with old remote_path property
+      const credsAny = credentials as any;
       const fullCredentials: AphSftpCredentials = {
         host: credentials.host,
         port: credentials.port || 22,
         username: credentials.username,
         password: credentials.password || existingCredentials?.password || '',
-        remotePath: credentials.remotePath || credentials.remote_path || existingCredentials?.remotePath || '/',
+        remotePath: credentials.remotePath || credsAny.remote_path || existingCredentials?.remotePath || '/',
       };
 
       if (!fullCredentials.password) {
