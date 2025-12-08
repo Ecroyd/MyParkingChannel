@@ -4,9 +4,34 @@ import { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD } from "next/constants
 /** @type {import('next').NextConfig} */
 const baseConfig = {
   reactStrictMode: true,
-  serverExternalPackages: ['@supabase/supabase-js'],
+  serverExternalPackages: [
+    '@supabase/supabase-js',
+    'ssh2',
+    'ssh2-sftp-client',
+  ],
   images: { 
     domains: ["*.supabase.co", "localhost"] 
+  },
+  webpack: (config: any, { isServer }: any) => {
+    // Exclude native modules from client-side bundling
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        net: false,
+        tls: false,
+        crypto: false,
+      };
+    }
+    // Ignore native bindings for ssh2
+    config.externals = config.externals || [];
+    if (isServer) {
+      config.externals.push({
+        'ssh2': 'commonjs ssh2',
+        'ssh2-sftp-client': 'commonjs ssh2-sftp-client',
+      });
+    }
+    return config;
   },
   // Optimize CSS loading to prevent preload warnings
   experimental: {

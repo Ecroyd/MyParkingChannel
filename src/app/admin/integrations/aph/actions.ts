@@ -3,7 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/server';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { saveAphSftpCredentials as saveAphSftpCredentialsLib } from '@/lib/integrations/aph/secrets';
-import { runAphExportForChannel } from '@/lib/integrations/aph/job';
+// Don't import runAphExportForChannel directly - use dynamic import to avoid bundling native modules
 import type { AphSftpCredentials } from '@/lib/integrations/aph/types';
 
 /**
@@ -225,7 +225,8 @@ export async function runAphExportNow(params: { channelId: string }) {
       return { error: 'Forbidden - admin access required' };
     }
 
-    // Run the export
+    // Run the export using dynamic import to avoid bundling native SFTP modules
+    const { runAphExportForChannel } = await import('@/lib/integrations/aph/job');
     await runAphExportForChannel(params.channelId);
 
     return { ok: true };
