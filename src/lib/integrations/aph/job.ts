@@ -156,14 +156,16 @@ export async function runAphExportForChannel(channelId: string): Promise<void> {
   // Optionally update last_export_at on tenant_integration_channels
   // First check if column exists, if not we'll skip this
   if (status === 'success') {
-    // Try to update - if column doesn't exist, this will fail silently
-    await supabase
+    // Try to update last_export_at - if column doesn't exist, this will fail silently
+    const { error: updateError } = await supabase
       .from('tenant_integration_channels')
-      .update({ updated_at: new Date().toISOString() })
-      .eq('id', channel.id)
-      .catch(() => {
-        // Ignore if column doesn't exist
-      });
+      .update({ last_export_at: new Date().toISOString() })
+      .eq('id', channel.id);
+    
+    if (updateError) {
+      // Ignore if column doesn't exist or update fails
+      console.warn('[APH][EXPORT] Failed to update last_export_at', updateError);
+    }
   }
 }
 
