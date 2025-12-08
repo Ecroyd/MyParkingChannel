@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -27,7 +28,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Plus, Edit, Trash2 } from 'lucide-react';
+import { Plus, Edit, Trash2, Settings } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
 type Channel = {
@@ -211,7 +212,19 @@ export default function ChannelsPage() {
             ) : (
               channels.map((channel) => (
                 <TableRow key={channel.id}>
-                  <TableCell className="font-medium">{channel.name}</TableCell>
+                  <TableCell className="font-medium">
+                    {channel.code === 'cavu' ? (
+                      <Link
+                        href="/admin/channels/cavu"
+                        className="flex items-center gap-2 text-blue-600 hover:text-blue-800 hover:underline"
+                      >
+                        {channel.name}
+                        <Settings className="h-3 w-3" />
+                      </Link>
+                    ) : (
+                      channel.name
+                    )}
+                  </TableCell>
                   <TableCell>
                     <code className="text-xs bg-gray-100 px-2 py-1 rounded">
                       {channel.code}
@@ -235,6 +248,17 @@ export default function ChannelsPage() {
                   <TableCell>{channel.sort_order}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-2">
+                      {channel.code === 'cavu' && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          asChild
+                        >
+                          <Link href="/admin/channels/cavu">
+                            <Settings className="h-4 w-4" />
+                          </Link>
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="sm"

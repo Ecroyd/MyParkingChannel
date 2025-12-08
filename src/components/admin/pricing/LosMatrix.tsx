@@ -611,23 +611,39 @@ export default function LosMatrix({ seasonId, seasons }: LosMatrixProps) {
           <div className="space-y-4 py-4">
             <div>
               <Label>Select Season to Copy From</Label>
-              <Select
-                value={copySourceSeasonId}
-                onValueChange={setCopySourceSeasonId}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a season..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {seasons
-                    .filter((s) => s.id !== selectedSeasonId)
-                    .map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.name}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+              <div className="mt-2 max-h-60 overflow-y-auto border rounded-md">
+                {seasons.filter((s) => s.id !== selectedSeasonId).length === 0 ? (
+                  <div className="p-4 text-sm text-gray-500 text-center">
+                    No other seasons available to copy from
+                  </div>
+                ) : (
+                  <div className="divide-y">
+                    {seasons
+                      .filter((s) => s.id !== selectedSeasonId)
+                      .map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => {
+                            setCopySourceSeasonId(s.id);
+                          }}
+                          className={`w-full text-left px-4 py-3 text-sm hover:bg-gray-50 transition-colors ${
+                            copySourceSeasonId === s.id
+                              ? 'bg-blue-50 text-blue-900 font-medium'
+                              : 'text-gray-900'
+                          }`}
+                        >
+                          {s.name}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+              {copySourceSeasonId && (
+                <p className="text-xs text-blue-600 mt-2">
+                  Selected: {seasons.find((s) => s.id === copySourceSeasonId)?.name}
+                </p>
+              )}
               <p className="text-xs text-gray-500 mt-2">
                 This will copy all pricing data from the selected season to the current season.
               </p>

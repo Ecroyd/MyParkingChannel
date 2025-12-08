@@ -15,7 +15,7 @@ export const bookingSchema = z.object({
   money_charged: z.number().min(0).default(0),
   money_received: z.number().min(0).default(0),
   notes: z.string().optional(),
-  source: z.enum(['direct', 'parkvia', 'holidayextras', 'manual', 'other']).default('manual')
+  source: z.enum(['direct', 'parkvia', 'holidayextras', 'manual', 'other', 'cavu']).default('manual')
 })
 
 export const bookingUpdateSchema = bookingSchema.partial().omit({ reference: true })

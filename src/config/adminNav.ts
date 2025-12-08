@@ -43,6 +43,7 @@ export const ADMIN_NAV: NavNode[] = [
   { key: "site-seo", label: "Site & SEO", href: "/admin/site-seo", section: "Sites & Integrations", minRole: "admin" },
   { key: "channels", label: "Channels", href: "/admin/channels", section: "Sites & Integrations", minRole: "admin" },
   { key: "integrations-flights", label: "Flight Data", href: "/admin/integrations/flights", section: "Sites & Integrations", minRole: "admin" },
+  // { key: "integrations-aph", label: "APH SFTP", href: "/admin/integrations/aph", section: "Sites & Integrations", minRole: "admin" }, // Commented out - not in use yet, but can be re-enabled when needed
   { 
     key: "integrations", 
     label: "Integrations", 
