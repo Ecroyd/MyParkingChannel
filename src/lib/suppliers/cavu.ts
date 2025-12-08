@@ -89,3 +89,5 @@ export async function getBookingDetails(
   return cavuFetch<CavuBooking>(path, config);
 }
 
+
+

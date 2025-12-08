@@ -70,14 +70,17 @@ export async function runAphExportForChannel(channelId: string): Promise<void> {
   // Decrypt credentials
   let credentials: AphSftpCredentials;
   try {
-    credentials = decryptTenantSecret<AphSftpCredentials>(secret.value_ciphertext);
+    const decrypted = decryptTenantSecret<AphSftpCredentials>(secret.value_ciphertext);
     
     // Handle legacy format (remote_path) and new format (remotePath)
-    if ('remote_path' in credentials && !('remotePath' in credentials)) {
+    if ('remote_path' in decrypted && !('remotePath' in decrypted)) {
+      const credsAny = decrypted as any;
       credentials = {
-        ...credentials,
-        remotePath: (credentials as any).remote_path || '/',
-      };
+        ...credsAny,
+        remotePath: credsAny.remote_path || '/',
+      } as AphSftpCredentials;
+    } else {
+      credentials = decrypted;
     }
     
     if (!credentials.remotePath) {
