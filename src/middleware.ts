@@ -23,8 +23,6 @@ const IGNORE_PREFIXES = [
   '/assets',
   '/widget',
   '/embed'
-  '/widget',
-  '/embed'
 ];
 
 export const config = {
