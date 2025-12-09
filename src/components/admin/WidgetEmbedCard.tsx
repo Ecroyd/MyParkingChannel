@@ -5,14 +5,15 @@ import { useMemo, useState } from "react";
 export default function WidgetEmbedCard({ slug, baseDomain }: { slug: string; baseDomain?: string }) {
   const base = baseDomain || (typeof window !== "undefined" ? window.location.origin : "");
   const snippet = useMemo(() => {
-    const d = base.replace(/\/$/, "");
-    return [
-      "<!-- Parking Channel Booking Widget -->",
-      `<script async src="${d}/embed/booking?slug=${slug}&base=${d}"></script>`,
-      `<div class="parking-channel-widget" data-slug="${slug}" data-min-height="460" data-base="${d}"></div>`,
-      "<!-- End Parking Channel -->",
-    ].join("\n");
-  }, [slug, base]);
+    return `<!-- Parking Channel Booking Widget -->
+<iframe
+  src="https://myparkingchannel.app/widget/${slug}"
+  style="width: 100%; min-height: 700px; border: 0;"
+  loading="lazy"
+  referrerpolicy="strict-origin-when-cross-origin">
+</iframe>
+<!-- End Parking Channel -->`;
+  }, [slug]);
 
   const [copied, setCopied] = useState(false);
   async function copy() {
@@ -31,7 +32,7 @@ export default function WidgetEmbedCard({ slug, baseDomain }: { slug: string; ba
           onClick={copy} 
           className="text-xs sm:text-sm rounded-xl px-3 py-1.5 border border-slate-300 hover:bg-slate-50 transition-colors shrink-0"
         >
-          {copied ? "Copied ✓" : "Copy code"}
+          {copied ? "Copied ?" : "Copy code"}
         </button>
       </div>
       <pre className="text-xs bg-slate-50 rounded-xl p-3 overflow-x-auto whitespace-pre-wrap break-all">{snippet}</pre>
@@ -52,3 +53,6 @@ export default function WidgetEmbedCard({ slug, baseDomain }: { slug: string; ba
     </div>
   );
 }
+
+
+
