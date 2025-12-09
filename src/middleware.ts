@@ -20,7 +20,11 @@ const IGNORE_PREFIXES = [
   '/sitemap.xml',
   '/images',
   '/static',
-  '/assets'
+  '/assets',
+  '/widget',
+  '/embed'
+  '/widget',
+  '/embed'
 ];
 
 export const config = {

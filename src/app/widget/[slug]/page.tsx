@@ -1,27 +1,30 @@
-import { notFound } from "next/navigation";
+// src/app/widget/[slug]/page.tsx
+import TenantBookingShell from "@/app/sites/[slug]/TenantBookingShell";
 import { getTenantContext } from "@/lib/site";
-import BookingWidget from "@/components/booking/BookingWidget";
+import { notFound } from "next/navigation";
 
-interface WidgetPageProps {
+type Props = {
   params: Promise<{ slug: string }>;
-}
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
 
-export default async function WidgetPage({ params }: WidgetPageProps) {
+export const dynamic = "force-dynamic";
+
+export default async function TenantWidgetPage({ params, searchParams }: Props) {
   const resolvedParams = await params;
-  const { slug } = resolvedParams;
+  const resolvedSearchParams = await searchParams;
+  const embedded = resolvedSearchParams.embedded === "1" || resolvedSearchParams.embedded === "true";
 
-  const ctx = await getTenantContext(slug);
+  // Check if tenant exists and is published before rendering
+  const ctx = await getTenantContext(resolvedParams.slug);
   if (!ctx) {
     notFound();
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
+    <div className="bg-slate-50 min-h-screen p-4">
       <div className="max-w-md mx-auto">
-        <BookingWidget 
-          tenantSlug={slug} 
-          tenantId={ctx.tenant.id} 
-        />
+        <TenantBookingShell slug={resolvedParams.slug} embedded={embedded || true} />
       </div>
     </div>
   );
