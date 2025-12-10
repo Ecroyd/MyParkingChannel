@@ -55,6 +55,7 @@ export async function middleware(req: NextRequest) {
     url.pathname.startsWith("/api") ||
     url.pathname === "/sw.js" ||
     url.pathname.startsWith("/workbox-") ||
+    url.pathname.startsWith("/fallback-") ||
     url.pathname === "/manifest.webmanifest"
   ) {
     console.log("[TENANT_RESOLVE] Skipping rewrite for:", url.pathname);
