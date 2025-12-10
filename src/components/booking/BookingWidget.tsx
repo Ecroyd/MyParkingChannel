@@ -468,11 +468,6 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
                     £{calculatedPrice.toFixed(2)}
                   </span>
                 </div>
-                {pricing && (
-                  <p className="text-xs text-blue-700 mt-1">
-                    £{pricing.dailyRate.toFixed(2)} per day
-                  </p>
-                )}
               </div>
             )}
           </div>
