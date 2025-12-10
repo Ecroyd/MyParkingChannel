@@ -54,7 +54,7 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
 
   useEffect(() => {
     calculatePrice();
-  }, [startDate, endDate, pricing]);
+  }, [startDate, endDate, tenantId]);
 
   // Show quote when price is calculated
   useEffect(() => {
@@ -147,8 +147,8 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
     }
   };
 
-  const calculatePrice = () => {
-    if (!startDate || !endDate || !pricing) {
+  const calculatePrice = async () => {
+    if (!startDate || !endDate) {
       setCalculatedPrice(null);
       return;
     }
@@ -161,10 +161,50 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
       return;
     }
 
-    const diffTime = Math.abs(end.getTime() - start.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
-    setCalculatedPrice(diffDays * pricing.dailyRate);
+    try {
+      // Use the proper pricing calculation API that respects pricing rules, tiers, and matrix
+      const response = await fetch("/api/pricing/public-quote", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          tenantId,
+          startAt: start.toISOString(),
+          endAt: end.toISOString(),
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.data) {
+          setCalculatedPrice(result.data.amount);
+          // Update pricing info for display
+          if (result.data.currency) {
+            setPricing({
+              dailyRate: pricing?.dailyRate || 7.0, // Keep for display, actual price comes from quote
+              currency: result.data.currency,
+            });
+          }
+          return;
+        }
+      }
+      
+      // Fallback to simple calculation if quote API fails
+      if (pricing) {
+        const diffTime = Math.abs(end.getTime() - start.getTime());
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        setCalculatedPrice(diffDays * pricing.dailyRate);
+      }
+    } catch (error) {
+      console.error("Error calculating quote:", error);
+      // Fallback to simple calculation
+      if (pricing) {
+        const diffTime = Math.abs(end.getTime() - start.getTime());
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        setCalculatedPrice(diffDays * pricing.dailyRate);
+      }
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
