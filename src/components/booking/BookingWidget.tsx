@@ -29,6 +29,7 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
   const [vehicleReg, setVehicleReg] = useState("");
   const [flightNumber, setFlightNumber] = useState("");
   const [loading, setLoading] = useState(false);
+  const [calculatingPrice, setCalculatingPrice] = useState(false);
   const [pricing, setPricing] = useState<PricingInfo | null>(null);
   const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
   const [showCustomerDetails, setShowCustomerDetails] = useState(false);
@@ -151,6 +152,7 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
   const calculatePrice = async () => {
     if (!startDate || !endDate) {
       setCalculatedPrice(null);
+      setCalculatingPrice(false);
       return;
     }
 
@@ -159,9 +161,11 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
     
     if (start >= end) {
       setCalculatedPrice(null);
+      setCalculatingPrice(false);
       return;
     }
 
+    setCalculatingPrice(true);
     try {
       // Use the proper pricing calculation API that respects pricing rules, tiers, and matrix
       const response = await fetch("/api/pricing/public-quote", {
@@ -188,6 +192,7 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
               currency: result.data.currency,
             });
           }
+          setCalculatingPrice(false);
           return;
         } else {
           console.error("[BookingWidget] Quote API returned unsuccessful result:", result);
@@ -199,11 +204,13 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
       
       // Don't fallback to simple calculation - show error instead
       setCalculatedPrice(null);
+      setCalculatingPrice(false);
       setErrors({ general: "Unable to calculate price. Please try again." });
     } catch (error) {
       console.error("[BookingWidget] Error calculating quote:", error);
       // Don't fallback to simple calculation - show error instead
       setCalculatedPrice(null);
+      setCalculatingPrice(false);
       setErrors({ general: "Unable to calculate price. Please try again." });
     }
   };
@@ -461,7 +468,15 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
                 : 'opacity-0 max-h-0 mt-0 -translate-y-2'
             }`}
           >
-            {calculatedPrice && calculatedPrice > 0 && (
+            {calculatingPrice && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-blue-900">Calculating price...</span>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                </div>
+              </div>
+            )}
+            {!calculatingPrice && calculatedPrice && calculatedPrice > 0 && (
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-blue-900">Total Price:</span>
