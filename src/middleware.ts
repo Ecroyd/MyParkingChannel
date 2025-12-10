@@ -1,111 +1,99 @@
-import { NextResponse, NextRequest } from 'next/server';
+// src/middleware.ts
 
-const PRIMARY_DOMAIN = process.env.PRIMARY_DOMAIN || 'myparkingchannel.app';
-const DEFAULT_TENANT_SLUG = process.env.DEFAULT_TENANT_SLUG || 'main';
-const SITES_PREFIX = '/sites';
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
-// Paths the middleware must ignore (no rewrites)
-const PUBLIC_FILE = /\.(.*)$/;
-const IGNORE_PREFIXES = [
-  '/api',
-  '/_next',
-  '/admin',
-  '/login',
-  '/signup',
-  '/accept-invite',
-  '/~offline',
-  '/favicon.ico',
-  '/robots.txt',
-  '/manifest.webmanifest',
-  '/sitemap.xml',
-  '/images',
-  '/static',
-  '/assets',
-  '/widget',
-  '/embed'
+const PLATFORM_HOSTS = [
+  "myparkingchannel.app",
+  "www.myparkingchannel.app",
+  "localhost",
+  "localhost:3000",
+  "localhost:3002",
+  "127.0.0.1",
+  "127.0.0.1:3000",
+  "127.0.0.1:3002",
 ];
+
+// IMPORTANT: service key is OK here because middleware runs on the server.
+// Do NOT expose it to the client.
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    auth: { persistSession: false },
+  }
+);
+
+function normalizeHost(rawHost: string | null): string {
+  if (!rawHost) return "";
+  const hostOnly = rawHost.split(":")[0]?.toLowerCase() ?? "";
+  return hostOnly.startsWith("www.") ? hostOnly.slice(4) : hostOnly;
+}
+
+function isPlatformHost(rawHost: string | null, normalizedHost: string): boolean {
+  if (!rawHost && !normalizedHost) return true;
+  // Check both raw and normalized against platform hosts
+  return PLATFORM_HOSTS.includes(rawHost ?? "") || 
+         PLATFORM_HOSTS.some(ph => normalizeHost(ph) === normalizedHost);
+}
 
 export const config = {
   matcher: [
-    // run on everything except the files above (we also check again in code)
-    '/((?!_next|.*\\..*|api).*)',
+    // match everything except static files & public assets
+    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
   ],
 };
 
-function isIgnoredPath(pathname: string) {
-  if (PUBLIC_FILE.test(pathname)) return true;
-  return IGNORE_PREFIXES.some(p => pathname.startsWith(p));
-}
+export async function middleware(req: NextRequest) {
+  const url = req.nextUrl.clone();
+  const rawHost = req.headers.get("host");
+  const normalizedHost = normalizeHost(rawHost);
 
-function getHost(req: NextRequest) {
-  const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || '';
-  // strip :port if any
-  return host.split(':')[0].toLowerCase();
-}
+  // If it's one of the platform hosts, just let the normal routing handle it
+  if (!normalizedHost || isPlatformHost(rawHost, normalizedHost)) {
+    return NextResponse.next();
+  }
 
-function getSubdomainFromPrimary(host: string) {
-  // e.g. foo.myparkingchannel.app -> foo
-  if (!host.endsWith(PRIMARY_DOMAIN)) return null;
-  const withoutDomain = host.slice(0, -(PRIMARY_DOMAIN.length + 1)); // remove ".myparkingchannel.app"
-  if (!withoutDomain) return null; // apex
-  return withoutDomain;
-}
+  try {
+    // 1) Find the tenant_domain for this host
+    const { data: domainRow, error: domainError } = await supabase
+      .from("tenant_domains")
+      .select("tenant_id, tenants!inner(slug)")
+      .eq("domain", normalizedHost)
+      .maybeSingle();
 
-export default function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl;
-
-  // 1) Do not touch ignored paths
-  if (isIgnoredPath(pathname)) return NextResponse.next();
-
-  // 2) Do not process if we've already been rewritten to /sites/[slug]
-  if (pathname.startsWith(`${SITES_PREFIX}/`)) return NextResponse.next();
-
-  // 3) Allow root path to be handled by the page.tsx to check for tenant
-  // This allows the root page to show the landing page if no tenant is configured
-  if (pathname === '/') return NextResponse.next();
-
-  const host = getHost(req);
-
-  /**
-   * RESOLUTION STRATEGY
-   * - Preview hosts (vercel.app): always fallback to DEFAULT_TENANT_SLUG
-   * - Primary domain subdomains: use subdomain as tenant slug
-   * - Apex PRIMARY_DOMAIN: fallback to DEFAULT_TENANT_SLUG
-   * - Custom domains (mapped via Vercel): if you don't have a fast edge lookup, fall back to DEFAULT_TENANT_SLUG
-   *   (or call an internal API to resolve, but keep this simple to stop the loop now)
-   */
-
-  let tenantSlug: string | null = null;
-
-  const isVercelPreview = host.endsWith('.vercel.app');
-  if (isVercelPreview) {
-    tenantSlug = DEFAULT_TENANT_SLUG;
-  } else {
-    const sub = getSubdomainFromPrimary(host);
-    if (sub) {
-      // e.g. tenant1.myparkingchannel.app
-      tenantSlug = sub;
-    } else if (host === PRIMARY_DOMAIN || host === `www.${PRIMARY_DOMAIN}`) {
-      // apex → default tenant (or marketing site if you use one)
-      tenantSlug = DEFAULT_TENANT_SLUG;
-    } else {
-      // likely a custom domain; if you have a fast lookup, call it here.
-      // For now: safe fallback to default to avoid "should not happen" + loops.
-      tenantSlug = DEFAULT_TENANT_SLUG;
+    if (domainError) {
+      console.error("[TENANT_RESOLVE] domainError", domainError);
     }
+
+    const slug =
+      (domainRow as any)?.tenants?.slug ??
+      (domainRow as any)?.slug ??
+      null;
+
+    console.log("[TENANT_RESOLVE]", {
+      rawHost,
+      normalizedHost,
+      slug,
+    });
+
+    if (!slug) {
+      // Unknown domain → DO NOT fall back to platform site, show a specific page
+      url.pathname = "/site-not-available";
+      return NextResponse.rewrite(url);
+    }
+
+    // 2) Rewrite to the tenant site, preserving the rest of the path
+    // Example:
+    //   /           → /sites/flyparksexeter
+    //   /booking    → /sites/flyparksexeter/booking
+    const originalPath = url.pathname === "/" ? "" : url.pathname;
+    url.pathname = `/sites/${slug}${originalPath}`;
+    return NextResponse.rewrite(url);
+  } catch (err) {
+    console.error("[TENANT_RESOLVE] Unexpected error", err);
+    // Fail safe: show site-not-available instead of wrong brand
+    url.pathname = "/site-not-available";
+    return NextResponse.rewrite(url);
   }
-
-  if (!tenantSlug) {
-    // This should never happen now that we assign DEFAULT_TENANT_SLUG above.
-    console.error('❌ [SITE] Unresolved tenant; using hard fallback');
-    tenantSlug = DEFAULT_TENANT_SLUG;
-  }
-
-  // 3) Build rewrite target, preserving pathname/query
-  // If you want per-tenant roots to land on their index: /sites/[slug] + original pathname (commonly '/')
-  const rewriteUrl = req.nextUrl.clone();
-  rewriteUrl.pathname = `${SITES_PREFIX}/${tenantSlug}${pathname}`;
-
-  // IMPORTANT: rewrite, do NOT redirect (avoids 307 loops)
-  return NextResponse.rewrite(rewriteUrl);
 }
