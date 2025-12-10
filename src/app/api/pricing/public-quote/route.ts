@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { calculateAvailability } from "@/lib/availability/engine";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 /**
  * Public quote API - single source of truth for pricing calculation
  * Uses calculateAvailability which includes:

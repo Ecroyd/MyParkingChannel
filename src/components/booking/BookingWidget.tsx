@@ -178,6 +178,7 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
       if (response.ok) {
         const result = await response.json();
         if (result.success && result.data) {
+          console.log("[BookingWidget] Quote calculated:", result.data);
           setCalculatedPrice(result.data.amount);
           // Update pricing info for display
           if (result.data.currency) {
@@ -187,23 +188,22 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
             });
           }
           return;
+        } else {
+          console.error("[BookingWidget] Quote API returned unsuccessful result:", result);
         }
+      } else {
+        const errorText = await response.text();
+        console.error(`[BookingWidget] Quote API error (${response.status}):`, errorText);
       }
       
-      // Fallback to simple calculation if quote API fails
-      if (pricing) {
-        const diffTime = Math.abs(end.getTime() - start.getTime());
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        setCalculatedPrice(diffDays * pricing.dailyRate);
-      }
+      // Don't fallback to simple calculation - show error instead
+      setCalculatedPrice(null);
+      setErrors({ general: "Unable to calculate price. Please try again." });
     } catch (error) {
-      console.error("Error calculating quote:", error);
-      // Fallback to simple calculation
-      if (pricing) {
-        const diffTime = Math.abs(end.getTime() - start.getTime());
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        setCalculatedPrice(diffDays * pricing.dailyRate);
-      }
+      console.error("[BookingWidget] Error calculating quote:", error);
+      // Don't fallback to simple calculation - show error instead
+      setCalculatedPrice(null);
+      setErrors({ general: "Unable to calculate price. Please try again." });
     }
   };
 
