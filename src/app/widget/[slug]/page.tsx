@@ -18,13 +18,14 @@ export default async function TenantWidgetPage({ params, searchParams }: Props) 
   // Check if tenant exists and is published before rendering
   const ctx = await getTenantContext(resolvedParams.slug);
   if (!ctx) {
+    console.error(`[WIDGET] Tenant not found or not published: ${resolvedParams.slug}`);
     notFound();
   }
 
   return (
     <div className="bg-slate-50 min-h-screen p-4">
       <div className="max-w-md mx-auto">
-        <TenantBookingShell slug={resolvedParams.slug} embedded={embedded || true} />
+        <TenantBookingShell slug={resolvedParams.slug} embedded={embedded} />
       </div>
     </div>
   );
