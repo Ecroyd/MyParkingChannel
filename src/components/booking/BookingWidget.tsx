@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Calendar, Clock, Car, MapPin, CreditCard } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { redirectToCheckout } from "@/lib/utils/redirect";
 
 interface BookingWidgetProps {
   tenantSlug: string;
@@ -356,9 +357,9 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
         return;
       }
 
-      // Redirect to Stripe checkout
+      // Redirect to Stripe checkout (top-level if in iframe)
       if (paymentResult.url) {
-        window.location.href = paymentResult.url;
+        redirectToCheckout(paymentResult.url);
       } else {
         toast({
           title: "Payment Error",

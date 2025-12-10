@@ -10,7 +10,8 @@ export default function WidgetEmbedCard({ slug, baseDomain }: { slug: string; ba
   src="https://myparkingchannel.app/widget/${slug}?embedded=1"
   style="width: 100%; min-height: 700px; border: 0;"
   loading="lazy"
-  referrerpolicy="strict-origin-when-cross-origin">
+  referrerpolicy="strict-origin-when-cross-origin"
+  allow="payment *; fullscreen *">
 </iframe>
 <!-- End Parking Channel -->`;
   }, [slug]);

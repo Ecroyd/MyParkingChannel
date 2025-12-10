@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { toMoney } from '@/lib/money';
+import { redirectToCheckout } from '@/lib/utils/redirect';
 
 type Booking = {
   id: string;
@@ -419,7 +420,7 @@ function PaymentForm({
       }
 
       if (json.url) {
-        window.location.href = json.url;
+        redirectToCheckout(json.url);
       } else {
         throw new Error('No payment URL returned');
       }
