@@ -121,23 +121,7 @@ export async function getMatrixPriceForStay(params: {
   // 1) Find season for the first date
   const seasonId = await findSeasonForDate(supabase, tenantId, firstDate);
 
-  // 2) Get product rate plan (for metadata only)
-  let ratePlanId: string | null = null;
-  let ratePlanName = 'standard';
-
-  const { data: ratePlan } = await supabase
-    .from('product_rate_plans')
-    .select('id, name')
-    .eq('product_id', productId)
-    .limit(1)
-    .maybeSingle();
-
-  if (ratePlan) {
-    ratePlanId = ratePlan.id as string;
-    ratePlanName = ratePlan.name || 'standard';
-  }
-
-  // 3) Query pricing_rules matching this LOS + season + rate plan
+  // 2) Query pricing_rules matching this LOS + season
   let q = supabase
     .from('pricing_rules')
     .select(
@@ -235,11 +219,11 @@ export async function getMatrixPriceForStay(params: {
   return {
     totalPrice,
     pricePerDay,
-    ratePlanName,
+    ratePlanName: 'standard', // Not using product_rate_plans
     source: {
       table: 'pricing_rules',
-      ratePlanId: selectedRule.rate_plan_id,
-      ratePlanName,
+      ratePlanId: null, // Not using product_rate_plans
+      ratePlanName: 'standard',
       totalPrice,
       pricePerDay,
       seasonId: selectedRule.season_id,
