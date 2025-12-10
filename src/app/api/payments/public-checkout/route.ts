@@ -2,7 +2,6 @@
 import { NextResponse } from 'next/server';
 import { stripe, useConnected, ROOT_URL } from '@/lib/stripe';
 import { getServerSupabase, getTenantStripeAccountId } from '@/lib/supabase-server';
-import { getQuoteCents } from '@/lib/pricing';
 import { siteUrlForTenantSlug } from '@/lib/sites/domain';
 
 /**
@@ -89,10 +88,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Tenant not found' }, { status: 400 });
     }
 
-    // Get quote for the booking
-    const q = await getQuoteCents(tenant_id, start_at, end_at);
-    const amount_cents = q.amount_cents;
-    const currency = q.currency;
+    // Get quote for the booking using calculateAvailability (single source of truth)
+    const { calculateAvailability } = await import('@/lib/availability/engine');
+    const availability = await calculateAvailability({
+      tenantId: tenant_id,
+      startAt: start_at,
+      endAt: end_at,
+      currency: 'GBP',
+      channel: 'direct',
+    });
+    const amount_cents = Math.round(availability.pricing.total_price * 100);
+    const currency = availability.currency.toUpperCase();
 
     if (amount_cents <= 0) return NextResponse.json({ error: 'Invalid amount' }, { status: 400 });
 
