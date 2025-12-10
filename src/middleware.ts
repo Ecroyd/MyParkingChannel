@@ -49,6 +49,17 @@ export async function middleware(req: NextRequest) {
   const rawHost = req.headers.get("host");
   const normalizedHost = normalizeHost(rawHost);
 
+  // 🔴 Do NOT rewrite API routes, PWA assets, or manifest
+  // These should always go to root paths, not tenant-specific paths
+  if (
+    url.pathname.startsWith("/api") ||
+    url.pathname === "/sw.js" ||
+    url.pathname === "/manifest.webmanifest"
+  ) {
+    console.log("[TENANT_RESOLVE] Skipping rewrite for:", url.pathname);
+    return NextResponse.next();
+  }
+
   // If it's one of the platform hosts, just let the normal routing handle it
   if (!normalizedHost || isPlatformHost(rawHost, normalizedHost)) {
     return NextResponse.next();
