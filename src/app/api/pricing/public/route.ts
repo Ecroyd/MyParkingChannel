@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { calculateAvailability } from "@/lib/availability/engine";
+import { calculateStayDays } from "@/lib/pricing/stayLength";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -38,7 +39,8 @@ export async function GET(req: NextRequest) {
       });
 
       // Return in the format expected by the widget
-      const days = Math.ceil((new Date(end_at).getTime() - new Date(start_at).getTime()) / (1000 * 60 * 60 * 24));
+      // Use centralized stay length calculation
+      const days = calculateStayDays(new Date(start_at), new Date(end_at));
       const dailyRate = days > 0 ? availability.pricing.total_price / days : availability.pricing.base_price;
 
       return NextResponse.json({

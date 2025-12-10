@@ -1,6 +1,7 @@
 // lib/pricing.ts
 import { getServerSupabase } from '@/lib/supabase-server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { calculateStayDays } from './pricing/stayLength';
 
 export async function getQuoteCents(tenantId: string, startAt: string, endAt: string): Promise<{ amount_cents: number, currency: string }> {
   // TODO: replace with your actual pricing logic:
@@ -33,8 +34,8 @@ export async function getQuoteCents(tenantId: string, startAt: string, endAt: st
     console.log(`[getQuoteCents] Tenant: ${tenantId}, Minutes: ${minutes}, Rate: £${minuteRate}/min, Total: £${amount_cents/100}`);
   } else {
     // Per-day billing (default)
-    const dayMs = 24 * 60 * 60 * 1000;
-    const days = Math.max(1, Math.ceil(diffMs / dayMs));
+    // Use centralized stay length calculation
+    const days = calculateStayDays(start, end);
     const dailyRate = tp?.daily_rate || 7.0; // £7 fallback rate
     amount_cents = Math.round(Number(dailyRate) * 100 * days);
     console.log(`[getQuoteCents] Tenant: ${tenantId}, Days: ${days}, Rate: £${dailyRate}/day, Total: £${amount_cents/100}`);

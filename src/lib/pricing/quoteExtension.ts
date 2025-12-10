@@ -1,5 +1,6 @@
 // src/lib/pricing/quoteExtension.ts
 import { createAdminClient } from '@/lib/supabase/server';
+import { calculateStayDays } from './stayLength';
 
 export async function quoteExtensionCents(opts: {
   tenantId: string;
@@ -15,7 +16,8 @@ export async function quoteExtensionCents(opts: {
     throw new Error("Invalid extension range");
   }
 
-  const days = Math.max(1, Math.ceil((+end - +start) / 86400000));
+  // Use centralized stay length calculation
+  const days = calculateStayDays(start, end);
 
   // 1) Try pricing_daily (per date) - if this table exists
   try {

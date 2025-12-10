@@ -5,6 +5,7 @@
 
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { calculateStayDays } from './stayLength';
 
 const DAY_MS = 1000 * 60 * 60 * 24;
 
@@ -115,7 +116,18 @@ export async function getMatrixPriceForStay(params: {
   const supabase = createAdminClient();
   const stayDates = generateStayDates(startAt, endAt);
   const firstDate = stayDates[0];
-  const days = stayDates.length;
+  
+  // Use centralized stay length calculation (time-based, not calendar-based)
+  const startAtDate = new Date(startAt);
+  const endAtDate = new Date(endAt);
+  const days = calculateStayDays(startAtDate, endAtDate);
+  
+  console.log("[PRICING] stay", {
+    startAt: startAtDate.toISOString(),
+    endAt: endAtDate.toISOString(),
+    days,
+  });
+  
   const effectiveChannelCode = channelCode || 'agent';
 
   // 1) Find season for the first date
@@ -191,6 +203,16 @@ export async function getMatrixPriceForStay(params: {
     // Fallback: first rule by priority
     selectedRule = candidateSet[0];
   }
+
+  console.log("[PRICING] matrix row selected", {
+    ruleId: selectedRule?.id,
+    minStay: selectedRule?.min_stay,
+    maxStay: selectedRule?.max_stay,
+    channel: selectedRule?.channel,
+    seasonId: selectedRule?.season_id,
+    tierId: selectedRule?.tier_id,
+    days,
+  });
 
   // 5) Load price tier for selected rule
   const { data: tier, error: tierError } = await supabase

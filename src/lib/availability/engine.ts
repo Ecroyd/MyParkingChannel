@@ -2,6 +2,7 @@
 
 import { createAdminClient } from '@/lib/supabase/admin';
 import { AvailabilityResponse } from '@/lib/supplier/types';
+import { calculateStayDays } from '@/lib/pricing/stayLength';
 
 export type AvailabilityChannel = 'direct' | 'partner';
 
@@ -139,7 +140,16 @@ export async function calculateAvailability(
     };
   }
 
-  const days = stayDates.length;
+  // Use centralized stay length calculation (time-based, not calendar-based)
+  const startAtDate = new Date(startAt);
+  const endAtDate = new Date(endAt);
+  const days = calculateStayDays(startAtDate, endAtDate);
+  
+  console.log("[PRICING] stay", {
+    startAt: startAtDate.toISOString(),
+    endAt: endAtDate.toISOString(),
+    days,
+  });
 
   // 1) Load tenant_capacity rows for these dates
   const { data: capRows, error: capError } = await supabase
