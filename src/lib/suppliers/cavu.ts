@@ -134,7 +134,13 @@ export async function getOperators(config: CavuConfig) {
   const url = new URL('operators', BASE_URL); // 👈 NO leading slash
   url.searchParams.set('key', config.operator_private_key);
 
-  const res = await fetch(url.toString(), {
+  const fullUrl = url.toString();
+  console.log('[CAVU] getOperators - Full URL:', fullUrl);
+  console.log('[CAVU] getOperators - BASE_URL:', BASE_URL);
+  console.log('[CAVU] getOperators - Subscription Key present:', !!config.subscription_key);
+  console.log('[CAVU] getOperators - Operator Private Key present:', !!config.operator_private_key);
+
+  const res = await fetch(fullUrl, {
     headers: {
       'Ocp-Apim-Subscription-Key': config.subscription_key,
       Accept: 'application/json',
@@ -142,11 +148,34 @@ export async function getOperators(config: CavuConfig) {
     cache: 'no-store',
   });
 
+  console.log('[CAVU] getOperators - Response status:', res.status);
+  console.log('[CAVU] getOperators - Response headers:', Object.fromEntries(res.headers.entries()));
+
   if (!res.ok) {
     const text = await res.text();
     console.error('[CAVU] /operators error', res.status, text);
+    console.error('[CAVU] /operators - Requested URL:', fullUrl);
     throw new Error(`CAVU /operators failed: ${res.status} ${text}`);
   }
 
-  return res.json() as Promise<any[]>;
+  const contentType = res.headers.get('content-type') || '';
+  console.log('[CAVU] getOperators - Content-Type:', contentType);
+
+  // Handle XML response if needed
+  if (contentType.includes('xml')) {
+    const text = await res.text();
+    console.log('[CAVU] getOperators - XML response received, length:', text.length);
+    // Try to parse as JSON anyway (sometimes XML APIs return JSON)
+    try {
+      return JSON.parse(text) as Promise<any[]>;
+    } catch {
+      // If it's actually XML, we'd need an XML parser
+      console.warn('[CAVU] getOperators - Received XML, cannot parse as JSON');
+      throw new Error('CAVU /operators returned XML instead of JSON');
+    }
+  }
+
+  const json = await res.json();
+  console.log('[CAVU] getOperators - Response data:', JSON.stringify(json).substring(0, 200));
+  return json as Promise<any[]>;
 }

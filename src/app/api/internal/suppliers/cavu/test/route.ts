@@ -22,11 +22,24 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    console.log('[CAVU TEST] Config loaded:', {
+      operator_id: config.operator_id,
+      has_private_key: !!config.operator_private_key,
+      has_subscription_key: !!config.subscription_key,
+    });
+
     // Today in YYYY-MM-DD (UTC is fine for a basic test)
     const today = new Date().toISOString().slice(0, 10);
+    console.log('[CAVU TEST] Testing for date:', today);
 
     // 1) Always call /operators – we KNOW this works
+    console.log('[CAVU TEST] Calling getOperators...');
     const operators = await getOperators(config);
+    console.log('[CAVU TEST] getOperators returned:', {
+      isArray: Array.isArray(operators),
+      length: Array.isArray(operators) ? operators.length : 'not an array',
+      firstItem: Array.isArray(operators) && operators.length > 0 ? operators[0] : null,
+    });
     const first = Array.isArray(operators) ? operators[0] : null;
 
     const operatorId =
