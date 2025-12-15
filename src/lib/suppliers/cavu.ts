@@ -74,7 +74,17 @@ export async function getRecentEvents(
 ): Promise<CavuEvent[]> {
   // becomes .../rest/operator/v1.svc/operator/7135/bookings/events/age/4?key=...
   const path = `operator/${config.operator_id}/bookings/events/age/${hours}`;
-  return cavuFetch<CavuEvent[]>(path, config);
+  
+  try {
+    const result = await cavuFetch<CavuEvent[]>(path, config);
+    return result;
+  } catch (err: any) {
+    // If it's a 404, the events endpoint doesn't exist for this operator
+    if (err.message?.includes('404')) {
+      throw new Error(`Events endpoint not available: The /bookings/events/age endpoint returned 404. This operator may not support event-based syncing. Try using arrivals/departures endpoints instead.`);
+    }
+    throw err;
+  }
 }
 
 export async function getBookingDetails(

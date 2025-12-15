@@ -30,7 +30,30 @@ export async function POST(req: NextRequest) {
 
     const supabase = createAdminClient();
 
-    const events = await getRecentEvents(config, hours);
+    let events: any[] = [];
+    try {
+      events = await getRecentEvents(config, hours);
+    } catch (err: any) {
+      console.error('[CAVU SYNC] Failed to get events:', err);
+      // Return a user-friendly error message
+      return NextResponse.json(
+        { 
+          error: err.message ?? 'Failed to fetch events from CAVU. The events endpoint may not be available for this operator.',
+          ok: false 
+        },
+        { status: 400 }
+      );
+    }
+
+    if (events.length === 0) {
+      return NextResponse.json({ 
+        ok: true, 
+        processed: 0, 
+        failed: 0,
+        events: 0,
+        message: 'No events found in the specified time period'
+      });
+    }
 
     let processed = 0;
     let failed = 0;
