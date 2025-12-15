@@ -1,7 +1,10 @@
 // src/lib/suppliers/cavu.ts
 import 'server-only';
 
-const BASE_URL = process.env.CAVU_BASE_URL || 'https://parkcloud.azure-api.net/rest/operator/v1.svc';
+const BASE_URL =
+  process.env.CAVU_BASE_URL ||
+  'https://parkcloud.azure-api.net/rest/operator/v1.svc/';
+//                👆 NOTE THE TRAILING SLASH
 
 export type CavuConfig = {
   operator_id: number;
@@ -29,6 +32,7 @@ export type CavuBooking = {
 };
 
 function buildUrl(path: string, config: CavuConfig) {
+  // IMPORTANT: path has NO leading slash (e.g. "operators", "operator/7135/...")
   const url = new URL(path, BASE_URL);
   url.searchParams.set('key', config.operator_private_key);
   return url.toString();
@@ -49,7 +53,7 @@ async function cavuFetch<T>(
     ...init,
     headers: {
       ...(init.headers || {}),
-      'Ocp-Apim-Subscription-Key': config.subscription_key, // 👈 per-tenant
+      'Ocp-Apim-Subscription-Key': config.subscription_key,
       Accept: 'application/json',
     },
     cache: 'no-store',
@@ -68,7 +72,8 @@ export async function getRecentEvents(
   config: CavuConfig,
   hours: number
 ): Promise<CavuEvent[]> {
-  const path = `/operator/${config.operator_id}/bookings/events/age/${hours}`;
+  // becomes .../rest/operator/v1.svc/operator/7135/bookings/events/age/4?key=...
+  const path = `operator/${config.operator_id}/bookings/events/age/${hours}`;
   return cavuFetch<CavuEvent[]>(path, config);
 }
 
@@ -76,7 +81,7 @@ export async function getBookingDetails(
   config: CavuConfig,
   reference: string
 ): Promise<CavuBooking | null> {
-  const path = `/operator/${config.operator_id}/booking/${encodeURIComponent(
+  const path = `operator/${config.operator_id}/booking/${encodeURIComponent(
     reference
   )}`;
   return cavuFetch<CavuBooking>(path, config);
@@ -86,7 +91,7 @@ export async function getArrivalsForDate(
   config: CavuConfig,
   date: string // YYYY-MM-DD
 ) {
-  const path = `/operator/${config.operator_id}/bookings/arrivals/${date}`;
+  const path = `operator/${config.operator_id}/bookings/arrivals/${date}`;
   return cavuFetch<any[]>(path, config);
 }
 
@@ -94,7 +99,7 @@ export async function getDeparturesForDate(
   config: CavuConfig,
   date: string // YYYY-MM-DD
 ) {
-  const path = `/operator/${config.operator_id}/bookings/departures/${date}`;
+  const path = `operator/${config.operator_id}/bookings/departures/${date}`;
   return cavuFetch<any[]>(path, config);
 }
 
@@ -102,12 +107,12 @@ export async function getEventsByDate(
   config: CavuConfig,
   date: string // YYYY-MM-DD
 ): Promise<CavuEvent[]> {
-  const path = `/operator/${config.operator_id}/bookings/events/date/${date}`;
+  const path = `operator/${config.operator_id}/bookings/events/date/${date}`;
   return cavuFetch<CavuEvent[]>(path, config);
 }
 
 export async function getOperatorDetails(config: CavuConfig) {
-  const path = `/operator/${config.operator_id}`;
+  const path = `operator/${config.operator_id}`;
   return cavuFetch<any>(path, config);
 }
 
@@ -115,7 +120,7 @@ export async function registerNoShow(
   config: CavuConfig,
   reference: string
 ) {
-  const path = `/operator/${config.operator_id}/booking/${encodeURIComponent(
+  const path = `operator/${config.operator_id}/booking/${encodeURIComponent(
     reference
   )}/NoShow`;
 
@@ -124,8 +129,9 @@ export async function registerNoShow(
   });
 }
 
+// /rest/operator/v1.svc/operators?key=...
 export async function getOperators(config: CavuConfig) {
-  const url = new URL('/operators', BASE_URL);
+  const url = new URL('operators', BASE_URL); // 👈 NO leading slash
   url.searchParams.set('key', config.operator_private_key);
 
   const res = await fetch(url.toString(), {
