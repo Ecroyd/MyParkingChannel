@@ -1,7 +1,7 @@
 // src/app/api/admin/cavu/sync/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentTenantContext } from '@/lib/auth/current-tenant-context';
-import { syncCavuArrivalsForTenant } from '@/lib/suppliers/cavuSync';
+import { syncCavuEventsForTenant } from '@/lib/suppliers/cavuEventsSync';
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,8 +23,8 @@ export async function POST(req: NextRequest) {
 
     // Use tenantId from context (secure) or allow override from body for testing
     const tenantId = body?.tenantId || ctx.tenantId;
-    const daysPast = typeof body?.daysPast === 'number' ? body.daysPast : 7;
-    const daysFuture = typeof body?.daysFuture === 'number' ? body.daysFuture : 365;
+    const hours =
+      typeof body?.hours === 'number' && body.hours > 0 ? body.hours : 2;
 
     if (!tenantId) {
       return NextResponse.json(
@@ -41,17 +41,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await syncCavuArrivalsForTenant(tenantId, {
-      daysPast,
-      daysFuture,
-    });
+    const result = await syncCavuEventsForTenant(tenantId, { hours });
 
     return NextResponse.json({
       ok: true,
       ...result,
     });
   } catch (err: any) {
-    console.error('[CAVU ADMIN SYNC] error', err);
+    console.error('[CAVU ADMIN EVENTS SYNC] error', err);
     return NextResponse.json(
       { ok: false, error: err.message ?? 'Unknown error' },
       { status: 500 }

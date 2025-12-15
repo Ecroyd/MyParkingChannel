@@ -24,11 +24,10 @@ type SyncResult =
   | {
       ok: true;
       tenantId: string;
-      daysPast: number;
-      daysFuture: number;
-      datesProcessed: string[];
-      totalArrivalsSeen: number;
+      hours: number;
+      eventsSeen: number;
       bookingsUpserted: number;
+      bookingsCancelled: number;
       errors: string[];
     }
   | {
@@ -88,8 +87,7 @@ export function TestCavuConnection({ tenantId }: Props) {
         },
         body: JSON.stringify({
           tenantId,
-          daysPast: 1,   // Pull yesterday
-          daysFuture: 60, // Pull next 60 days
+          hours: 2, // Last 2 hours of events
         }),
       });
 
@@ -98,14 +96,15 @@ export function TestCavuConnection({ tenantId }: Props) {
 
       if (data.ok) {
         const errorCount = data.errors.length;
+        const cancelledText = data.bookingsCancelled > 0 ? `, ${data.bookingsCancelled} cancelled` : '';
         if (errorCount > 0) {
           toast.success(
-            `Sync completed: ${data.totalArrivalsSeen} arrivals seen, ${data.bookingsUpserted} bookings upserted, ${errorCount} error${errorCount !== 1 ? 's' : ''}`,
+            `Sync completed: ${data.eventsSeen} events processed, ${data.bookingsUpserted} bookings upserted${cancelledText}, ${errorCount} error${errorCount !== 1 ? 's' : ''}`,
             { duration: 6000 }
           );
         } else {
           toast.success(
-            `Sync completed: ${data.totalArrivalsSeen} arrivals seen, ${data.bookingsUpserted} bookings upserted`
+            `Sync completed: ${data.eventsSeen} events processed, ${data.bookingsUpserted} bookings upserted${cancelledText}`
           );
         }
       } else {
@@ -171,7 +170,7 @@ export function TestCavuConnection({ tenantId }: Props) {
           <div>
             <h2 className="text-sm font-medium">Sync now from CAVU</h2>
             <p className="text-xs text-muted-foreground">
-              Import bookings from CAVU arrivals (last 7 days, next 365 days).
+              Import recent bookings from CAVU events (last 2 hours).
             </p>
           </div>
           <button
@@ -195,11 +194,12 @@ export function TestCavuConnection({ tenantId }: Props) {
             </p>
             <p className="mt-1">
               <span className="font-semibold text-green-700">{syncResult.bookingsUpserted}</span> bookings upserted
-              {' '}from <span className="font-semibold">{syncResult.totalArrivalsSeen}</span> arrivals seen
-            </p>
-            <p className="mt-1 text-xs opacity-75">
-              Processed {syncResult.datesProcessed.length} date{syncResult.datesProcessed.length !== 1 ? 's' : ''} 
-              {' '}({syncResult.daysPast} day{syncResult.daysPast !== 1 ? 's' : ''} past, {syncResult.daysFuture} day{syncResult.daysFuture !== 1 ? 's' : ''} future)
+              {syncResult.bookingsCancelled > 0 && (
+                <>
+                  , <span className="font-semibold text-orange-700">{syncResult.bookingsCancelled}</span> cancelled
+                </>
+              )}
+              {' '}from <span className="font-semibold">{syncResult.eventsSeen}</span> event{syncResult.eventsSeen !== 1 ? 's' : ''} (last {syncResult.hours} hour{syncResult.hours !== 1 ? 's' : ''})
             </p>
             {syncResult.errors.length > 0 && (
               <div className="mt-2">
