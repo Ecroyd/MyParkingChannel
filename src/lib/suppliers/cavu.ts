@@ -135,47 +135,64 @@ export async function getOperators(config: CavuConfig) {
   url.searchParams.set('key', config.operator_private_key);
 
   const fullUrl = url.toString();
-  console.log('[CAVU] getOperators - Full URL:', fullUrl);
-  console.log('[CAVU] getOperators - BASE_URL:', BASE_URL);
-  console.log('[CAVU] getOperators - Subscription Key present:', !!config.subscription_key);
-  console.log('[CAVU] getOperators - Operator Private Key present:', !!config.operator_private_key);
+  
+  // Enhanced logging
+  console.error('[CAVU] ===== getOperators DEBUG START =====');
+  console.error('[CAVU] BASE_URL:', BASE_URL);
+  console.error('[CAVU] Full URL:', fullUrl);
+  console.error('[CAVU] Has subscription_key:', !!config.subscription_key);
+  console.error('[CAVU] Has operator_private_key:', !!config.operator_private_key);
+  console.error('[CAVU] Operator ID:', config.operator_id);
+
+  const headers = {
+    'Ocp-Apim-Subscription-Key': config.subscription_key,
+    Accept: 'application/json',
+  };
+  console.error('[CAVU] Request headers:', JSON.stringify(headers, null, 2));
 
   const res = await fetch(fullUrl, {
-    headers: {
-      'Ocp-Apim-Subscription-Key': config.subscription_key,
-      Accept: 'application/json',
-    },
+    headers,
     cache: 'no-store',
   });
 
-  console.log('[CAVU] getOperators - Response status:', res.status);
-  console.log('[CAVU] getOperators - Response headers:', Object.fromEntries(res.headers.entries()));
+  console.error('[CAVU] Response status:', res.status);
+  console.error('[CAVU] Response statusText:', res.statusText);
+  const responseHeaders: Record<string, string> = {};
+  res.headers.forEach((value, key) => {
+    responseHeaders[key] = value;
+  });
+  console.error('[CAVU] Response headers:', JSON.stringify(responseHeaders, null, 2));
 
   if (!res.ok) {
     const text = await res.text();
-    console.error('[CAVU] /operators error', res.status, text);
-    console.error('[CAVU] /operators - Requested URL:', fullUrl);
+    console.error('[CAVU] /operators error response body:', text);
+    console.error('[CAVU] ===== getOperators DEBUG END =====');
     throw new Error(`CAVU /operators failed: ${res.status} ${text}`);
   }
 
   const contentType = res.headers.get('content-type') || '';
-  console.log('[CAVU] getOperators - Content-Type:', contentType);
+  console.error('[CAVU] Content-Type:', contentType);
 
   // Handle XML response if needed
   if (contentType.includes('xml')) {
     const text = await res.text();
-    console.log('[CAVU] getOperators - XML response received, length:', text.length);
+    console.error('[CAVU] XML response received, length:', text.length);
+    console.error('[CAVU] XML preview:', text.substring(0, 500));
     // Try to parse as JSON anyway (sometimes XML APIs return JSON)
     try {
-      return JSON.parse(text) as Promise<any[]>;
+      const parsed = JSON.parse(text);
+      console.error('[CAVU] Successfully parsed XML as JSON');
+      console.error('[CAVU] ===== getOperators DEBUG END =====');
+      return parsed as Promise<any[]>;
     } catch {
-      // If it's actually XML, we'd need an XML parser
-      console.warn('[CAVU] getOperators - Received XML, cannot parse as JSON');
+      console.error('[CAVU] Failed to parse XML as JSON');
+      console.error('[CAVU] ===== getOperators DEBUG END =====');
       throw new Error('CAVU /operators returned XML instead of JSON');
     }
   }
 
   const json = await res.json();
-  console.log('[CAVU] getOperators - Response data:', JSON.stringify(json).substring(0, 200));
+  console.error('[CAVU] JSON response preview:', JSON.stringify(json).substring(0, 500));
+  console.error('[CAVU] ===== getOperators DEBUG END =====');
   return json as Promise<any[]>;
 }

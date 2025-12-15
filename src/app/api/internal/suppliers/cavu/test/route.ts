@@ -32,19 +32,31 @@ export async function GET(req: NextRequest) {
     const today = new Date().toISOString().slice(0, 10);
     console.log('[CAVU TEST] Testing for date:', today);
 
-    // 1) Always call /operators – we KNOW this works
-    console.log('[CAVU TEST] Calling getOperators...');
-    const operators = await getOperators(config);
-    console.log('[CAVU TEST] getOperators returned:', {
-      isArray: Array.isArray(operators),
-      length: Array.isArray(operators) ? operators.length : 'not an array',
-      firstItem: Array.isArray(operators) && operators.length > 0 ? operators[0] : null,
-    });
-    const first = Array.isArray(operators) ? operators[0] : null;
-
-    const operatorId =
-      first?.Id ?? first?.OperatorID ?? config.operator_id;
-    const operatorName = first?.Name ?? first?.OperatorName ?? 'Unknown operator';
+    // 1) Try /operators, but fallback to config if it fails
+    let operatorId = config.operator_id;
+    let operatorName = 'Unknown operator';
+    
+    try {
+      console.error('[CAVU TEST] Attempting to call getOperators...');
+      const operators = await getOperators(config);
+      console.error('[CAVU TEST] getOperators succeeded:', {
+        isArray: Array.isArray(operators),
+        length: Array.isArray(operators) ? operators.length : 'not an array',
+      });
+      
+      const first = Array.isArray(operators) ? operators[0] : null;
+      if (first) {
+        operatorId = first?.Id ?? first?.OperatorID ?? config.operator_id;
+        operatorName = first?.Name ?? first?.OperatorName ?? 'Unknown operator';
+        console.error('[CAVU TEST] Extracted from operators:', { operatorId, operatorName });
+      }
+    } catch (err: any) {
+      console.error('[CAVU TEST] getOperators failed (non-fatal):', err?.message ?? err);
+      // Fallback: use operator_id from config and try to get name from operator details
+      console.error('[CAVU TEST] Falling back to config operator_id:', config.operator_id);
+      operatorId = config.operator_id;
+      operatorName = `Operator ${config.operator_id}`;
+    }
 
     // 2) Try arrivals, but don't kill the test if it 404s
     let arrivalsCount: number | null = null;
