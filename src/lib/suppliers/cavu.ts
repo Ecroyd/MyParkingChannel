@@ -48,6 +48,11 @@ async function cavuFetch<T>(
   }
 
   const url = buildUrl(path, config);
+  console.log('[CAVU DEBUG] Fetching:', url);
+  console.log('[CAVU DEBUG] Headers:', {
+    'Ocp-Apim-Subscription-Key': config.subscription_key ? '***present***' : 'MISSING',
+    Accept: 'application/json',
+  });
 
   const res = await fetch(url, {
     ...init,
