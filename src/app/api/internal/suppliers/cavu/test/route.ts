@@ -32,30 +32,25 @@ export async function GET(req: NextRequest) {
     const today = new Date().toISOString().slice(0, 10);
     console.log('[CAVU TEST] Testing for date:', today);
 
-    // 1) Try /operators, but fallback to config if it fails
+    // 1) Try /operators, but fallback to config if it fails (404 is expected)
     let operatorId = config.operator_id;
-    let operatorName = 'Unknown operator';
+    let operatorName = `Operator ${config.operator_id}`;
     
     try {
-      console.error('[CAVU TEST] Attempting to call getOperators...');
       const operators = await getOperators(config);
-      console.error('[CAVU TEST] getOperators succeeded:', {
-        isArray: Array.isArray(operators),
-        length: Array.isArray(operators) ? operators.length : 'not an array',
-      });
-      
       const first = Array.isArray(operators) ? operators[0] : null;
       if (first) {
         operatorId = first?.Id ?? first?.OperatorID ?? config.operator_id;
-        operatorName = first?.Name ?? first?.OperatorName ?? 'Unknown operator';
-        console.error('[CAVU TEST] Extracted from operators:', { operatorId, operatorName });
+        operatorName = first?.Name ?? first?.OperatorName ?? operatorName;
       }
     } catch (err: any) {
-      console.error('[CAVU TEST] getOperators failed (non-fatal):', err?.message ?? err);
-      // Fallback: use operator_id from config and try to get name from operator details
-      console.error('[CAVU TEST] Falling back to config operator_id:', config.operator_id);
-      operatorId = config.operator_id;
-      operatorName = `Operator ${config.operator_id}`;
+      // 404 is expected - /operators endpoint may not exist for all operators
+      // Fallback to using operator_id from config (which we already have)
+      if (err.message?.includes('404')) {
+        // Silent fallback - this is expected behavior
+      } else {
+        console.warn('[CAVU TEST] getOperators failed:', err?.message ?? err);
+      }
     }
 
     // 2) Try arrivals, but don't kill the test if it 404s

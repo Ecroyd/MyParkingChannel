@@ -135,64 +135,36 @@ export async function getOperators(config: CavuConfig) {
   url.searchParams.set('key', config.operator_private_key);
 
   const fullUrl = url.toString();
-  
-  // Enhanced logging
-  console.error('[CAVU] ===== getOperators DEBUG START =====');
-  console.error('[CAVU] BASE_URL:', BASE_URL);
-  console.error('[CAVU] Full URL:', fullUrl);
-  console.error('[CAVU] Has subscription_key:', !!config.subscription_key);
-  console.error('[CAVU] Has operator_private_key:', !!config.operator_private_key);
-  console.error('[CAVU] Operator ID:', config.operator_id);
-
-  const headers = {
-    'Ocp-Apim-Subscription-Key': config.subscription_key,
-    Accept: 'application/json',
-  };
-  console.error('[CAVU] Request headers:', JSON.stringify(headers, null, 2));
 
   const res = await fetch(fullUrl, {
-    headers,
+    headers: {
+      'Ocp-Apim-Subscription-Key': config.subscription_key,
+      Accept: 'application/json',
+    },
     cache: 'no-store',
   });
 
-  console.error('[CAVU] Response status:', res.status);
-  console.error('[CAVU] Response statusText:', res.statusText);
-  const responseHeaders: Record<string, string> = {};
-  res.headers.forEach((value, key) => {
-    responseHeaders[key] = value;
-  });
-  console.error('[CAVU] Response headers:', JSON.stringify(responseHeaders, null, 2));
-
   if (!res.ok) {
     const text = await res.text();
-    console.error('[CAVU] /operators error response body:', text);
-    console.error('[CAVU] ===== getOperators DEBUG END =====');
+    // Only log if it's not a 404 (404 is expected and handled gracefully)
+    if (res.status !== 404) {
+      console.error('[CAVU] /operators error', res.status, text);
+    }
     throw new Error(`CAVU /operators failed: ${res.status} ${text}`);
   }
 
   const contentType = res.headers.get('content-type') || '';
-  console.error('[CAVU] Content-Type:', contentType);
 
   // Handle XML response if needed
   if (contentType.includes('xml')) {
     const text = await res.text();
-    console.error('[CAVU] XML response received, length:', text.length);
-    console.error('[CAVU] XML preview:', text.substring(0, 500));
     // Try to parse as JSON anyway (sometimes XML APIs return JSON)
     try {
-      const parsed = JSON.parse(text);
-      console.error('[CAVU] Successfully parsed XML as JSON');
-      console.error('[CAVU] ===== getOperators DEBUG END =====');
-      return parsed as Promise<any[]>;
+      return JSON.parse(text) as Promise<any[]>;
     } catch {
-      console.error('[CAVU] Failed to parse XML as JSON');
-      console.error('[CAVU] ===== getOperators DEBUG END =====');
       throw new Error('CAVU /operators returned XML instead of JSON');
     }
   }
 
-  const json = await res.json();
-  console.error('[CAVU] JSON response preview:', JSON.stringify(json).substring(0, 500));
-  console.error('[CAVU] ===== getOperators DEBUG END =====');
-  return json as Promise<any[]>;
+  return res.json() as Promise<any[]>;
 }
