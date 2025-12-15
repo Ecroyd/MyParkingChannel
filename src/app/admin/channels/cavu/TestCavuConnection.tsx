@@ -23,13 +23,16 @@ type TestResult =
 type SyncResult =
   | {
       ok: true;
-      processed: number;
-      failed: number;
-      events: number;
-      syncMethod?: string;
-      failedReferences?: string[];
+      tenantId: string;
+      daysPast: number;
+      daysFuture: number;
+      datesProcessed: string[];
+      totalArrivalsSeen: number;
+      bookingsUpserted: number;
+      errors: string[];
     }
   | {
+      ok: false;
       error: string;
     };
 
@@ -83,29 +86,34 @@ export function TestCavuConnection({ tenantId }: Props) {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ hours: 24 }),
+        body: JSON.stringify({
+          tenantId,
+          daysPast: 7,   // Pull last week
+          daysFuture: 365, // Pull up to a year into the future
+        }),
       });
 
       const data = (await res.json()) as SyncResult;
       setSyncResult(data);
 
-      if ('ok' in data && data.ok) {
-        const method = data.syncMethod === 'arrivals' ? 'arrivals' : 'events';
-        if (data.failed > 0) {
+      if (data.ok) {
+        const errorCount = data.errors.length;
+        if (errorCount > 0) {
           toast.success(
-            `Synced ${data.processed} bookings successfully, ${data.failed} failed (${data.events} total ${method})`,
-            { duration: 5000 }
+            `Sync completed: ${data.totalArrivalsSeen} arrivals seen, ${data.bookingsUpserted} bookings upserted, ${errorCount} error${errorCount !== 1 ? 's' : ''}`,
+            { duration: 6000 }
           );
         } else {
           toast.success(
-            `Successfully synced ${data.processed} booking${data.processed !== 1 ? 's' : ''} from ${data.events} ${method}${data.events !== 1 ? '' : ''}`
+            `Sync completed: ${data.totalArrivalsSeen} arrivals seen, ${data.bookingsUpserted} bookings upserted`
           );
         }
       } else {
-        toast.error(`Sync failed: ${'error' in data ? data.error : 'Unknown error'}`);
+        toast.error(`Sync failed: ${data.error}`);
       }
     } catch (err: any) {
       const errorResult: SyncResult = {
+        ok: false,
         error: err.message ?? 'Network error while syncing',
       };
       setSyncResult(errorResult);
@@ -163,7 +171,7 @@ export function TestCavuConnection({ tenantId }: Props) {
           <div>
             <h2 className="text-sm font-medium">Sync now from CAVU</h2>
             <p className="text-xs text-muted-foreground">
-              Import bookings from CAVU for the last 24 hours.
+              Import bookings from CAVU arrivals (last 7 days, next 365 days).
             </p>
           </div>
           <button
@@ -176,39 +184,40 @@ export function TestCavuConnection({ tenantId }: Props) {
           </button>
         </div>
 
-        {syncResult && 'ok' in syncResult && syncResult.ok && (
+        {syncResult && syncResult.ok && (
           <div className={`mt-3 rounded-md p-3 text-xs ${
-            syncResult.failed > 0 
+            syncResult.errors.length > 0 
               ? 'bg-amber-50 text-amber-900' 
               : 'bg-emerald-50 text-emerald-900'
           }`}>
             <p className="font-medium">
-              {syncResult.failed > 0 ? 'Sync completed with errors' : 'Sync completed'}
-              {syncResult.syncMethod && (
-                <span className="ml-2 text-xs opacity-75">
-                  (via {syncResult.syncMethod} method)
-                </span>
-              )}
+              {syncResult.errors.length > 0 ? 'Sync completed with errors' : 'Sync completed'}
             </p>
             <p className="mt-1">
-              <span className="font-semibold text-green-700">{syncResult.processed}</span> bookings synced successfully
-              {syncResult.failed > 0 && (
-                <>
-                  , <span className="font-semibold text-red-700">{syncResult.failed}</span> failed
-                </>
-              )}
-              {' '}from <span className="font-semibold">{syncResult.events}</span> {syncResult.syncMethod || 'event'}{syncResult.events !== 1 ? 's' : ''}
+              <span className="font-semibold text-green-700">{syncResult.bookingsUpserted}</span> bookings upserted
+              {' '}from <span className="font-semibold">{syncResult.totalArrivalsSeen}</span> arrivals seen
             </p>
-            {syncResult.failed > 0 && syncResult.failedReferences && syncResult.failedReferences.length > 0 && (
-              <p className="mt-2 text-xs opacity-75">
-                Failed references: {syncResult.failedReferences.join(', ')}
-                {syncResult.failed > syncResult.failedReferences.length && ` (+${syncResult.failed - syncResult.failedReferences.length} more)`}
-              </p>
+            <p className="mt-1 text-xs opacity-75">
+              Processed {syncResult.datesProcessed.length} date{syncResult.datesProcessed.length !== 1 ? 's' : ''} 
+              {' '}({syncResult.daysPast} day{syncResult.daysPast !== 1 ? 's' : ''} past, {syncResult.daysFuture} day{syncResult.daysFuture !== 1 ? 's' : ''} future)
+            </p>
+            {syncResult.errors.length > 0 && (
+              <div className="mt-2">
+                <p className="font-medium text-red-700">{syncResult.errors.length} error{syncResult.errors.length !== 1 ? 's' : ''}:</p>
+                <ul className="mt-1 space-y-1 max-h-32 overflow-y-auto">
+                  {syncResult.errors.slice(0, 5).map((error, idx) => (
+                    <li key={idx} className="text-xs opacity-90">• {error}</li>
+                  ))}
+                  {syncResult.errors.length > 5 && (
+                    <li className="text-xs opacity-75">... and {syncResult.errors.length - 5} more</li>
+                  )}
+                </ul>
+              </div>
             )}
           </div>
         )}
 
-        {syncResult && 'error' in syncResult && (
+        {syncResult && !syncResult.ok && (
           <div className="mt-3 rounded-md bg-red-50 p-3 text-xs text-red-900">
             <p className="font-medium">Sync failed</p>
             <p className="mt-1">{syncResult.error}</p>
