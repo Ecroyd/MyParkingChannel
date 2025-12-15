@@ -61,8 +61,22 @@ export async function syncCavuArrivalsForTenant(
     try {
       arrivals = await getArrivalsForDate(config, dateStr);
     } catch (err: any) {
-      console.warn('[CAVU SYNC] Arrivals fetch failed for date', dateStr, err?.message ?? err);
-      errors.push(`Arrivals fetch failed for ${dateStr}: ${err?.message ?? String(err)}`);
+      if (err?.code === 'CAVU_RATE_LIMIT') {
+        const msg = `Rate limited by CAVU after ${datesProcessed.length} dates: ${err.message}`;
+        console.warn('[CAVU SYNC]', msg);
+        errors.push(msg);
+        // Stop processing more dates – we hit their limit
+        break;
+      }
+
+      console.warn(
+        '[CAVU SYNC] Arrivals fetch failed for date',
+        dateStr,
+        err?.message ?? err
+      );
+      errors.push(
+        `Arrivals fetch failed for ${dateStr}: ${err?.message ?? String(err)}`
+      );
       continue;
     }
 

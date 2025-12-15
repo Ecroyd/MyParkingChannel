@@ -88,8 +88,8 @@ export function TestCavuConnection({ tenantId }: Props) {
         },
         body: JSON.stringify({
           tenantId,
-          daysPast: 7,   // Pull last week
-          daysFuture: 365, // Pull up to a year into the future
+          daysPast: 1,   // Pull yesterday
+          daysFuture: 60, // Pull next 60 days
         }),
       });
 

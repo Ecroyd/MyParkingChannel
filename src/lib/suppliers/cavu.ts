@@ -67,7 +67,11 @@ async function cavuFetch<T>(
   if (!res.ok) {
     const text = await res.text();
     console.error('[CAVU] Error response', res.status, text);
-    throw new Error(`CAVU request failed: ${res.status} ${text}`);
+    const err: any = new Error(`CAVU request failed: ${res.status} ${text}`);
+    if (res.status === 429) {
+      err.code = 'CAVU_RATE_LIMIT';
+    }
+    throw err;
   }
 
   return res.json() as Promise<T>;
