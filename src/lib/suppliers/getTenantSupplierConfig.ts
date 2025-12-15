@@ -22,15 +22,18 @@ export async function getCavuConfigForTenant(
     return null;
   }
 
-  const config = data?.config as Partial<CavuConfig> | null;
-  if (!config?.operator_id || !config.operator_private_key) {
-    console.warn('[CAVU] Incomplete config for tenant', tenantId);
+  const cfg = (data?.config as any) ?? {};
+
+  if (!cfg.operator_id || !cfg.operator_private_key || !cfg.subscription_key) {
+    console.warn('[CAVU] Incomplete config for tenant', tenantId, cfg);
     return null;
   }
 
-  return {
-    operator_id: Number(config.operator_id),
-    operator_private_key: String(config.operator_private_key),
+  const config: CavuConfig = {
+    operator_id: Number(cfg.operator_id),
+    operator_private_key: String(cfg.operator_private_key),
+    subscription_key: String(cfg.subscription_key),
   };
-}
 
+  return config;
+}
