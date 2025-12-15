@@ -13,7 +13,7 @@ type TestResult =
       operatorId: number | string;
       operatorName: string;
       date: string;
-      arrivalsCount: number;
+      arrivalsCount: number | null;
     }
   | {
       ok: false;
@@ -129,7 +129,11 @@ export function TestCavuConnection({ tenantId }: Props) {
           </p>
           <p className="mt-1">
             Arrivals for <span className="font-mono">{testResult.date}</span>:{' '}
-            <span className="font-semibold">{testResult.arrivalsCount}</span>
+            <span className="font-semibold">
+              {testResult.arrivalsCount === null || testResult.arrivalsCount === undefined
+                ? 'unknown (arrivals endpoint not supported)'
+                : testResult.arrivalsCount}
+            </span>
           </p>
         </div>
       )}

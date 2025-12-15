@@ -1,7 +1,7 @@
 // src/app/api/internal/suppliers/cavu/test/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { getCavuConfigForTenant } from '@/lib/suppliers/getTenantSupplierConfig';
-import { getArrivalsForDate, getOperatorDetails } from '@/lib/suppliers/cavu';
+import { getArrivalsForDate, getOperators } from '@/lib/suppliers/cavu';
 
 export async function GET(req: NextRequest) {
   const tenantId = req.nextUrl.searchParams.get('tenantId');
@@ -25,28 +25,31 @@ export async function GET(req: NextRequest) {
     // Today in YYYY-MM-DD (UTC is fine for a basic test)
     const today = new Date().toISOString().slice(0, 10);
 
-    const [operatorDetails, arrivals] = await Promise.all([
-      getOperatorDetails(config),
-      getArrivalsForDate(config, today),
-    ]);
+    // 1) Always call /operators – we KNOW this works
+    const operators = await getOperators(config);
+    const first = Array.isArray(operators) ? operators[0] : null;
 
-    // XML will likely be deserialised into a JS object by fetch → text → xml2js if they had; 
-    // but the CAVU API often returns JSON for us – we'll just safely access Id/Name
     const operatorId =
-      operatorDetails?.Id ??
-      operatorDetails?.OperatorID ??
-      config.operator_id;
-    const operatorName =
-      operatorDetails?.Name ??
-      operatorDetails?.OperatorName ??
-      'Unknown operator';
+      first?.Id ?? first?.OperatorID ?? config.operator_id;
+    const operatorName = first?.Name ?? first?.OperatorName ?? 'Unknown operator';
+
+    // 2) Try arrivals, but don't kill the test if it 404s
+    let arrivalsCount: number | null = null;
+
+    try {
+      const arrivals = await getArrivalsForDate(config, today);
+      arrivalsCount = Array.isArray(arrivals) ? arrivals.length : 0;
+    } catch (err: any) {
+      console.warn('[CAVU TEST] Arrivals check failed (non-fatal):', err?.message ?? err);
+      // leave arrivalsCount as null
+    }
 
     return NextResponse.json({
       ok: true,
       operatorId,
       operatorName,
       date: today,
-      arrivalsCount: Array.isArray(arrivals) ? arrivals.length : 0,
+      arrivalsCount,
     });
   } catch (err: any) {
     console.error('[CAVU TEST] error', err);
@@ -56,4 +59,3 @@ export async function GET(req: NextRequest) {
     );
   }
 }
-
