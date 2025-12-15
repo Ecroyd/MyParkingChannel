@@ -33,61 +33,83 @@ export async function POST(req: NextRequest) {
     const events = await getRecentEvents(config, hours);
 
     let processed = 0;
+    let failed = 0;
+    const failedReferences: string[] = [];
 
     for (const event of events) {
       const ref = event.Reference;
       if (!ref) continue;
 
-      if (event.EventType === 'NEW' || event.EventType === 'AMEND') {
-        const booking = await getBookingDetails(config, ref);
-        if (!booking) continue;
+      try {
+        if (event.EventType === 'NEW' || event.EventType === 'AMEND') {
+          const booking = await getBookingDetails(config, ref);
+          if (!booking) {
+            failed++;
+            failedReferences.push(ref);
+            continue;
+          }
 
-        // Map CAVU booking to your bookings schema
-        const { error } = await supabase.from('bookings').upsert(
-          {
-            tenant_id: ctx.tenantId,
-            reference: booking.Reference,
-            customer_name: booking.CustomerName ?? 'Unknown',
-            customer_email: booking.CustomerEmail ?? '',
-            plate: booking.VehicleReg ?? '',
-            car_make: booking.VehicleMake ?? null,
-            car_model: booking.VehicleModel ?? null,
-            car_color: booking.VehicleColour ?? null,
-            start_at: booking.ArrivalDate,
-            end_at: booking.DepartureDate,
-            status: 'reserved',
-            source: 'cavu',
-            money_received: 0,
-            money_charged: 0,
-          },
-          {
-            onConflict: 'tenant_id,reference',
-          } as any
-        );
+          // Map CAVU booking to your bookings schema
+          const { error } = await supabase.from('bookings').upsert(
+            {
+              tenant_id: ctx.tenantId,
+              reference: booking.Reference,
+              customer_name: booking.CustomerName ?? 'Unknown',
+              customer_email: booking.CustomerEmail ?? '',
+              plate: booking.VehicleReg ?? '',
+              car_make: booking.VehicleMake ?? null,
+              car_model: booking.VehicleModel ?? null,
+              car_color: booking.VehicleColour ?? null,
+              start_at: booking.ArrivalDate,
+              end_at: booking.DepartureDate,
+              status: 'reserved',
+              source: 'cavu',
+              money_received: 0,
+              money_charged: 0,
+            },
+            {
+              onConflict: 'tenant_id,reference',
+            } as any
+          );
 
-        if (error) {
-          console.error('[CAVU] Upsert booking error', error);
-        } else {
-          processed++;
+          if (error) {
+            console.error('[CAVU] Upsert booking error', error, 'Reference:', ref);
+            failed++;
+            failedReferences.push(ref);
+          } else {
+            processed++;
+          }
         }
-      }
 
-      if (event.EventType === 'CANCEL') {
-        const { error } = await supabase
-          .from('bookings')
-          .update({ status: 'cancelled' })
-          .eq('tenant_id', ctx.tenantId)
-          .eq('reference', ref);
+        if (event.EventType === 'CANCEL') {
+          const { error } = await supabase
+            .from('bookings')
+            .update({ status: 'cancelled' })
+            .eq('tenant_id', ctx.tenantId)
+            .eq('reference', ref);
 
-        if (error) {
-          console.error('[CAVU] Cancel update error', error);
-        } else {
-          processed++;
+          if (error) {
+            console.error('[CAVU] Cancel update error', error, 'Reference:', ref);
+            failed++;
+            failedReferences.push(ref);
+          } else {
+            processed++;
+          }
         }
+      } catch (err: any) {
+        console.error('[CAVU] Error processing event', err, 'Reference:', ref);
+        failed++;
+        failedReferences.push(ref);
       }
     }
 
-    return NextResponse.json({ ok: true, processed, events: events.length });
+    return NextResponse.json({ 
+      ok: true, 
+      processed, 
+      failed,
+      events: events.length,
+      failedReferences: failedReferences.slice(0, 10), // Limit to first 10 for response size
+    });
   } catch (err: any) {
     console.error('[CAVU] Sync error', err);
     return NextResponse.json(

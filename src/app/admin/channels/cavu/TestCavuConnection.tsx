@@ -24,7 +24,9 @@ type SyncResult =
   | {
       ok: true;
       processed: number;
+      failed: number;
       events: number;
+      failedReferences?: string[];
     }
   | {
       error: string;
@@ -87,7 +89,16 @@ export function TestCavuConnection({ tenantId }: Props) {
       setSyncResult(data);
 
       if ('ok' in data && data.ok) {
-        toast.success(`Imported ${data.processed} bookings from ${data.events} events`);
+        if (data.failed > 0) {
+          toast.success(
+            `Synced ${data.processed} bookings successfully, ${data.failed} failed (${data.events} total events)`,
+            { duration: 5000 }
+          );
+        } else {
+          toast.success(
+            `Successfully synced ${data.processed} booking${data.processed !== 1 ? 's' : ''} from ${data.events} event${data.events !== 1 ? 's' : ''}`
+          );
+        }
       } else {
         toast.error(`Sync failed: ${'error' in data ? data.error : 'Unknown error'}`);
       }
@@ -164,12 +175,29 @@ export function TestCavuConnection({ tenantId }: Props) {
         </div>
 
         {syncResult && 'ok' in syncResult && syncResult.ok && (
-          <div className="mt-3 rounded-md bg-emerald-50 p-3 text-xs text-emerald-900">
-            <p className="font-medium">Sync completed</p>
-            <p className="mt-1">
-              Processed <span className="font-semibold">{syncResult.processed}</span> bookings from{' '}
-              <span className="font-semibold">{syncResult.events}</span> events
+          <div className={`mt-3 rounded-md p-3 text-xs ${
+            syncResult.failed > 0 
+              ? 'bg-amber-50 text-amber-900' 
+              : 'bg-emerald-50 text-emerald-900'
+          }`}>
+            <p className="font-medium">
+              {syncResult.failed > 0 ? 'Sync completed with errors' : 'Sync completed'}
             </p>
+            <p className="mt-1">
+              <span className="font-semibold text-green-700">{syncResult.processed}</span> bookings synced successfully
+              {syncResult.failed > 0 && (
+                <>
+                  , <span className="font-semibold text-red-700">{syncResult.failed}</span> failed
+                </>
+              )}
+              {' '}from <span className="font-semibold">{syncResult.events}</span> event{syncResult.events !== 1 ? 's' : ''}
+            </p>
+            {syncResult.failed > 0 && syncResult.failedReferences && syncResult.failedReferences.length > 0 && (
+              <p className="mt-2 text-xs opacity-75">
+                Failed references: {syncResult.failedReferences.join(', ')}
+                {syncResult.failed > syncResult.failedReferences.length && ` (+${syncResult.failed - syncResult.failedReferences.length} more)`}
+              </p>
+            )}
           </div>
         )}
 
