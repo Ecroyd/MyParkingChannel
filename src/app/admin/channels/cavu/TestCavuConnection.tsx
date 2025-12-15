@@ -26,6 +26,7 @@ type SyncResult =
       processed: number;
       failed: number;
       events: number;
+      syncMethod?: string;
       failedReferences?: string[];
     }
   | {
@@ -89,14 +90,15 @@ export function TestCavuConnection({ tenantId }: Props) {
       setSyncResult(data);
 
       if ('ok' in data && data.ok) {
+        const method = data.syncMethod === 'arrivals' ? 'arrivals' : 'events';
         if (data.failed > 0) {
           toast.success(
-            `Synced ${data.processed} bookings successfully, ${data.failed} failed (${data.events} total events)`,
+            `Synced ${data.processed} bookings successfully, ${data.failed} failed (${data.events} total ${method})`,
             { duration: 5000 }
           );
         } else {
           toast.success(
-            `Successfully synced ${data.processed} booking${data.processed !== 1 ? 's' : ''} from ${data.events} event${data.events !== 1 ? 's' : ''}`
+            `Successfully synced ${data.processed} booking${data.processed !== 1 ? 's' : ''} from ${data.events} ${method}${data.events !== 1 ? '' : ''}`
           );
         }
       } else {
@@ -182,6 +184,11 @@ export function TestCavuConnection({ tenantId }: Props) {
           }`}>
             <p className="font-medium">
               {syncResult.failed > 0 ? 'Sync completed with errors' : 'Sync completed'}
+              {syncResult.syncMethod && (
+                <span className="ml-2 text-xs opacity-75">
+                  (via {syncResult.syncMethod} method)
+                </span>
+              )}
             </p>
             <p className="mt-1">
               <span className="font-semibold text-green-700">{syncResult.processed}</span> bookings synced successfully
@@ -190,7 +197,7 @@ export function TestCavuConnection({ tenantId }: Props) {
                   , <span className="font-semibold text-red-700">{syncResult.failed}</span> failed
                 </>
               )}
-              {' '}from <span className="font-semibold">{syncResult.events}</span> event{syncResult.events !== 1 ? 's' : ''}
+              {' '}from <span className="font-semibold">{syncResult.events}</span> {syncResult.syncMethod || 'event'}{syncResult.events !== 1 ? 's' : ''}
             </p>
             {syncResult.failed > 0 && syncResult.failedReferences && syncResult.failedReferences.length > 0 && (
               <p className="mt-2 text-xs opacity-75">
