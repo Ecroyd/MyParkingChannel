@@ -6,6 +6,7 @@ import { Eye, EyeOff, Copy, Check } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { Button } from '@/components/ui/button';
 import { upsertCavuConfig } from './actions';
+import { TestCavuConnection } from './TestCavuConnection';
 
 interface CavuSettingsClientProps {
   tenantId: string;
@@ -204,6 +205,8 @@ export default function CavuSettingsClient({
           </Button>
         </div>
       </form>
+
+      <TestCavuConnection tenantId={tenantId} />
     </div>
   );
 }
