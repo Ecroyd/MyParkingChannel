@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
     // Use tenantId from context (secure) or allow override from body for testing
     const tenantId = body?.tenantId || ctx.tenantId;
     const hours =
-      typeof body?.hours === 'number' && body.hours > 0 ? body.hours : 2;
+      typeof body?.hours === 'number' && body.hours > 0 ? body.hours : 12;
 
     if (!tenantId) {
       return NextResponse.json(

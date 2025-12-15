@@ -87,7 +87,7 @@ export function TestCavuConnection({ tenantId }: Props) {
         },
         body: JSON.stringify({
           tenantId,
-          hours: 2, // Last 2 hours of events
+          hours: 12, // Last 12 hours of events
         }),
       });
 
@@ -170,7 +170,7 @@ export function TestCavuConnection({ tenantId }: Props) {
           <div>
             <h2 className="text-sm font-medium">Sync now from CAVU</h2>
             <p className="text-xs text-muted-foreground">
-              Import recent bookings from CAVU events (last 2 hours).
+              Import bookings created/updated/cancelled in the last 12 hours.
             </p>
           </div>
           <button

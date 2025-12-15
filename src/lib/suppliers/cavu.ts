@@ -1,10 +1,11 @@
 // src/lib/suppliers/cavu.ts
 import 'server-only';
 
-const BASE_URL =
+const rawBase =
   process.env.CAVU_BASE_URL ||
   'https://parkcloud.azure-api.net/rest/operator/v1.svc/';
-//                👆 NOTE THE TRAILING SLASH
+
+export const BASE_URL = rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
 
 export type CavuConfig = {
   operator_id: number;
@@ -77,24 +78,16 @@ async function cavuFetch<T>(
   return res.json() as Promise<T>;
 }
 
-export async function getRecentEvents(
+export async function getEventsByAge(
   config: CavuConfig,
   hours: number
 ): Promise<CavuEvent[]> {
-  // becomes .../rest/operator/v1.svc/operator/7135/bookings/events/age/4?key=...
   const path = `operator/${config.operator_id}/bookings/events/age/${hours}`;
-  
-  try {
-    const result = await cavuFetch<CavuEvent[]>(path, config);
-    return result;
-  } catch (err: any) {
-    // If it's a 404, the events endpoint doesn't exist for this operator
-    if (err.message?.includes('404')) {
-      throw new Error(`Events endpoint not available: The /bookings/events/age endpoint returned 404. This operator may not support event-based syncing. Try using arrivals/departures endpoints instead.`);
-    }
-    throw err;
-  }
+  return cavuFetch<CavuEvent[]>(path, config);
 }
+
+// Alias for backward compatibility
+export const getRecentEvents = getEventsByAge;
 
 export async function getBookingDetails(
   config: CavuConfig,

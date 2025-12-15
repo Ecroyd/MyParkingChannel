@@ -3,7 +3,7 @@ import 'server-only';
 import { createAdminClient } from '@/lib/supabase/server';
 import { getCavuConfigForTenant } from './getTenantSupplierConfig';
 import {
-  getRecentEvents,
+  getEventsByAge,
   getBookingDetails,
   CavuBooking,
   CavuEvent,
@@ -42,21 +42,15 @@ export async function syncCavuEventsForTenant(
 
   let events: CavuEvent[] = [];
 
+  // 1) Fetch events for the last X hours (single API call)
   try {
-    events = await getRecentEvents(config, hours);
+    events = await getEventsByAge(config, hours);
   } catch (err: any) {
-    // If events endpoint returns 404, it's not available for this operator
-    if (err.message?.includes('404') || err.message?.includes('Events endpoint not available')) {
-      errors.push(
-        `Events endpoint not available for this operator. Try using arrivals-based sync instead.`
-      );
-    } else {
-      errors.push(
-        `GetEventsByAge failed for last ${hours} hours: ${
-          err?.message ?? String(err)
-        }`
-      );
-    }
+    errors.push(
+      `GetEventsByAge failed for last ${hours} hours: ${
+        err?.message ?? String(err)
+      }`
+    );
     return {
       tenantId,
       hours,
@@ -119,8 +113,8 @@ export async function syncCavuEventsForTenant(
       const msg = err?.message ?? String(err);
       errors.push(`GetBookingDetails failed for ${ref}: ${msg}`);
 
-      if (err?.code === 'CAVU_RATE_LIMIT' || msg.includes('429')) {
-        // Rate limit hit: stop processing further to avoid spamming
+      if (msg.includes('429')) {
+        // Rate limit hit: stop processing to avoid spamming
         break;
       }
 
@@ -143,8 +137,8 @@ export async function syncCavuEventsForTenant(
       car_make: booking.VehicleMake ?? null,
       car_model: booking.VehicleModel ?? null,
       car_color: booking.VehicleColour ?? null,
-      source: 'cavu', // make sure 'cavu' exists in booking_source enum
-      status: 'reserved', // you can refine this later if CAVU sends a status
+      source: 'cavu',   // make sure 'cavu' exists in booking_source enum
+      status: 'reserved', // we can refine mapping later if needed
       money_received: 0,
       money_charged: 0,
     };
