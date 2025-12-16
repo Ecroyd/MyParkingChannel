@@ -1,3 +1,4 @@
+// src/app/api/internal/suppliers/cavu/debug-booking/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { getCavuConfigForTenant } from '@/lib/suppliers/getTenantSupplierConfig';
 import { getBookingDetails } from '@/lib/suppliers/cavu';
@@ -10,7 +11,7 @@ export async function GET(req: NextRequest) {
   if (!tenantId || !reference) {
     return NextResponse.json(
       { ok: false, error: 'Missing tenantId or reference' },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -18,19 +19,19 @@ export async function GET(req: NextRequest) {
   if (!config) {
     return NextResponse.json(
       { ok: false, error: 'No CAVU config for tenant' },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   try {
     const booking = await getBookingDetails(config, reference);
+    // Just spit out exactly what CAVU sent us
     return NextResponse.json({ ok: true, reference, booking });
   } catch (err: any) {
     console.error('[CAVU DEBUG BOOKING] error', err);
     return NextResponse.json(
       { ok: false, error: err?.message ?? String(err) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
-
