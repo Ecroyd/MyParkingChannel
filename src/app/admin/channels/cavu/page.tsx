@@ -29,5 +29,9 @@ export default async function CavuSettingsPage() {
 
   const existingConfig = (data?.config as any) ?? {};
 
-  return <CavuSettingsClient tenantId={ctx.tenantId} existingConfig={existingConfig} />;
+  return (
+    <>
+      <CavuSettingsClient tenantId={ctx.tenantId} existingConfig={existingConfig} />
+    </>
+  );
 }

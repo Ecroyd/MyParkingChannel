@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Eye, EyeOff, Copy, Check } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { Button } from '@/components/ui/button';
@@ -210,6 +211,21 @@ export default function CavuSettingsClient({
       <TestCavuConnection tenantId={tenantId} />
 
       <CavuSyncStatus tenantId={tenantId} />
+
+      <div className="bg-white rounded-lg border p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Sync History</h2>
+          <Link
+            href="/admin/channels/cavu/sync-runs"
+            className="text-sm text-blue-600 hover:text-blue-700 underline"
+          >
+            View all sync runs →
+          </Link>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          View detailed history of all CAVU sync operations, including errors and performance metrics.
+        </p>
+      </div>
     </div>
   );
 }

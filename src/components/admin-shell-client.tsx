@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { Menu, X } from 'lucide-react';
 import { DynamicPricingBadge } from './admin/DynamicPricingBadge';
+import { CavuSyncHealthBanner } from './admin/CavuSyncHealthBanner';
 import Sidebar from '@/components/admin/Sidebar';
 import MobileSidebar from '@/components/admin/MobileSidebar';
 import InstallPWAButton from '@/components/InstallPWAButton';
@@ -139,8 +140,14 @@ export default function AdminShellClient({
         )}
 
         {/* Main Content */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-6">
-          {children}
+        <main className="flex-1 overflow-y-auto">
+          {/* CAVU Sync Health Banner */}
+          <div className="px-4 md:px-6 pt-4">
+            <CavuSyncHealthBanner />
+          </div>
+          <div className="p-4 md:p-6">
+            {children}
+          </div>
         </main>
       </div>
       
