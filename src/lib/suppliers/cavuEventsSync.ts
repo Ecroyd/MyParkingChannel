@@ -126,21 +126,44 @@ export async function syncCavuEventsForTenant(
       continue;
     }
 
+    // Map customer name from nested structure
+    const customerFirst = booking.Customer?.FirstName ?? '';
+    const customerLast = booking.Customer?.Surname ?? '';
+    const customerNameRaw = `${customerFirst} ${customerLast}`.trim();
+    const customerName = customerNameRaw || 'Unknown';
+
+    // Normalize plate: uppercase, remove spaces
+    const plateRaw = booking.Vehicle?.Registration ?? '';
+    const plateNorm = plateRaw.replace(/\s+/g, '').toUpperCase();
+    const plate = plateNorm || 'UNKNOWN';
+
+    // Map status from CAVU Status
+    function mapCavuStatus(status?: string): 'reserved' | 'checked_in' | 'checked_out' | 'cancelled' {
+      if (!status) return 'reserved';
+      const upper = status.toUpperCase();
+      if (upper.includes('CANCELLED') || upper.includes('CANCEL')) return 'cancelled';
+      if (upper.includes('CHECKED_OUT') || upper.includes('DEPARTED') || upper.includes('OUT')) return 'checked_out';
+      if (upper.includes('CHECKED_IN') || upper.includes('ARRIVED') || upper.includes('IN')) return 'checked_in';
+      if (upper.includes('CONFIRMED') || upper.includes('RESERVED')) return 'reserved';
+      return 'reserved'; // Default
+    }
+
     const row = {
       tenant_id: tenantId,
       reference: booking.Reference,
       start_at: booking.ArrivalDate,
       end_at: booking.DepartureDate,
-      customer_name: booking.CustomerName ?? 'Unknown',
-      customer_email: booking.CustomerEmail ?? '',
-      plate: booking.VehicleReg ?? '',
-      car_make: booking.VehicleMake ?? null,
-      car_model: booking.VehicleModel ?? null,
-      car_color: booking.VehicleColour ?? null,
-      source: 'cavu',   // make sure 'cavu' exists in booking_source enum
-      status: 'reserved', // we can refine mapping later if needed
+      customer_name: customerName,
+      customer_email: booking.Customer?.Email ?? null,
+      plate: plate,
+      car_make: booking.Vehicle?.Make ?? null,
+      car_model: booking.Vehicle?.Model ?? null,
+      car_color: booking.Vehicle?.Colour ?? null,
+      source: 'cavu',
+      status: mapCavuStatus(booking.Status),
       money_received: 0,
       money_charged: 0,
+      notes: booking.SpecialRequests ?? null,
     };
 
     const { error } = await supabase

@@ -28,7 +28,7 @@ async function runCavuCron() {
 
     try {
       const result = await syncCavuEventsForTenant(tenantId, {
-        hours: 72, // TEMP: last 3 days so we can see some events
+        hours: 2, // TEMP: last 3 days so we can see some events
       });
 
       logs.push({

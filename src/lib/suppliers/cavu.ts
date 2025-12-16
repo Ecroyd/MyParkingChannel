@@ -24,12 +24,21 @@ export type CavuBooking = {
   Reference: string;
   ArrivalDate: string;
   DepartureDate: string;
-  CustomerName?: string;
-  CustomerEmail?: string;
-  VehicleReg?: string;
-  VehicleMake?: string;
-  VehicleModel?: string;
-  VehicleColour?: string;
+  Status?: string;
+  Customer?: {
+    FirstName?: string;
+    Surname?: string;
+    Mobile?: string;
+    Email?: string;
+    Title?: string;
+  };
+  Vehicle?: {
+    Registration?: string;
+    Make?: string;
+    Model?: string;
+    Colour?: string;
+  };
+  SpecialRequests?: string;
 };
 
 function buildUrl(path: string, config: CavuConfig) {
