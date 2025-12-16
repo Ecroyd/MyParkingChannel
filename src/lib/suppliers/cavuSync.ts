@@ -116,21 +116,50 @@ export async function syncCavuArrivalsForTenant(
         continue;
       }
 
+      // Map customer name from nested structure
+      const customerFirst = booking.Customer?.FirstName ?? '';
+      const customerLast = booking.Customer?.Surname ?? '';
+      const customerNameRaw = `${customerFirst} ${customerLast}`.trim();
+      const customerName = customerNameRaw || 'Unknown';
+
+      // Normalize plate: uppercase, remove spaces
+      const plateRaw = booking.Vehicle?.Registration ?? '';
+      const plateNorm = plateRaw.replace(/\s+/g, '').toUpperCase();
+      const plate = plateNorm || 'UNKNOWN';
+
+      // Map status from CAVU Status
+      function mapCavuStatus(status?: string): 'reserved' | 'checked_in' | 'checked_out' | 'cancelled' {
+        if (!status) return 'reserved';
+        const upper = status.toUpperCase();
+        if (upper.includes('CANCELLED') || upper.includes('CANCEL')) return 'cancelled';
+        if (upper.includes('CHECKED_OUT') || upper.includes('DEPARTED') || upper.includes('OUT')) return 'checked_out';
+        if (upper.includes('CHECKED_IN') || upper.includes('ARRIVED') || upper.includes('IN')) return 'checked_in';
+        if (upper.includes('CONFIRMED') || upper.includes('RESERVED')) return 'reserved';
+        return 'reserved'; // Default
+      }
+
+      // Extract flight_date from ArrivalDate (YYYY-MM-DD format)
+      const flightDate = booking.ArrivalDate ? booking.ArrivalDate.slice(0, 10) : null;
+
       const row = {
         tenant_id: tenantId,
         reference: booking.Reference,
         start_at: booking.ArrivalDate,
         end_at: booking.DepartureDate,
-        customer_name: booking.CustomerName ?? 'Unknown',
-        customer_email: booking.CustomerEmail ?? '',
-        plate: booking.VehicleReg ?? '',
-        car_make: booking.VehicleMake ?? null,
-        car_model: booking.VehicleModel ?? null,
-        car_color: booking.VehicleColour ?? null,
-        source: 'cavu', // make sure this exists in booking_source enum
-        status: 'reserved', // or map from booking if they send a status later
-        money_received: 0,
-        money_charged: 0,
+        customer_name: customerName,
+        customer_email: booking.Customer?.Email ?? null,
+        customer_phone: booking.Customer?.Mobile ?? null,
+        plate: plate,
+        car_make: booking.Vehicle?.Make ?? null,
+        car_model: booking.Vehicle?.Model ?? null,
+        car_color: booking.Vehicle?.Colour ?? null,
+        flight_number: booking.OutboundFlight ?? null,
+        flight_date: flightDate,
+        source: 'cavu',
+        status: mapCavuStatus(booking.Status),
+        money_received: booking.AmountPaid ?? 0,
+        money_charged: booking.AmountPaid ?? 0,
+        notes: booking.SpecialRequests ?? null,
       };
 
       const { error } = await supabase
