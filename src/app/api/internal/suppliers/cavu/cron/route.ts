@@ -2,38 +2,36 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { syncCavuEventsForTenant } from '@/lib/suppliers/cavuEventsSync';
 
-// This endpoint is triggered by Vercel Cron
-export async function GET() {
+async function runCavuCron() {
   const supabase = createAdminClient();
 
-  // Fetch all tenants that have CAVU enabled
+  // Get all tenants that have a CAVU config
   const { data: configs, error } = await supabase
     .from('tenant_supplier_configs')
-    .select('tenant_id, supplier_code')
+    .select('tenant_id')
     .eq('supplier_code', 'cavu');
 
   if (error) {
     console.error('[CAVU CRON] Failed to load configs', error);
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: error.message },
+      { status: 500 }
+    );
   }
 
-  let totalBookings = 0;
+  const logs: any[] = [];
   let totalEvents = 0;
-  
-  const tenantLogs: any[] = [];
+  let totalBookings = 0;
 
   for (const config of configs ?? []) {
     const tenantId = config.tenant_id;
 
     try {
       const result = await syncCavuEventsForTenant(tenantId, {
-        hours: 2,   // last 2 hours of changes
+        hours: 2, // look back 2 hours for changes
       });
 
-      totalEvents += result.eventsSeen;
-      totalBookings += result.bookingsUpserted;
-
-      tenantLogs.push({
+      logs.push({
         tenantId,
         eventsSeen: result.eventsSeen,
         bookingsUpserted: result.bookingsUpserted,
@@ -41,20 +39,31 @@ export async function GET() {
         errors: result.errors,
       });
 
+      totalEvents += result.eventsSeen;
+      totalBookings += result.bookingsUpserted;
     } catch (err: any) {
-      tenantLogs.push({
+      console.error('[CAVU CRON] Error for tenant', tenantId, err);
+      logs.push({
         tenantId,
-        error: err.message ?? String(err),
+        error: err?.message ?? String(err),
       });
     }
   }
 
   return NextResponse.json({
     ok: true,
+    tenantsProcessed: configs?.length ?? 0,
     totalEvents,
     totalBookings,
-    tenantsProcessed: (configs ?? []).length,
-    tenantLogs,
+    logs,
   });
 }
 
+// Allow both GET and POST so it's easy to test + works with QStash
+export async function GET() {
+  return runCavuCron();
+}
+
+export async function POST() {
+  return runCavuCron();
+}
