@@ -7,6 +7,7 @@ import { toast } from 'react-hot-toast';
 import { Button } from '@/components/ui/button';
 import { upsertCavuConfig } from './actions';
 import { TestCavuConnection } from './TestCavuConnection';
+import { CavuSyncStatus } from './CavuSyncStatus';
 
 interface CavuSettingsClientProps {
   tenantId: string;
@@ -207,6 +208,8 @@ export default function CavuSettingsClient({
       </form>
 
       <TestCavuConnection tenantId={tenantId} />
+
+      <CavuSyncStatus tenantId={tenantId} />
     </div>
   );
 }

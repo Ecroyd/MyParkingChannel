@@ -30,6 +30,7 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
   const [sortOrder, setSortOrder] = useState<'closest' | 'most_recent'>('closest');
   const [showFinishedBookings, setShowFinishedBookings] = useState(false);
   const [showCancelledBookings, setShowCancelledBookings] = useState(false);
+  const [channelFilter, setChannelFilter] = useState<string>('all');
   const [selectedBookings, setSelectedBookings] = useState<Set<string>>(new Set());
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const [newBookingModalOpen, setNewBookingModalOpen] = useState(false);
@@ -108,6 +109,27 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
     return bookings.filter(booking => booking.status !== 'cancelled');
   };
 
+  const filterByChannel = (bookings: any[], channel: string) => {
+    if (channel === 'all') return bookings;
+    
+    return bookings.filter(booking => {
+      // Check both source enum and external_source field
+      const source = booking.source;
+      const externalSource = booking.external_source;
+      
+      // If channel matches the source enum directly
+      if (source === channel) return true;
+      
+      // If channel is 'cavu' and source is 'cavu', match
+      if (channel === 'cavu' && source === 'cavu') return true;
+      
+      // For other channels, check if external_source matches (case-insensitive)
+      if (externalSource && externalSource.toLowerCase() === channel.toLowerCase()) return true;
+      
+      return false;
+    });
+  };
+
   const sortBookings = (bookings: any[], sortOrder: 'closest' | 'most_recent') => {
     const sorted = [...bookings];
     sorted.sort((a, b) => {
@@ -125,6 +147,20 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
     return sorted;
   };
 
+  // Get unique channels from bookings
+  const getUniqueChannels = () => {
+    const channels = new Set<string>();
+    bookings.forEach(booking => {
+      if (booking.source) {
+        channels.add(booking.source);
+      }
+      if (booking.external_source) {
+        channels.add(booking.external_source);
+      }
+    });
+    return Array.from(channels).sort();
+  };
+
   // Filter and sort bookings when filters or sort order changes
   useEffect(() => {
     const dateRangeObj = getDateRange();
@@ -132,9 +168,10 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
     const searchFiltered = filterBookingsBySearch(dateFiltered, searchTerm);
     const finishedFiltered = filterFinishedBookings(searchFiltered, showFinishedBookings);
     const cancelledFiltered = filterCancelledBookings(finishedFiltered, showCancelledBookings);
-    const sorted = sortBookings(cancelledFiltered, sortOrder);
+    const channelFiltered = filterByChannel(cancelledFiltered, channelFilter);
+    const sorted = sortBookings(channelFiltered, sortOrder);
     setFilteredBookings(sorted);
-  }, [dateRange, customStartDate, customEndDate, searchTerm, sortOrder, showFinishedBookings, showCancelledBookings, bookings]);
+  }, [dateRange, customStartDate, customEndDate, searchTerm, sortOrder, showFinishedBookings, showCancelledBookings, channelFilter, bookings]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -334,6 +371,24 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
                 <SelectContent>
                   <SelectItem value="closest">Closest First</SelectItem>
                   <SelectItem value="most_recent">Most Recent</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Channel Filter */}
+            <div className="space-y-2">
+              <Label htmlFor="channel">Channel</Label>
+              <Select value={channelFilter} onValueChange={setChannelFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All Channels" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Channels</SelectItem>
+                  {getUniqueChannels().map(channel => (
+                    <SelectItem key={channel} value={channel}>
+                      {formatBookingSource(channel)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

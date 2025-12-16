@@ -141,6 +141,26 @@ export async function syncCavuArrivalsForTenant(
       // Extract flight_date from ArrivalDate (YYYY-MM-DD format)
       const flightDate = booking.ArrivalDate ? booking.ArrivalDate.slice(0, 10) : null;
 
+      // Compute missing fields
+      const missingFields: string[] = [];
+      if (!customerName || customerName === 'Unknown') {
+        missingFields.push('customer_name');
+      }
+      if (!plate || plate === 'UNKNOWN' || plate === '') {
+        missingFields.push('plate');
+      }
+      if (!booking.Customer?.Email || booking.Customer.Email.trim() === '') {
+        missingFields.push('customer_email');
+      }
+      if (!booking.ArrivalDate || booking.ArrivalDate.trim() === '') {
+        missingFields.push('start_at');
+      }
+      if (!booking.DepartureDate || booking.DepartureDate.trim() === '') {
+        missingFields.push('end_at');
+      }
+
+      const isIncomplete = missingFields.length > 0;
+
       const row = {
         tenant_id: tenantId,
         reference: booking.Reference,
@@ -160,6 +180,8 @@ export async function syncCavuArrivalsForTenant(
         money_received: booking.AmountPaid ?? 0,
         money_charged: booking.AmountPaid ?? 0,
         notes: booking.SpecialRequests ?? null,
+        is_incomplete: isIncomplete,
+        missing_fields: missingFields,
       };
 
       const { error } = await supabase

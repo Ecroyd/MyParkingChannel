@@ -63,6 +63,10 @@ async function runCavuCron(req?: NextRequest) {
   const hoursParam = Number(url?.searchParams.get('hours'));
   const hasExplicitHours = Number.isFinite(hoursParam) && hoursParam > 0;
 
+  // Detect trigger source
+  const triggerSource = req?.method === 'POST' ? 'qstash' : 'manual';
+  const requestId = req?.headers.get('x-request-id') || req?.headers.get('x-qstash-message-id') || null;
+
   // Get all tenants that have a CAVU config (including config JSON for last_synced_at)
   const { data: configs, error } = await supabase
     .from('tenant_supplier_configs')
@@ -106,6 +110,10 @@ async function runCavuCron(req?: NextRequest) {
         supplier_code: 'cavu',
         started_at: new Date().toISOString(),
         hours: hoursToFetch,
+        meta: {
+          trigger_source: triggerSource,
+          request_id: requestId,
+        },
       })
       .select()
       .single();
@@ -119,9 +127,119 @@ async function runCavuCron(req?: NextRequest) {
         hours: hoursToFetch,
       });
 
-      // Only update last_synced_at if sync was successful (no fatal errors)
-      // We consider it successful if we processed events, even if some had errors
-      if (result.eventsSeen >= 0) {
+      // Heal step: if no events seen, try to heal incomplete bookings
+      let healedCount = 0;
+      if (result.eventsSeen === 0) {
+        try {
+          // Fetch up to 25 incomplete CAVU bookings
+          const { data: incompleteBookings } = await supabase
+            .from('bookings')
+            .select('reference')
+            .eq('tenant_id', tenantId)
+            .eq('source', 'cavu')
+            .eq('is_incomplete', true)
+            .limit(25);
+
+          if (incompleteBookings && incompleteBookings.length > 0) {
+            // Import sync-booking logic directly to avoid HTTP calls
+            const { getCavuConfigForTenant } = await import('@/lib/suppliers/getTenantSupplierConfig');
+            const { getBookingDetails } = await import('@/lib/suppliers/cavu');
+            const healConfig = await getCavuConfigForTenant(tenantId);
+
+            if (healConfig) {
+              // Heal bookings sequentially (rate-limited)
+              for (const booking of incompleteBookings) {
+                try {
+                  const healBooking = await getBookingDetails(healConfig, booking.reference);
+                  if (healBooking) {
+                    // Map and upsert (same logic as sync-booking route)
+                    const customerFirst = healBooking.Customer?.FirstName ?? '';
+                    const customerLast = healBooking.Customer?.Surname ?? '';
+                    const customerNameRaw = `${customerFirst} ${customerLast}`.trim();
+                    const customerName = customerNameRaw || 'Unknown';
+                    const plateRaw = healBooking.Vehicle?.Registration ?? '';
+                    const plateNorm = plateRaw.replace(/\s+/g, '').toUpperCase();
+                    const plate = plateNorm || 'UNKNOWN';
+                    const flightDate = healBooking.ArrivalDate ? healBooking.ArrivalDate.slice(0, 10) : null;
+
+                    function mapCavuStatus(status?: string): 'reserved' | 'checked_in' | 'checked_out' | 'cancelled' {
+                      if (!status) return 'reserved';
+                      const upper = status.toUpperCase();
+                      if (upper.includes('CANCELLED') || upper.includes('CANCEL')) return 'cancelled';
+                      if (upper.includes('CHECKED_OUT') || upper.includes('DEPARTED') || upper.includes('OUT')) return 'checked_out';
+                      if (upper.includes('CHECKED_IN') || upper.includes('ARRIVED') || upper.includes('IN')) return 'checked_in';
+                      if (upper.includes('CONFIRMED') || upper.includes('RESERVED')) return 'reserved';
+                      return 'reserved';
+                    }
+
+                    // Compute missing fields for heal
+                    const healMissingFields: string[] = [];
+                    if (!customerName || customerName === 'Unknown') {
+                      healMissingFields.push('customer_name');
+                    }
+                    if (!plate || plate === 'UNKNOWN' || plate === '') {
+                      healMissingFields.push('plate');
+                    }
+                    if (!healBooking.Customer?.Email || healBooking.Customer.Email.trim() === '') {
+                      healMissingFields.push('customer_email');
+                    }
+                    if (!healBooking.ArrivalDate || healBooking.ArrivalDate.trim() === '') {
+                      healMissingFields.push('start_at');
+                    }
+                    if (!healBooking.DepartureDate || healBooking.DepartureDate.trim() === '') {
+                      healMissingFields.push('end_at');
+                    }
+
+                    const healIsIncomplete = healMissingFields.length > 0;
+
+                    const { error: healError } = await supabase
+                      .from('bookings')
+                      .upsert({
+                        tenant_id: tenantId,
+                        reference: healBooking.Reference,
+                        start_at: healBooking.ArrivalDate,
+                        end_at: healBooking.DepartureDate,
+                        customer_name: customerName,
+                        customer_email: healBooking.Customer?.Email ?? null,
+                        customer_phone: healBooking.Customer?.Mobile ?? null,
+                        plate: plate,
+                        car_make: healBooking.Vehicle?.Make ?? null,
+                        car_model: healBooking.Vehicle?.Model ?? null,
+                        car_color: healBooking.Vehicle?.Colour ?? null,
+                        flight_number: healBooking.OutboundFlight ?? null,
+                        flight_date: flightDate,
+                        source: 'cavu',
+                        status: mapCavuStatus(healBooking.Status),
+                        money_received: healBooking.AmountPaid ?? 0,
+                        money_charged: healBooking.AmountPaid ?? 0,
+                        notes: healBooking.SpecialRequests ?? null,
+                        is_incomplete: healIsIncomplete,
+                        missing_fields: healMissingFields,
+                      } as any, {
+                        onConflict: 'tenant_id,reference',
+                      } as any);
+
+                    if (!healError) {
+                      healedCount++;
+                    }
+                  }
+                  // Small delay to avoid rate limits
+                  await new Promise(resolve => setTimeout(resolve, 200));
+                } catch (healErr) {
+                  console.warn('[CAVU CRON] Heal failed for', booking.reference, healErr);
+                }
+              }
+            }
+          }
+        } catch (healErr) {
+          console.warn('[CAVU CRON] Heal step error', healErr);
+        }
+      }
+
+      // Update last_synced_at only after successful run (eventsSeen >= 0 means we tried)
+      // Consider it successful if we processed events OR healed some bookings
+      const wasSuccessful = result.eventsSeen > 0 || healedCount > 0 || result.errors.length === 0;
+      if (wasSuccessful) {
         await updateLastSyncedAt(tenantId, supabase);
       }
 
@@ -142,11 +260,13 @@ async function runCavuCron(req?: NextRequest) {
 
       logs.push({
         tenantId,
+        runId: run?.id || null,
         hours: hoursToFetch,
         lastSyncedAt: lastSyncedAt || null,
         eventsSeen: result.eventsSeen,
         bookingsUpserted: result.bookingsUpserted,
         bookingsCancelled: result.bookingsCancelled,
+        healedCount,
         errors: result.errors,
       });
 
@@ -172,6 +292,7 @@ async function runCavuCron(req?: NextRequest) {
 
       logs.push({
         tenantId,
+        runId: run?.id || null,
         hours: hoursToFetch,
         lastSyncedAt: lastSyncedAt || null,
         error: err?.message ?? String(err),
