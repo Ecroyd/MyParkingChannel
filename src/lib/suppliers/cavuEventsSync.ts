@@ -193,6 +193,9 @@ export async function syncCavuEventsForTenant(
       return 'reserved'; // Default
     }
 
+    // Extract flight_date from ArrivalDate (YYYY-MM-DD format)
+    const flightDate = booking.ArrivalDate ? booking.ArrivalDate.slice(0, 10) : null;
+
     const row = {
       tenant_id: tenantId,
       reference: booking.Reference,
@@ -200,14 +203,17 @@ export async function syncCavuEventsForTenant(
       end_at: booking.DepartureDate,
       customer_name: customerName,
       customer_email: booking.Customer?.Email ?? null,
+      customer_phone: booking.Customer?.Mobile ?? null,
       plate: plate,
       car_make: booking.Vehicle?.Make ?? null,
       car_model: booking.Vehicle?.Model ?? null,
       car_color: booking.Vehicle?.Colour ?? null,
+      flight_number: booking.OutboundFlight ?? null,
+      flight_date: flightDate,
       source: 'cavu',
       status: mapCavuStatus(booking.Status),
-      money_received: 0,
-      money_charged: 0,
+      money_received: booking.AmountPaid ?? 0,
+      money_charged: booking.AmountPaid ?? 0,
       notes: booking.SpecialRequests ?? null,
     };
 

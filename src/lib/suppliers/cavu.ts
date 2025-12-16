@@ -25,6 +25,8 @@ export type CavuBooking = {
   ArrivalDate: string;
   DepartureDate: string;
   Status?: string;
+  OutboundFlight?: string;
+  AmountPaid?: number;
   Customer?: {
     FirstName?: string;
     Surname?: string;
