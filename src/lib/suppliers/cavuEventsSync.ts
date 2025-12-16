@@ -123,7 +123,7 @@ export async function syncCavuEventsForTenant(
 
     const ref = getCavuEventReference(ev);
     if (!ref) {
-      const eventId = ev.EventID ?? ev.eventId ?? ev.id ?? 'unknown';
+      const eventId = (ev as any).EventID ?? (ev as any).eventId ?? (ev as any).id ?? 'unknown';
       errors.push(`Event ${eventId} missing Reference (keys: ${Object.keys(ev).join(', ')})`);
       continue;
     }
