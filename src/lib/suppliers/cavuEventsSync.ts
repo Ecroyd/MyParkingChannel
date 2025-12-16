@@ -22,6 +22,44 @@ export type CavuEventsSyncResult = {
   errors: string[];
 };
 
+/**
+ * Robustly extract booking reference from a CAVU event.
+ * Checks multiple possible property names and nested structures.
+ */
+function getCavuEventReference(event: any): string | null {
+  // Try direct properties first
+  if (event.Reference && typeof event.Reference === 'string' && event.Reference.trim()) {
+    return event.Reference.trim();
+  }
+  if (event.BookingReference && typeof event.BookingReference === 'string' && event.BookingReference.trim()) {
+    return event.BookingReference.trim();
+  }
+  if (event.BookingRef && typeof event.BookingRef === 'string' && event.BookingRef.trim()) {
+    return event.BookingRef.trim();
+  }
+  if (event.ReferenceNumber && typeof event.ReferenceNumber === 'string' && event.ReferenceNumber.trim()) {
+    return event.ReferenceNumber.trim();
+  }
+  
+  // Try nested structures
+  if (event.Booking?.Reference && typeof event.Booking.Reference === 'string' && event.Booking.Reference.trim()) {
+    return event.Booking.Reference.trim();
+  }
+  if (event.booking?.reference && typeof event.booking.reference === 'string' && event.booking.reference.trim()) {
+    return event.booking.reference.trim();
+  }
+  
+  // Try lowercase variants
+  if (event.reference && typeof event.reference === 'string' && event.reference.trim()) {
+    return event.reference.trim();
+  }
+  if (event.bookingReference && typeof event.bookingReference === 'string' && event.bookingReference.trim()) {
+    return event.bookingReference.trim();
+  }
+  
+  return null;
+}
+
 export async function syncCavuEventsForTenant(
   tenantId: string,
   opts: CavuEventsSyncOptions = {}
@@ -77,9 +115,16 @@ export async function syncCavuEventsForTenant(
   const seenRefs = new Set<string>();
 
   for (const ev of events) {
-    const ref = ev.Reference;
+    // TEMP: Log first event structure for debugging
+    if (seenRefs.size === 0) {
+      console.log('[CAVU SYNC DEBUG] First event keys:', Object.keys(ev));
+      console.log('[CAVU SYNC DEBUG] First event full structure:', JSON.stringify(ev, null, 2));
+    }
+
+    const ref = getCavuEventReference(ev);
     if (!ref) {
-      errors.push(`Event ${ev.EventID} missing Reference`);
+      const eventId = ev.EventID ?? ev.eventId ?? ev.id ?? 'unknown';
+      errors.push(`Event ${eventId} missing Reference (keys: ${Object.keys(ev).join(', ')})`);
       continue;
     }
 
