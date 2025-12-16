@@ -11,6 +11,7 @@ export function CavuSyncHealthBanner() {
   const [status, setStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [isVisible, setIsVisible] = useState(true);
 
   const fetchStatus = async () => {
     try {
@@ -18,6 +19,8 @@ export function CavuSyncHealthBanner() {
       const data = await res.json();
       if (data.ok) {
         setStatus(data);
+        // Reset visibility when status changes
+        setIsVisible(true);
       }
     } catch (err) {
       console.error('[CAVU SYNC HEALTH] Failed to fetch', err);
@@ -33,8 +36,45 @@ export function CavuSyncHealthBanner() {
     return () => clearInterval(interval);
   }, []);
 
+  // Auto-hide banner after 1 minute if sync is successful
+  useEffect(() => {
+    if (!status) return;
+
+    const latestRun = status.latestRun;
+    const latestSuccessfulRun = status.latestSuccessfulRun;
+
+    // Check if status is "ok" (green pill state)
+    const isOk = 
+      (!latestRun || (latestRun.ok && (!latestRun.errors || latestRun.errors.length === 0))) &&
+      (!latestSuccessfulRun || (() => {
+        const lastSuccess = new Date(latestSuccessfulRun.started_at);
+        const now = new Date();
+        const diffHours = (now.getTime() - lastSuccess.getTime()) / (1000 * 60 * 60);
+        return diffHours <= 2;
+      })()) &&
+      (!latestRun || latestRun.finished_at || (() => {
+        const started = new Date(latestRun.started_at);
+        const now = new Date();
+        const diffMins = (now.getTime() - started.getTime()) / (1000 * 60);
+        return diffMins <= 15;
+      })());
+
+    if (isOk) {
+      // Set timer to hide after 1 minute
+      const timer = setTimeout(() => {
+        setIsVisible(false);
+      }, 60000); // 1 minute
+
+      return () => clearTimeout(timer);
+    } else {
+      // Show banner if there's an issue
+      setIsVisible(true);
+    }
+  }, [status]);
+
   const handleRunSync = async () => {
     setSyncing(true);
+    setIsVisible(true); // Show banner when manually triggering sync
     try {
       const res = await fetch('/api/internal/suppliers/cavu/cron', {
         method: 'POST',
@@ -80,6 +120,11 @@ export function CavuSyncHealthBanner() {
 
   // Don't show banner if no status or no runs (CAVU might not be configured)
   if (!status || (!status.latestRun && !status.latestSuccessfulRun)) {
+    return null;
+  }
+
+  // Don't show if hidden (successful sync after 1 minute)
+  if (!isVisible) {
     return null;
   }
 
