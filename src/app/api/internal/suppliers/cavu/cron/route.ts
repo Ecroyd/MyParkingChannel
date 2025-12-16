@@ -98,6 +98,22 @@ async function runCavuCron(req?: NextRequest) {
       hoursToFetch = Math.min(Math.max(computed, 1), 168);
     }
 
+    // Create sync run record
+    const { data: run, error: runInsertError } = await supabase
+      .from('supplier_sync_runs')
+      .insert({
+        tenant_id: tenantId,
+        supplier_code: 'cavu',
+        started_at: new Date().toISOString(),
+        hours: hoursToFetch,
+      })
+      .select()
+      .single();
+
+    if (runInsertError) {
+      console.error('[CAVU CRON] Failed to create sync run record', tenantId, runInsertError);
+    }
+
     try {
       const result = await syncCavuEventsForTenant(tenantId, {
         hours: hoursToFetch,
@@ -107,6 +123,21 @@ async function runCavuCron(req?: NextRequest) {
       // We consider it successful if we processed events, even if some had errors
       if (result.eventsSeen >= 0) {
         await updateLastSyncedAt(tenantId, supabase);
+      }
+
+      // Update sync run record
+      if (run) {
+        await supabase
+          .from('supplier_sync_runs')
+          .update({
+            finished_at: new Date().toISOString(),
+            ok: result.errors.length === 0,
+            events_seen: result.eventsSeen,
+            bookings_upserted: result.bookingsUpserted,
+            bookings_cancelled: result.bookingsCancelled,
+            errors: result.errors,
+          })
+          .eq('id', run.id);
       }
 
       logs.push({
@@ -123,6 +154,22 @@ async function runCavuCron(req?: NextRequest) {
       totalBookings += result.bookingsUpserted;
     } catch (err: any) {
       console.error('[CAVU CRON] Error for tenant', tenantId, err);
+
+      // Update sync run record with error
+      if (run) {
+        await supabase
+          .from('supplier_sync_runs')
+          .update({
+            finished_at: new Date().toISOString(),
+            ok: false,
+            events_seen: 0,
+            bookings_upserted: 0,
+            bookings_cancelled: 0,
+            errors: [err?.message ?? String(err)],
+          })
+          .eq('id', run.id);
+      }
+
       logs.push({
         tenantId,
         hours: hoursToFetch,
