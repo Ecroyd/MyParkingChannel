@@ -4,6 +4,44 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { getCavuConfigForTenant } from '@/lib/suppliers/getTenantSupplierConfig';
 import { getRecentEvents, getBookingDetails } from '@/lib/suppliers/cavu';
 
+/**
+ * Robustly extract booking reference from a CAVU event.
+ * Checks multiple possible property names and nested structures.
+ */
+function getCavuEventReference(event: any): string | null {
+  // Try direct properties first
+  if (event.Reference && typeof event.Reference === 'string' && event.Reference.trim()) {
+    return event.Reference.trim();
+  }
+  if (event.BookingReference && typeof event.BookingReference === 'string' && event.BookingReference.trim()) {
+    return event.BookingReference.trim();
+  }
+  if (event.BookingRef && typeof event.BookingRef === 'string' && event.BookingRef.trim()) {
+    return event.BookingRef.trim();
+  }
+  if (event.ReferenceNumber && typeof event.ReferenceNumber === 'string' && event.ReferenceNumber.trim()) {
+    return event.ReferenceNumber.trim();
+  }
+  
+  // Try nested structures
+  if (event.Booking?.Reference && typeof event.Booking.Reference === 'string' && event.Booking.Reference.trim()) {
+    return event.Booking.Reference.trim();
+  }
+  if (event.booking?.reference && typeof event.booking.reference === 'string' && event.booking.reference.trim()) {
+    return event.booking.reference.trim();
+  }
+  
+  // Try lowercase variants
+  if (event.reference && typeof event.reference === 'string' && event.reference.trim()) {
+    return event.reference.trim();
+  }
+  if (event.bookingReference && typeof event.bookingReference === 'string' && event.bookingReference.trim()) {
+    return event.bookingReference.trim();
+  }
+  
+  return null;
+}
+
 const DEFAULT_HOURS = 4;
 
 // Simple auth – you might already have internal auth middleware, reuse that instead
@@ -47,30 +85,53 @@ export async function GET(req: NextRequest) {
     let processed = 0;
 
     for (const event of events) {
-      const ref = event.Reference;
+      const ref = getCavuEventReference(event);
       if (!ref) continue;
 
       if (event.EventType === 'NEW' || event.EventType === 'AMEND') {
         const booking = await getBookingDetails(config, ref);
         if (!booking) continue;
 
+        // Map customer name from nested structure
+        const customerFirst = booking.Customer?.FirstName ?? '';
+        const customerLast = booking.Customer?.Surname ?? '';
+        const customerNameRaw = `${customerFirst} ${customerLast}`.trim();
+        const customerName = customerNameRaw || 'Unknown';
+
+        // Normalize plate: uppercase, remove spaces
+        const plateRaw = booking.Vehicle?.Registration ?? '';
+        const plateNorm = plateRaw.replace(/\s+/g, '').toUpperCase();
+        const plate = plateNorm || 'UNKNOWN';
+
+        // Map status from CAVU Status
+        function mapCavuStatus(status?: string): 'reserved' | 'checked_in' | 'checked_out' | 'cancelled' {
+          if (!status) return 'reserved';
+          const upper = status.toUpperCase();
+          if (upper.includes('CANCELLED') || upper.includes('CANCEL')) return 'cancelled';
+          if (upper.includes('CHECKED_OUT') || upper.includes('DEPARTED') || upper.includes('OUT')) return 'checked_out';
+          if (upper.includes('CHECKED_IN') || upper.includes('ARRIVED') || upper.includes('IN')) return 'checked_in';
+          if (upper.includes('CONFIRMED') || upper.includes('RESERVED')) return 'reserved';
+          return 'reserved'; // Default
+        }
+
         // Map CAVU booking to your bookings schema
         const { error } = await supabase.from('bookings').upsert(
           {
             tenant_id: tenantId,
             reference: booking.Reference,
-            customer_name: booking.CustomerName ?? 'Unknown',
-            customer_email: booking.CustomerEmail ?? '',
-            plate: booking.VehicleReg ?? '',
-            car_make: booking.VehicleMake ?? null,
-            car_model: booking.VehicleModel ?? null,
-            car_color: booking.VehicleColour ?? null,
+            customer_name: customerName,
+            customer_email: booking.Customer?.Email ?? null,
+            plate: plate,
+            car_make: booking.Vehicle?.Make ?? null,
+            car_model: booking.Vehicle?.Model ?? null,
+            car_color: booking.Vehicle?.Colour ?? null,
             start_at: booking.ArrivalDate,
             end_at: booking.DepartureDate,
-            status: 'reserved', // you may want to map status from event type
-            source: 'cavu',     // make sure 'cavu' exists in booking_source enum
-            money_received: 0,  // CAVU doesn't provide payment info, default to 0
-            money_charged: 0,   // CAVU doesn't provide payment info, default to 0
+            status: mapCavuStatus(booking.Status),
+            source: 'cavu',
+            money_received: 0,
+            money_charged: 0,
+            notes: booking.SpecialRequests ?? null,
           },
           {
             onConflict: 'tenant_id,reference',
