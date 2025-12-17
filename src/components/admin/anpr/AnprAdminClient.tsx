@@ -29,7 +29,7 @@ type Props = {
   tenantId: string;
 };
 
-type Tab = 'events' | 'devices';
+type Tab = 'events' | 'devices' | 'settings';
 
 export default function AnprAdminClient({ tenantId }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('events');
@@ -81,6 +81,16 @@ export default function AnprAdminClient({ tenantId }: Props) {
         >
           Gate Devices
         </button>
+        <button
+          onClick={() => setActiveTab('settings')}
+          className={`pb-2 text-sm font-medium border-b-2 -mb-px ${
+            activeTab === 'settings'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-gray-600 hover:text-gray-800'
+          }`}
+        >
+          ANPR Settings
+        </button>
       </div>
 
       {/* Filters (events tab only) */}
@@ -120,8 +130,10 @@ export default function AnprAdminClient({ tenantId }: Props) {
           fromDate={fromDate}
           toDate={toDate}
         />
-      ) : (
+      ) : activeTab === 'devices' ? (
         <GateDevicesPanel tenantId={tenantId} />
+      ) : (
+        <AnprSettingsPanel tenantId={tenantId} />
       )}
     </div>
   );
@@ -139,6 +151,8 @@ function GateEventsTable({
   toDate: string;
 }) {
   const [events, setEvents] = useState<GateEvent[]>([]);
+  const [devices, setDevices] = useState<GateDevice[]>([]);
+  const [config, setConfig] = useState<{ offline_after_minutes: number } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -146,17 +160,18 @@ function GateEventsTable({
     let aborted = false;
     let timer: ReturnType<typeof setInterval> | null = null;
 
-    const fetchEvents = async () => {
+    const fetchData = async () => {
       try {
         setLoading(true);
         setError(null);
+        
+        // Fetch events
         const params = new URLSearchParams({
           tenantId,
           from: fromDate,
           to: toDate,
           limit: '200',
         });
-        // adjust path if your backend is different
         const res = await fetch(`/api/admin/gate-events?${params.toString()}`);
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
@@ -165,6 +180,24 @@ function GateEventsTable({
         const data = (await res.json()) as { events: GateEvent[] };
         if (!aborted) {
           setEvents(data.events || []);
+        }
+
+        // Fetch devices for offline detection
+        const devicesRes = await fetch(`/api/admin/gate-devices?${new URLSearchParams({ tenantId }).toString()}`);
+        if (devicesRes.ok) {
+          const devicesData = (await devicesRes.json()) as { devices: GateDevice[] };
+          if (!aborted) {
+            setDevices(devicesData.devices || []);
+          }
+        }
+
+        // Fetch ANPR config for offline threshold
+        const configRes = await fetch(`/api/admin/anpr/config?${new URLSearchParams({ tenantId }).toString()}`);
+        if (configRes.ok) {
+          const configData = (await configRes.json()) as { config: { offline_after_minutes: number } };
+          if (!aborted) {
+            setConfig(configData.config || null);
+          }
         }
       } catch (err: any) {
         console.error(err);
@@ -178,8 +211,8 @@ function GateEventsTable({
       }
     };
 
-    fetchEvents();
-    timer = setInterval(fetchEvents, 5000);
+    fetchData();
+    timer = setInterval(fetchData, 5000);
 
     return () => {
       aborted = true;
@@ -187,19 +220,45 @@ function GateEventsTable({
     };
   }, [tenantId, fromDate, toDate]);
 
+  // Check for offline devices
+  const offlineThreshold = config?.offline_after_minutes || 15;
+  const now = new Date();
+  const offlineDevices = devices.filter(dev => {
+    if (!dev.last_seen) return true;
+    const lastSeen = new Date(dev.last_seen);
+    const minutesSince = (now.getTime() - lastSeen.getTime()) / (1000 * 60);
+    return minutesSince > offlineThreshold;
+  });
+
   return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b">
-        <div className="text-xs text-gray-600">
-          Showing latest {events.length} events
-        </div>
-        {loading && (
-          <div className="text-xs text-blue-600 animate-pulse">
-            Refreshing…
+    <div className="space-y-4">
+      {/* Offline banner */}
+      {offlineDevices.length > 0 && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3">
+          <div className="flex items-center gap-2">
+            <span className="text-yellow-800 font-semibold text-sm">⚠️ Offline Devices</span>
+            <span className="text-xs text-yellow-700">
+              {offlineDevices.length} device(s) haven't been seen in over {offlineThreshold} minutes:
+            </span>
+            <span className="text-xs text-yellow-800 font-medium">
+              {offlineDevices.map(d => d.name).join(', ')}
+            </span>
           </div>
-        )}
-        {error && <div className="text-xs text-red-600">{error}</div>}
-      </div>
+        </div>
+      )}
+
+      <div className="border border-gray-200 rounded-lg overflow-hidden">
+        <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b">
+          <div className="text-xs text-gray-600">
+            Showing latest {events.length} events
+          </div>
+          {loading && (
+            <div className="text-xs text-blue-600 animate-pulse">
+              Refreshing…
+            </div>
+          )}
+          {error && <div className="text-xs text-red-600">{error}</div>}
+        </div>
 
       <div className="overflow-x-auto max-h-[480px]">
         <table className="min-w-full text-xs">
@@ -301,6 +360,7 @@ function GateEventsTable({
           </tbody>
         </table>
       </div>
+      </div>
     </div>
   );
 }
@@ -381,8 +441,8 @@ function GateDevicesPanel({ tenantId }: { tenantId: string }) {
   };
 
   const webhookUrl = integrationOrigin
-    ? `${integrationOrigin}/api/gates/events`
-    : '/api/gates/events';
+    ? `${integrationOrigin}/api/integrations/anpr/webhook`
+    : '/api/integrations/anpr/webhook';
 
   return (
     <div className="space-y-4">
@@ -530,7 +590,7 @@ function GateDevicesPanel({ tenantId }: { tenantId: string }) {
           <div className="bg-gray-50 border rounded px-2 py-1 font-mono text-[11px] break-all">
             Content-Type: application/json
             <br />
-            x-gate-api-key: YOUR_GENERATED_KEY
+            Authorization: Bearer YOUR_GENERATED_KEY
           </div>
           <p className="text-xs text-gray-600">
             And a JSON body like this (fields can be mapped from Snap&apos;s
@@ -593,6 +653,416 @@ function GateDevicesPanel({ tenantId }: { tenantId: string }) {
             </p>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* --------------------- ANPR SETTINGS PANEL ---------------------- */
+
+type AnprConfig = {
+  tenant_id: string;
+  enabled: boolean;
+  dedupe_seconds: number;
+  offline_after_minutes: number;
+  camera_direction_map: Record<string, string>;
+  arrival_grace_minutes: number;
+  departure_grace_minutes: number;
+};
+
+function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
+  const [config, setConfig] = useState<AnprConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [integrationOrigin, setIntegrationOrigin] = useState<string>('');
+  const [generatingCsvToken, setGeneratingCsvToken] = useState(false);
+  const [generatedCsvToken, setGeneratedCsvToken] = useState<string | null>(null);
+  const [csvTokenMessage, setCsvTokenMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setIntegrationOrigin(window.location.origin);
+    }
+  }, []);
+
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const res = await fetch(`/api/admin/anpr/config?${new URLSearchParams({ tenantId }).toString()}`);
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Failed to load ANPR config');
+        }
+        const data = (await res.json()) as { config: AnprConfig };
+        setConfig(data.config);
+      } catch (err: any) {
+        console.error(err);
+        setError(err.message || 'Error loading ANPR config');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchConfig();
+  }, [tenantId]);
+
+  const handleSave = async () => {
+    if (!config) return;
+
+    try {
+      setSaving(true);
+      setError(null);
+      const res = await fetch(`/api/admin/anpr/config?${new URLSearchParams({ tenantId }).toString()}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to save ANPR config');
+      }
+
+      const data = (await res.json()) as { config: AnprConfig };
+      setConfig(data.config);
+      alert('Settings saved successfully');
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Error saving ANPR config');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCameraMapChange = (cameraId: string, direction: string) => {
+    if (!config) return;
+    const newMap = { ...config.camera_direction_map };
+    if (direction) {
+      newMap[cameraId] = direction;
+    } else {
+      delete newMap[cameraId];
+    }
+    setConfig({ ...config, camera_direction_map: newMap });
+  };
+
+  const webhookUrl = integrationOrigin
+    ? `${integrationOrigin}/api/integrations/anpr/webhook`
+    : '/api/integrations/anpr/webhook';
+
+  if (loading) {
+    return <div className="text-sm text-gray-600">Loading settings...</div>;
+  }
+
+  if (!config) {
+    return <div className="text-sm text-red-600">Failed to load settings</div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="border border-gray-200 rounded-lg p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">ANPR Integration Settings</h2>
+            <p className="text-xs text-gray-600">
+              Configure ANPR vendor integration settings and webhook endpoint
+            </p>
+          </div>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : 'Save Settings'}
+          </button>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded px-3 py-2 text-sm text-red-800">
+            {error}
+          </div>
+        )}
+
+        {/* Enable toggle */}
+        <div className="flex items-center gap-3">
+          <input
+            type="checkbox"
+            id="enabled"
+            checked={config.enabled}
+            onChange={(e) => setConfig({ ...config, enabled: e.target.checked })}
+            className="w-4 h-4"
+          />
+          <label htmlFor="enabled" className="text-sm font-medium">
+            Enable ANPR Integration
+          </label>
+        </div>
+
+        {/* Webhook URL */}
+        <div className="space-y-2">
+          <label className="block text-sm font-medium">Webhook URL</label>
+          <div className="bg-gray-50 border rounded px-3 py-2 font-mono text-xs break-all">
+            {webhookUrl}
+          </div>
+          <p className="text-xs text-gray-600">
+            Provide this URL to your ANPR vendor for webhook configuration
+          </p>
+        </div>
+
+        {/* Headers */}
+        <div className="space-y-2">
+          <label className="block text-sm font-medium">Required Headers</label>
+          <div className="bg-gray-50 border rounded px-3 py-2 font-mono text-xs">
+            Authorization: Bearer {'<device_token>'}
+            <br />
+            Content-Type: application/json
+          </div>
+        </div>
+
+        {/* CSV Export */}
+        <div className="space-y-3 border-t pt-4">
+          <label className="block text-sm font-medium">Known Vehicles CSV Export</label>
+          
+          {/* Authenticated download */}
+          <div className="space-y-2">
+            <a
+              href={`/api/admin/anpr/known-vehicles.csv?tenantId=${tenantId}`}
+              download
+              className="inline-block px-3 py-1.5 bg-gray-100 border rounded text-sm hover:bg-gray-200"
+            >
+              Download CSV (Today + Tomorrow)
+            </a>
+            <p className="text-xs text-gray-600">
+              Authenticated export for manual download
+            </p>
+          </div>
+
+          {/* Token-based URL for hourly sync */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async () => {
+                  try {
+                    setGeneratingCsvToken(true);
+                    setGeneratedCsvToken(null);
+                    setCsvTokenMessage(null);
+                    const res = await fetch(
+                      `/api/admin/anpr/generate-csv-token?${new URLSearchParams({ tenantId }).toString()}`,
+                      { method: 'POST' }
+                    );
+                    if (!res.ok) {
+                      const data = await res.json().catch(() => ({}));
+                      throw new Error(data.error || 'Failed to generate CSV token');
+                    }
+                    const data = await res.json();
+                    setGeneratedCsvToken(data.rawToken);
+                    setCsvTokenMessage(data.message || 'Copy this token now. It will not be shown again.');
+                  } catch (err: any) {
+                    alert(err.message || 'Failed to generate token');
+                  } finally {
+                    setGeneratingCsvToken(false);
+                  }
+                }}
+                disabled={generatingCsvToken}
+                className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
+              >
+                {generatingCsvToken ? 'Generating...' : 'Generate CSV Token'}
+              </button>
+            </div>
+
+            {generatedCsvToken && (
+              <div className="border border-blue-200 bg-blue-50 rounded-lg px-3 py-3 space-y-2">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div>
+                    <p className="text-sm font-semibold text-blue-900">CSV Export Token</p>
+                    {csvTokenMessage && (
+                      <p className="text-xs text-blue-800">{csvTokenMessage}</p>
+                    )}
+                  </div>
+                  <button
+                    onClick={() =>
+                      navigator.clipboard.writeText(generatedCsvToken).catch(() => {})
+                    }
+                    className="text-[11px] border border-blue-400 text-blue-700 px-2 py-0.5 rounded hover:bg-blue-100"
+                  >
+                    Copy token
+                  </button>
+                </div>
+                <div className="bg-white border border-blue-200 rounded px-2 py-1 font-mono text-[11px] break-all">
+                  {generatedCsvToken}
+                </div>
+                <div className="bg-white border border-blue-200 rounded px-2 py-1 font-mono text-[10px] break-all">
+                  {integrationOrigin
+                    ? `${integrationOrigin}/api/integrations/anpr/known-vehicles.csv?tenant=${tenantId}&token=${generatedCsvToken}`
+                    : `/api/integrations/anpr/known-vehicles.csv?tenant=${tenantId}&token=${generatedCsvToken}`}
+                </div>
+                <p className="text-[10px] text-blue-800">
+                  Provide this URL to your ANPR vendor for hourly CSV sync. The token authenticates the request without requiring user login.
+                </p>
+              </div>
+            )}
+
+            {!generatedCsvToken && (
+              <p className="text-xs text-gray-600">
+                Generate a token to create an unauthenticated CSV URL for vendor hourly sync
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Configuration fields */}
+        <div className="grid gap-4 md:grid-cols-2">
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Deduplication Window (seconds)
+            </label>
+            <input
+              type="number"
+              min="0"
+              max="3600"
+              value={config.dedupe_seconds}
+              onChange={(e) => setConfig({ ...config, dedupe_seconds: parseInt(e.target.value) || 60 })}
+              className="w-full border rounded px-2 py-1 text-sm"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Prevent duplicate events within this window
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Offline Threshold (minutes)
+            </label>
+            <input
+              type="number"
+              min="1"
+              max="1440"
+              value={config.offline_after_minutes}
+              onChange={(e) => setConfig({ ...config, offline_after_minutes: parseInt(e.target.value) || 15 })}
+              className="w-full border rounded px-2 py-1 text-sm"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Device considered offline after this many minutes
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Arrival Grace Period (minutes)
+            </label>
+            <input
+              type="number"
+              min="0"
+              max="1440"
+              value={config.arrival_grace_minutes}
+              onChange={(e) => setConfig({ ...config, arrival_grace_minutes: parseInt(e.target.value) || 240 })}
+              className="w-full border rounded px-2 py-1 text-sm"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Early arrival tolerance (default: 4 hours)
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Departure Grace Period (minutes)
+            </label>
+            <input
+              type="number"
+              min="0"
+              max="1440"
+              value={config.departure_grace_minutes}
+              onChange={(e) => setConfig({ ...config, departure_grace_minutes: parseInt(e.target.value) || 480 })}
+              className="w-full border rounded px-2 py-1 text-sm"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Late departure tolerance (default: 8 hours)
+            </p>
+          </div>
+        </div>
+
+        {/* Camera Direction Mapping */}
+        <div className="space-y-2">
+          <label className="block text-sm font-medium">Camera Direction Mapping</label>
+          <p className="text-xs text-gray-600 mb-2">
+            Map camera IDs to entry/exit direction. If not mapped, defaults to entry.
+          </p>
+          <div className="space-y-2">
+            {Object.entries(config.camera_direction_map).map(([cameraId, direction]) => (
+              <div key={cameraId} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={cameraId}
+                  readOnly
+                  className="flex-1 border rounded px-2 py-1 text-sm bg-gray-50"
+                />
+                <select
+                  value={direction}
+                  onChange={(e) => handleCameraMapChange(cameraId, e.target.value)}
+                  className="border rounded px-2 py-1 text-sm"
+                >
+                  <option value="entry">Entry</option>
+                  <option value="exit">Exit</option>
+                </select>
+                <button
+                  onClick={() => handleCameraMapChange(cameraId, '')}
+                  className="px-2 py-1 text-xs border rounded hover:bg-red-50 text-red-600"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                id="new-camera-id"
+                placeholder="Camera ID"
+                className="flex-1 border rounded px-2 py-1 text-sm"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const input = e.target as HTMLInputElement;
+                    const cameraId = input.value.trim();
+                    if (cameraId) {
+                      handleCameraMapChange(cameraId, 'entry');
+                      input.value = '';
+                    }
+                  }
+                }}
+              />
+              <select
+                id="new-camera-direction"
+                defaultValue="entry"
+                className="border rounded px-2 py-1 text-sm"
+                onChange={(e) => {
+                  const input = document.getElementById('new-camera-id') as HTMLInputElement;
+                  const cameraId = input.value.trim();
+                  if (cameraId) {
+                    handleCameraMapChange(cameraId, e.target.value);
+                    input.value = '';
+                  }
+                }}
+              >
+                <option value="entry">Entry</option>
+                <option value="exit">Exit</option>
+              </select>
+              <button
+                onClick={() => {
+                  const input = document.getElementById('new-camera-id') as HTMLInputElement;
+                  const select = document.getElementById('new-camera-direction') as HTMLSelectElement;
+                  const cameraId = input.value.trim();
+                  if (cameraId) {
+                    handleCameraMapChange(cameraId, select.value);
+                    input.value = '';
+                  }
+                }}
+                className="px-3 py-1 text-xs border rounded hover:bg-blue-50 text-blue-600"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
