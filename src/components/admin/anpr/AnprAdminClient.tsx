@@ -376,10 +376,14 @@ function GateDevicesPanel({ tenantId }: { tenantId: string }) {
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   const [generatedMessage, setGeneratedMessage] = useState<string | null>(null);
   const [integrationOrigin, setIntegrationOrigin] = useState<string>('');
+  const [showTokenModal, setShowTokenModal] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      setIntegrationOrigin(window.location.origin);
+      // Use NEXT_PUBLIC_APP_URL if available, otherwise use window.location.origin
+      // NEXT_PUBLIC_* vars are available in client-side code in Next.js
+      const baseUrl = (process.env.NEXT_PUBLIC_APP_URL as string) || window.location.origin;
+      setIntegrationOrigin(baseUrl);
     }
   }, []);
 
@@ -668,6 +672,7 @@ type AnprConfig = {
   camera_direction_map: Record<string, string>;
   arrival_grace_minutes: number;
   departure_grace_minutes: number;
+  csv_token_last_rotated_at?: string | null;
 };
 
 function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
@@ -677,12 +682,16 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [integrationOrigin, setIntegrationOrigin] = useState<string>('');
   const [generatingCsvToken, setGeneratingCsvToken] = useState(false);
-  const [generatedCsvToken, setGeneratedCsvToken] = useState<string | null>(null);
-  const [csvTokenMessage, setCsvTokenMessage] = useState<string | null>(null);
+  const [hostedUrl, setHostedUrl] = useState<string | null>(null);
+  const [testingUrl, setTestingUrl] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message?: string; rowCount?: number } | null>(null);
+  const [showUrlModal, setShowUrlModal] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      setIntegrationOrigin(window.location.origin);
+      // Prefer NEXT_PUBLIC_APP_URL, fallback to window.location.origin
+      const baseUrl = (process.env.NEXT_PUBLIC_APP_URL as string) || window.location.origin;
+      setIntegrationOrigin(baseUrl);
     }
   }, []);
 
@@ -821,13 +830,15 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
         </div>
 
         {/* CSV Export */}
-        <div className="space-y-3 border-t pt-4">
-          <label className="block text-sm font-medium">Known Vehicles CSV Export</label>
+        <div className="space-y-4 border-t pt-4">
+          <div className="flex items-center justify-between">
+            <label className="block text-sm font-medium">Known Vehicles CSV Export</label>
+          </div>
           
           {/* Authenticated download */}
           <div className="space-y-2">
             <a
-              href={`/api/admin/anpr/known-vehicles.csv?tenantId=${tenantId}`}
+              href="/api/admin/anpr/known-vehicles.csv"
               download
               className="inline-block px-3 py-1.5 bg-gray-100 border rounded text-sm hover:bg-gray-200"
             >
@@ -838,28 +849,42 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
             </p>
           </div>
 
-          {/* Token-based URL for hourly sync */}
-          <div className="space-y-2">
+          {/* Hosted CSV Link Section */}
+          <div className="space-y-2 border-t pt-4">
+            <label className="block text-sm font-medium">Hosted CSV Link</label>
             <div className="flex items-center gap-2">
               <button
                 onClick={async () => {
                   try {
                     setGeneratingCsvToken(true);
-                    setGeneratedCsvToken(null);
-                    setCsvTokenMessage(null);
+                    setTestResult(null);
                     const res = await fetch(
                       `/api/admin/anpr/generate-csv-token?${new URLSearchParams({ tenantId }).toString()}`,
                       { method: 'POST' }
                     );
                     if (!res.ok) {
                       const data = await res.json().catch(() => ({}));
-                      throw new Error(data.error || 'Failed to generate CSV token');
+                      throw new Error(data.error || 'Failed to generate CSV link');
                     }
-                    const data = await res.json();
-                    setGeneratedCsvToken(data.rawToken);
-                    setCsvTokenMessage(data.message || 'Copy this token now. It will not be shown again.');
+                    const json = await res.json();
+                    if (!json.ok) {
+                      throw new Error(json.error || 'Failed to generate CSV link');
+                    }
+
+                    // Build full URL
+                    const base = integrationOrigin || window.location.origin;
+                    const fullUrl = `${base}/api/integrations/anpr/known-vehicles.csv?tenant=${tenantId}&token=${encodeURIComponent(json.token)}`;
+                    setHostedUrl(fullUrl);
+                    setShowUrlModal(true);
+
+                    // Refresh config to get updated rotation timestamp
+                    const configRes = await fetch(`/api/admin/anpr/config?${new URLSearchParams({ tenantId }).toString()}`);
+                    if (configRes.ok) {
+                      const configData = (await configRes.json()) as { config: AnprConfig };
+                      setConfig(configData.config);
+                    }
                   } catch (err: any) {
-                    alert(err.message || 'Failed to generate token');
+                    alert(err.message || 'Failed to generate link');
                   } finally {
                     setGeneratingCsvToken(false);
                   }
@@ -867,45 +892,26 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
                 disabled={generatingCsvToken}
                 className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
               >
-                {generatingCsvToken ? 'Generating...' : 'Generate CSV Token'}
+                {generatingCsvToken ? 'Generating...' : hostedUrl ? 'Regenerate link' : 'Generate hosted CSV link'}
               </button>
             </div>
 
-            {generatedCsvToken && (
-              <div className="border border-blue-200 bg-blue-50 rounded-lg px-3 py-3 space-y-2">
-                <div className="flex items-center justify-between gap-4 flex-wrap">
-                  <div>
-                    <p className="text-sm font-semibold text-blue-900">CSV Export Token</p>
-                    {csvTokenMessage && (
-                      <p className="text-xs text-blue-800">{csvTokenMessage}</p>
-                    )}
-                  </div>
-                  <button
-                    onClick={() =>
-                      navigator.clipboard.writeText(generatedCsvToken).catch(() => {})
-                    }
-                    className="text-[11px] border border-blue-400 text-blue-700 px-2 py-0.5 rounded hover:bg-blue-100"
-                  >
-                    Copy token
-                  </button>
-                </div>
-                <div className="bg-white border border-blue-200 rounded px-2 py-1 font-mono text-[11px] break-all">
-                  {generatedCsvToken}
-                </div>
-                <div className="bg-white border border-blue-200 rounded px-2 py-1 font-mono text-[10px] break-all">
-                  {integrationOrigin
-                    ? `${integrationOrigin}/api/integrations/anpr/known-vehicles.csv?tenant=${tenantId}&token=${generatedCsvToken}`
-                    : `/api/integrations/anpr/known-vehicles.csv?tenant=${tenantId}&token=${generatedCsvToken}`}
-                </div>
-                <p className="text-[10px] text-blue-800">
-                  Provide this URL to your ANPR vendor for hourly CSV sync. The token authenticates the request without requiring user login.
+            {hostedUrl && !showUrlModal && (
+              <div className="border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 space-y-2">
+                <p className="text-xs text-gray-600">
+                  Link generated. Click the button above to regenerate or copy the link from the modal.
                 </p>
+                {config.csv_token_last_rotated_at && (
+                  <p className="text-xs text-gray-500">
+                    Link last generated: {new Date(config.csv_token_last_rotated_at).toLocaleString()}
+                  </p>
+                )}
               </div>
             )}
 
-            {!generatedCsvToken && (
+            {!hostedUrl && (
               <p className="text-xs text-gray-600">
-                Generate a token to create an unauthenticated CSV URL for vendor hourly sync
+                Generate a hosted CSV link for your ANPR system to pull vehicle data automatically
               </p>
             )}
           </div>
@@ -1064,6 +1070,63 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
           </div>
         </div>
       </div>
+
+      {/* Hosted CSV Link Modal */}
+      {showUrlModal && hostedUrl && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold">Hosted CSV link generated</h3>
+              <button
+                onClick={() => {
+                  setShowUrlModal(false);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="space-y-3">
+              <p className="text-sm text-gray-600">
+                Copy and paste this link into the ANPR system. It updates automatically.
+              </p>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium">Hosted CSV link</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={hostedUrl}
+                    className="flex-1 border rounded px-3 py-2 font-mono text-xs bg-gray-50 break-all"
+                  />
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(hostedUrl).catch(() => {});
+                      alert('Link copied to clipboard!');
+                    }}
+                    className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 whitespace-nowrap"
+                  >
+                    Copy link
+                  </button>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500">
+                Paste this link into Videofit's 'Read CSV at preset times' setting.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowUrlModal(false);
+                }}
+                className="px-4 py-2 bg-gray-200 text-gray-800 text-sm rounded hover:bg-gray-300"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

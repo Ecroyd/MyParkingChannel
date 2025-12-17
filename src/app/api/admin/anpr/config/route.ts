@@ -59,6 +59,7 @@ export async function GET(req: NextRequest) {
       camera_direction_map: {},
       arrival_grace_minutes: 240,
       departure_grace_minutes: 480,
+      csv_token_last_rotated_at: null,
     };
 
     return NextResponse.json({ config: config || defaultConfig });

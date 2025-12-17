@@ -10,6 +10,9 @@ CREATE TABLE IF NOT EXISTS tenant_anpr_config (
   arrival_grace_minutes INTEGER DEFAULT 240, -- 4 hours early tolerance for arrivals
   departure_grace_minutes INTEGER DEFAULT 480, -- 8 hours late tolerance for departures
   csv_token_hash TEXT, -- SHA256 hash of CSV export token for unauthenticated access
+  csv_token_last_rotated_at TIMESTAMP WITH TIME ZONE, -- When the CSV token was last generated/rotated
+  csv_enabled BOOLEAN NOT NULL DEFAULT true, -- Enable/disable hosted CSV endpoint
+  default_group TEXT DEFAULT 'Self Park', -- Default group value for CSV export
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

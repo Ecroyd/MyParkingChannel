@@ -36,32 +36,37 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Access denied. Admin role required.' }, { status: 403 });
     }
 
-    // Generate new token
-    const rawToken = crypto.randomBytes(32).toString('hex');
+    // Generate new token (32 bytes, URL-safe base64url)
+    const rawToken = crypto.randomBytes(32).toString('base64url');
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
 
-    // Update or create config with token hash
+    // Upsert row if missing - set token hash and rotation timestamp
+    // This will create the row if it doesn't exist, or update it if it does
+    const now = new Date().toISOString();
     const { error: configError } = await adminClient
       .from('tenant_anpr_config')
       .upsert({
         tenant_id: tenantId,
         csv_token_hash: tokenHash,
-        updated_at: new Date().toISOString(),
+        csv_token_last_rotated_at: now,
+        updated_at: now,
+        // Preserve existing values for other fields if row exists
+        // If row doesn't exist, defaults will be used from schema
       }, {
         onConflict: 'tenant_id',
       });
 
     if (configError) {
-      console.error('Error updating CSV token:', configError);
+      console.error('Error upserting CSV token:', configError);
       return NextResponse.json(
-        { error: 'Failed to generate CSV token' },
+        { error: 'Failed to generate CSV token', details: configError.message },
         { status: 500 }
       );
     }
 
     return NextResponse.json({
-      rawToken,
-      message: 'Copy this CSV token now. It will not be shown again after you leave this page.',
+      ok: true,
+      token: rawToken,
     });
   } catch (error: any) {
     console.error('Generate CSV token error:', error);
