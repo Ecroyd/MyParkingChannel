@@ -36,21 +36,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    // Get Videofit base URL from tenant_secrets (column-based storage)
+    // Get Videofit base URL from tenant_secrets using encrypted key-value pattern
     const { data: secret } = await adminClient
       .from('tenant_secrets')
-      .select('videofit_base_url')
+      .select('value_ciphertext')
       .eq('tenant_id', tenantId)
+      .eq('scope', 'anpr')
+      .eq('key', 'videofit_base_url')
       .maybeSingle();
 
-    if (!secret?.videofit_base_url) {
+    if (!secret?.value_ciphertext) {
       return NextResponse.json(
         { error: 'Videofit not configured. Please set Videofit Base URL in ANPR settings.' },
         { status: 400 }
       );
     }
 
-    const baseUrl = secret.videofit_base_url;
+    // Decrypt the base URL
+    const decryptSecret = (encryptedValue: string): string => {
+      return Buffer.from(encryptedValue, 'base64').toString();
+    };
+    const baseUrl = decryptSecret(secret.value_ciphertext);
 
     // Ping Videofit
     const result = await pingVideofit(baseUrl);

@@ -70,25 +70,46 @@ export async function GET(req: NextRequest) {
     // Merge defaults with existing config to ensure new fields are present
     const mergedConfig = config ? { ...defaultConfig, ...config } : defaultConfig;
 
-    // Fetch Videofit secrets from tenant_secrets (column-based storage)
+    // Fetch Videofit secrets from tenant_secrets using encrypted key-value pattern
     const { data: videofitSecrets } = await adminClient
       .from('tenant_secrets')
-      .select('videofit_base_url, videofit_site_client_license, videofit_loc_pc_no, videofit_default_group')
+      .select('key, value_ciphertext')
       .eq('tenant_id', tenantId)
-      .maybeSingle();
+      .eq('scope', 'anpr')
+      .in('key', [
+        'videofit_base_url',
+        'videofit_site_client_license',
+        'videofit_loc_pc_no',
+        'videofit_default_group',
+      ]);
+
+    // Decrypt helper
+    const decryptSecret = (encryptedValue: string): string => {
+      return Buffer.from(encryptedValue, 'base64').toString();
+    };
+
+    const getSecret = (key: string): string | null => {
+      const secret = videofitSecrets?.find((s) => s.key === key);
+      if (!secret?.value_ciphertext) return null;
+      try {
+        return decryptSecret(secret.value_ciphertext);
+      } catch {
+        return null;
+      }
+    };
 
     // Add Videofit config to response
     const responseConfig = {
       ...mergedConfig,
-      videofit_base_url: videofitSecrets?.videofit_base_url || null,
-      videofit_site_client_license: videofitSecrets?.videofit_site_client_license
-        ? parseInt(String(videofitSecrets.videofit_site_client_license), 10)
+      videofit_base_url: getSecret('videofit_base_url') || null,
+      videofit_site_client_license: getSecret('videofit_site_client_license')
+        ? parseInt(getSecret('videofit_site_client_license')!, 10)
         : null,
-      videofit_loc_pc_no: videofitSecrets?.videofit_loc_pc_no
-        ? parseInt(String(videofitSecrets.videofit_loc_pc_no), 10)
+      videofit_loc_pc_no: getSecret('videofit_loc_pc_no')
+        ? parseInt(getSecret('videofit_loc_pc_no')!, 10)
         : 0,
-      videofit_default_group: videofitSecrets?.videofit_default_group
-        ? parseInt(String(videofitSecrets.videofit_default_group), 10)
+      videofit_default_group: getSecret('videofit_default_group')
+        ? parseInt(getSecret('videofit_default_group')!, 10)
         : 4,
     };
 
@@ -247,40 +268,78 @@ export async function PUT(req: NextRequest) {
     if (whitelist_lookahead_days !== undefined) updateData.whitelist_lookahead_days = whitelist_lookahead_days;
     if (whitelist_keep_after_end_hours !== undefined) updateData.whitelist_keep_after_end_hours = whitelist_keep_after_end_hours;
 
-    // Save Videofit secrets to tenant_secrets (column-based storage)
-    const videofitSecretsData: any = {
-      tenant_id: tenantId,
-      updated_at: new Date().toISOString(),
-    };
+    // Save Videofit secrets to tenant_secrets using encrypted key-value pattern
+    // (like APH SFTP credentials and ANPR relay token)
+    const videofitSecrets: Array<{ tenant_id: string; scope: string; key: string; value: string; updated_at: string }> = [];
+    const now = new Date().toISOString();
 
     if (videofit_base_url !== undefined) {
-      videofitSecretsData.videofit_base_url = videofit_base_url || null;
+      videofitSecrets.push({
+        tenant_id: tenantId,
+        scope: 'anpr',
+        key: 'videofit_base_url',
+        value: videofit_base_url || '',
+        updated_at: now,
+      });
     }
     if (videofit_site_client_license !== undefined) {
-      videofitSecretsData.videofit_site_client_license = videofit_site_client_license
-        ? String(videofit_site_client_license)
-        : null;
+      videofitSecrets.push({
+        tenant_id: tenantId,
+        scope: 'anpr',
+        key: 'videofit_site_client_license',
+        value: String(videofit_site_client_license || ''),
+        updated_at: now,
+      });
     }
     if (videofit_loc_pc_no !== undefined) {
-      videofitSecretsData.videofit_loc_pc_no = videofit_loc_pc_no !== null && videofit_loc_pc_no !== undefined
-        ? String(videofit_loc_pc_no)
-        : '0';
+      videofitSecrets.push({
+        tenant_id: tenantId,
+        scope: 'anpr',
+        key: 'videofit_loc_pc_no',
+        value: String(videofit_loc_pc_no ?? 0),
+        updated_at: now,
+      });
     }
     if (videofit_default_group !== undefined) {
-      videofitSecretsData.videofit_default_group = videofit_default_group !== null && videofit_default_group !== undefined
-        ? String(videofit_default_group)
-        : '4';
+      videofitSecrets.push({
+        tenant_id: tenantId,
+        scope: 'anpr',
+        key: 'videofit_default_group',
+        value: String(videofit_default_group ?? 4),
+        updated_at: now,
+      });
     }
 
-    // Upsert Videofit secrets (only if at least one field is being updated)
-    if (Object.keys(videofitSecretsData).length > 2) { // More than just tenant_id and updated_at
-      const { error: secretsError } = await adminClient
-        .from('tenant_secrets')
-        .upsert(videofitSecretsData, { onConflict: 'tenant_id' });
+    // Upsert Videofit secrets using encrypted key-value pattern
+    for (const secret of videofitSecrets) {
+      if (secret.value) {
+        // Encrypt the value (using base64 like other secrets)
+        const encrypted = Buffer.from(secret.value).toString('base64');
+        const { error: secretError } = await adminClient
+          .from('tenant_secrets')
+          .upsert(
+            {
+              tenant_id: secret.tenant_id,
+              scope: secret.scope,
+              key: secret.key,
+              value_ciphertext: encrypted,
+              updated_at: secret.updated_at,
+            },
+            { onConflict: 'tenant_id,scope,key' }
+          );
 
-      if (secretsError) {
-        console.error('Error saving Videofit secrets:', secretsError);
-        // Don't fail the whole request, just log it
+        if (secretError) {
+          console.error(`Error saving Videofit secret ${secret.key}:`, secretError);
+          // Don't fail the whole request, just log it
+        }
+      } else {
+        // Delete if empty
+        await adminClient
+          .from('tenant_secrets')
+          .delete()
+          .eq('tenant_id', secret.tenant_id)
+          .eq('scope', secret.scope)
+          .eq('key', secret.key);
       }
     }
 
