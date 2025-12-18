@@ -1119,7 +1119,7 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
                 disabled={
                   testingVideofitVehicle ||
                   !config.videofit_site_client_license ||
-                  !config.videofit_loc_pc_no ||
+                  (config.videofit_loc_pc_no === null || config.videofit_loc_pc_no === undefined) ||
                   (config.videofit_mode === 'relay' ? !relayToken : !config.videofit_base_url)
                 }
                 className="px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
