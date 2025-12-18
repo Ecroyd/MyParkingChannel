@@ -49,12 +49,13 @@ export async function GET(req: NextRequest) {
     }
 
     // Fetch token from tenant_secrets using encrypted key-value pattern
+    // ALWAYS read from: scope='anpr', key='anpr_relay_token'
     const { data: secret, error: secretError } = await adminClient
       .from('tenant_secrets')
       .select('value_ciphertext, updated_at')
       .eq('tenant_id', tenantId)
-      .eq('scope', 'anpr_relay')
-      .eq('key', 'RELAY_TOKEN')
+      .eq('scope', 'anpr')
+      .eq('key', 'anpr_relay_token')
       .maybeSingle();
 
     if (secretError && secretError.code !== 'PGRST116') {

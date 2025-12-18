@@ -61,6 +61,7 @@ export async function POST(req: NextRequest) {
     const token = randomBytes(32).toString('hex');
 
     // Use encrypted key-value pattern (like APH SFTP credentials)
+    // ALWAYS save as: scope='anpr', key='anpr_relay_token', value_ciphertext=encrypted
     const encrypted = encryptSecret(token);
 
     const { error: upsertError } = await adminClient
@@ -68,8 +69,8 @@ export async function POST(req: NextRequest) {
       .upsert(
         {
           tenant_id: tenantId,
-          scope: 'anpr_relay',
-          key: 'RELAY_TOKEN',
+          scope: 'anpr',
+          key: 'anpr_relay_token',
           value_ciphertext: encrypted,
           updated_at: new Date().toISOString(),
         },

@@ -1,12 +1,43 @@
 // GET /api/internal/anpr/outbox - Poll pending vehicle updates
-// Authenticated via Bearer token (gate device API key)
+// Authenticated via Bearer token (tenant relay token from tenant_secrets)
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { hashGateDeviceKey } from '@/lib/devices/gateDeviceKeys';
+import crypto from 'crypto';
+
+/**
+ * Simple decryption helper (matches pattern from other integrations)
+ * TODO: Implement proper decryption using ENCRYPTION_KEY
+ */
+function decryptSecret(encryptedValue: string): string {
+  return Buffer.from(encryptedValue, 'base64').toString();
+}
+
+/**
+ * Timing-safe comparison to prevent timing attacks
+ */
+function timingSafeEqual(a: string, b: string): boolean {
+  const aBuf = Buffer.from(a, 'utf8');
+  const bBuf = Buffer.from(b, 'utf8');
+  if (aBuf.length !== bBuf.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(aBuf, bBuf);
+}
 
 export async function GET(req: NextRequest) {
   try {
+    // Get tenantId from query params
+    const { searchParams } = new URL(req.url);
+    const tenantId = searchParams.get('tenantId');
+
+    if (!tenantId) {
+      return NextResponse.json(
+        { error: 'tenantId query parameter is required' },
+        { status: 400 }
+      );
+    }
+
     // Authenticate via Bearer token
     const authHeader = req.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -16,35 +47,46 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const deviceToken = authHeader.substring(7); // Remove "Bearer " prefix
-    const apiKeyHash = hashGateDeviceKey(deviceToken);
+    const providedToken = authHeader.substring(7); // Remove "Bearer " prefix
     const supabase = createAdminClient();
 
-    // Find device by hashed key
-    const { data: device, error: deviceError } = await supabase
-      .from('gate_devices')
-      .select('id, tenant_id, status, kind, name')
-      .eq('api_key_hash', apiKeyHash)
+    // Fetch relay token from tenant_secrets
+    const { data: secret, error: secretError } = await supabase
+      .from('tenant_secrets')
+      .select('value_ciphertext')
+      .eq('tenant_id', tenantId)
+      .eq('scope', 'anpr')
+      .eq('key', 'anpr_relay_token')
       .maybeSingle();
 
-    if (deviceError || !device) {
+    if (secretError || !secret || !secret.value_ciphertext) {
       return NextResponse.json(
-        { error: 'Invalid device token' },
+        { error: 'Invalid relay token' },
         { status: 401 }
       );
     }
 
-    if (device.status !== 'active') {
+    // Decrypt the stored token
+    let storedToken: string;
+    try {
+      storedToken = decryptSecret(secret.value_ciphertext);
+    } catch (error) {
+      console.error('[ANPR Outbox] Error decrypting relay token:', error);
       return NextResponse.json(
-        { error: 'Device not active' },
-        { status: 403 }
+        { error: 'Invalid relay token' },
+        { status: 401 }
       );
     }
 
-    const tenantId = device.tenant_id;
+    // Timing-safe comparison
+    if (!timingSafeEqual(providedToken, storedToken)) {
+      return NextResponse.json(
+        { error: 'Invalid relay token' },
+        { status: 401 }
+      );
+    }
 
-    // Get query parameters
-    const { searchParams } = new URL(req.url);
+    // Get query parameters (reuse searchParams from above)
     const limit = Math.min(parseInt(searchParams.get('limit') || '100', 10), 1000); // Max 1000 items
     const maxAge = parseInt(searchParams.get('maxAge') || '86400', 10); // Default 24 hours in seconds
 
