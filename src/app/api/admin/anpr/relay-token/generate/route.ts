@@ -44,23 +44,48 @@ export async function POST(req: NextRequest) {
     // Generate strong token (64 hex chars = 32 bytes)
     const token = randomBytes(32).toString('hex');
 
-    // Upsert into tenant_secrets
-    const { error: upsertError } = await adminClient
-      .from('tenant_secrets')
-      .upsert(
-        {
-          tenant_id: tenantId,
-          key: 'anpr_relay_token',
-          value: token,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'tenant_id,key' }
-      );
+    // Try column-based approach first (like stripe_secret_key)
+    let upsertError = null;
+    try {
+      const { error } = await adminClient
+        .from('tenant_secrets')
+        .upsert(
+          {
+            tenant_id: tenantId,
+            anpr_relay_token: token,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'tenant_id' }
+        );
+      upsertError = error;
+    } catch (err: any) {
+      upsertError = err;
+    }
+
+    // If column-based fails, try key-value approach
+    if (upsertError) {
+      try {
+        const { error: kvError } = await adminClient
+          .from('tenant_secrets')
+          .upsert(
+            {
+              tenant_id: tenantId,
+              key: 'anpr_relay_token',
+              value: token,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'tenant_id,key' }
+          );
+        upsertError = kvError;
+      } catch (kvErr: any) {
+        upsertError = kvErr;
+      }
+    }
 
     if (upsertError) {
       console.error('[ANPR Relay Token] Failed to save token:', upsertError);
       return NextResponse.json(
-        { error: 'Failed to save relay token' },
+        { error: 'Failed to save relay token', details: upsertError.message },
         { status: 500 }
       );
     }

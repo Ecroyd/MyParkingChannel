@@ -40,28 +40,49 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Fetch token from tenant_secrets
-    const { data: secret, error: secretError } = await adminClient
+    // Fetch token from tenant_secrets - try column-based first, then key-value
+    let token: string | null = null;
+    let rotatedAt: string | null = null;
+
+    // Try column-based approach
+    const { data: columnSecret, error: columnError } = await adminClient
       .from('tenant_secrets')
-      .select('value, updated_at')
+      .select('anpr_relay_token, updated_at')
       .eq('tenant_id', tenantId)
-      .eq('key', 'anpr_relay_token')
       .maybeSingle();
 
-    if (secretError && secretError.code !== 'PGRST116') {
-      // PGRST116 = not found, which is okay
-      console.error('[ANPR Relay Token] Error fetching token:', secretError);
-      return NextResponse.json(
-        { error: 'Failed to fetch relay token' },
-        { status: 500 }
-      );
+    if (!columnError && columnSecret) {
+      token = columnSecret.anpr_relay_token || null;
+      rotatedAt = columnSecret.updated_at || null;
+    } else {
+      // Try key-value approach
+      const { data: kvSecret, error: kvError } = await adminClient
+        .from('tenant_secrets')
+        .select('value, updated_at')
+        .eq('tenant_id', tenantId)
+        .eq('key', 'anpr_relay_token')
+        .maybeSingle();
+
+      if (kvError && kvError.code !== 'PGRST116') {
+        // PGRST116 = not found, which is okay
+        console.error('[ANPR Relay Token] Error fetching token:', kvError);
+        return NextResponse.json(
+          { error: 'Failed to fetch relay token' },
+          { status: 500 }
+        );
+      }
+
+      if (kvSecret) {
+        token = kvSecret.value || null;
+        rotatedAt = kvSecret.updated_at || null;
+      }
     }
 
     return NextResponse.json(
       {
         ok: true,
-        token: secret?.value || null,
-        rotatedAt: secret?.updated_at || null,
+        token,
+        rotatedAt,
       },
       {
         headers: {
