@@ -64,29 +64,44 @@ export async function POST(req: NextRequest) {
   const tenantId = device.tenant_id;
   const plateNormalised = body.plate ? normalisePlate(body.plate) : null;
 
-  // 2) Try to match booking by plate (for ANPR)
+  // 2) Check if this is a staff vehicle first (staff vehicles always allowed)
   let matchedBookingId: string | null = null;
   let result: 'allow' | 'deny' = 'deny';
   let reason: string | null = null;
 
   if (plateNormalised) {
-    const earlyToleranceHours = 4;
-    const lateToleranceHours = 8;
-    const from = new Date(eventAt.getTime() - earlyToleranceHours * 3600_000).toISOString();
-    const to = new Date(eventAt.getTime() + lateToleranceHours * 3600_000).toISOString();
-
-    const { data: booking, error: bookingError } = await supabase
-      .from('bookings')
-      .select('id, start_at, end_at, status, checked_in_at, checked_out_at')
+    // Check for staff vehicle first
+    const { data: staffVehicle } = await supabase
+      .from('staff_vehicles')
+      .select('id, description')
       .eq('tenant_id', tenantId)
-      .ilike('plate', plateNormalised)
-      .lte('start_at', to)
-      .gte('end_at', from)
-      .order('start_at', { ascending: true })
-      .limit(1)
+      .eq('plate', plateNormalised)
+      .eq('is_active', true)
       .maybeSingle();
 
-    if (!bookingError && booking?.id) {
+    if (staffVehicle) {
+      // Staff vehicle - always allow
+      result = 'allow';
+      reason = 'Staff vehicle - always allowed';
+    } else {
+      // Try to match booking by plate (for ANPR)
+      const earlyToleranceHours = 4;
+      const lateToleranceHours = 8;
+      const from = new Date(eventAt.getTime() - earlyToleranceHours * 3600_000).toISOString();
+      const to = new Date(eventAt.getTime() + lateToleranceHours * 3600_000).toISOString();
+
+      const { data: booking, error: bookingError } = await supabase
+        .from('bookings')
+        .select('id, start_at, end_at, status, checked_in_at, checked_out_at')
+        .eq('tenant_id', tenantId)
+        .ilike('plate', plateNormalised)
+        .lte('start_at', to)
+        .gte('end_at', from)
+        .order('start_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (!bookingError && booking?.id) {
       matchedBookingId = booking.id;
       result = 'allow';
       reason = null;
@@ -112,10 +127,10 @@ export async function POST(req: NextRequest) {
             gate_status: 'departed'
           })
           .eq('id', booking.id);
+      } else {
+        result = 'deny';
+        reason = 'No matching booking for plate';
       }
-    } else {
-      result = 'deny';
-      reason = 'No matching booking for plate';
     }
   } else {
     // If this is a QR event instead
