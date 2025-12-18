@@ -696,6 +696,10 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
   const [testingVideofitVehicle, setTestingVideofitVehicle] = useState(false);
   const [videofitPingResult, setVideofitPingResult] = useState<{ success: boolean; message?: string } | null>(null);
   const [videofitVehicleResult, setVideofitVehicleResult] = useState<{ success: boolean; message?: string } | null>(null);
+  const [relayToken, setRelayToken] = useState<string | null>(null);
+  const [relayTokenLoading, setRelayTokenLoading] = useState(false);
+  const [relayTokenGenerating, setRelayTokenGenerating] = useState(false);
+  const [showRelayToken, setShowRelayToken] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -726,6 +730,26 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
     };
 
     fetchConfig();
+  }, [tenantId]);
+
+  // Fetch relay token on mount
+  useEffect(() => {
+    const fetchRelayToken = async () => {
+      try {
+        setRelayTokenLoading(true);
+        const res = await fetch(`/api/admin/anpr/relay-token?${new URLSearchParams({ tenantId }).toString()}`);
+        if (res.ok) {
+          const data = (await res.json()) as { ok: boolean; token: string | null };
+          setRelayToken(data.token);
+        }
+      } catch (err) {
+        console.error('Failed to fetch relay token:', err);
+      } finally {
+        setRelayTokenLoading(false);
+      }
+    };
+
+    fetchRelayToken();
   }, [tenantId]);
 
   const handleSave = async () => {
@@ -1173,6 +1197,117 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
                 Default vehicle group (default: 4 = Self Park)
               </p>
             </div>
+          </div>
+        </div>
+
+        {/* ANPR Relay (On-Site Agent) */}
+        <div className="space-y-4 border-t pt-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold">ANPR Relay (On-Site Agent)</h3>
+              <p className="text-xs text-gray-600">
+                Token for on-site PowerShell relay script to poll vehicle updates
+              </p>
+            </div>
+            <button
+              onClick={async () => {
+                try {
+                  setRelayTokenGenerating(true);
+                  const res = await fetch(
+                    `/api/admin/anpr/relay-token/generate?${new URLSearchParams({ tenantId }).toString()}`,
+                    { method: 'POST' }
+                  );
+                  if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error(data.error || 'Failed to generate token');
+                  }
+                  const data = (await res.json()) as { ok: boolean; token: string };
+                  setRelayToken(data.token);
+                  setShowRelayToken(true); // Show token after generation
+                  alert('Relay token generated successfully');
+                } catch (err: any) {
+                  alert(err.message || 'Failed to generate token');
+                } finally {
+                  setRelayTokenGenerating(false);
+                }
+              }}
+              disabled={relayTokenGenerating}
+              className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {relayTokenGenerating ? 'Generating...' : relayToken ? 'Rotate Token' : 'Generate Token'}
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Relay Token
+              </label>
+              {relayTokenLoading ? (
+                <div className="text-sm text-gray-500">Loading...</div>
+              ) : relayToken ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type={showRelayToken ? 'text' : 'password'}
+                    value={relayToken}
+                    readOnly
+                    className="flex-1 border rounded px-2 py-1 text-sm font-mono bg-gray-50"
+                  />
+                  <button
+                    onClick={() => setShowRelayToken(!showRelayToken)}
+                    className="px-3 py-1 text-xs border rounded hover:bg-gray-50"
+                  >
+                    {showRelayToken ? 'Hide' : 'Show'}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(relayToken);
+                        alert('Token copied to clipboard');
+                      } catch (err) {
+                        alert('Failed to copy token');
+                      }
+                    }}
+                    className="px-3 py-1 text-xs border rounded hover:bg-gray-50"
+                  >
+                    Copy
+                  </button>
+                </div>
+              ) : (
+                <div className="text-sm text-gray-500">No relay token yet. Click "Generate Token" to create one.</div>
+              )}
+              <p className="text-xs text-gray-500 mt-1">
+                Secure token for on-site PowerShell relay script authentication
+              </p>
+            </div>
+
+            {relayToken && (
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  PowerShell Config (paste into C:\ParkingChannel\anpr-relay.json)
+                </label>
+                <textarea
+                  readOnly
+                  value={JSON.stringify(
+                    {
+                      parkingChannelBaseUrl: integrationOrigin || 'https://myparkingchannel.app',
+                      tenantId: tenantId,
+                      relayToken: relayToken,
+                      siteClientLicense: config?.videofit_site_client_license || 18834562,
+                      locPcNo: config?.videofit_loc_pc_no ?? 0,
+                      defaultGroup: config?.videofit_default_group ?? 4,
+                      pollSeconds: 60,
+                    },
+                    null,
+                    2
+                  )}
+                  className="w-full border rounded px-2 py-1 text-xs font-mono bg-gray-50 h-32 resize-none"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Copy this JSON and save it to C:\ParkingChannel\anpr-relay.json on the ANPR PC
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
