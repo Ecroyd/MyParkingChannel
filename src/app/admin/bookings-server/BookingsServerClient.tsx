@@ -479,6 +479,9 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-2">
                           <BookingHighlightIcon highlightCode={booking.highlight_code || 'none'} />
+                          {booking.reference && (
+                            <span className="text-sm font-semibold text-gray-900">#{booking.reference}</span>
+                          )}
                           <h3 className="font-medium text-gray-900">
                             {booking.customer_name || 'Unknown Customer'}
                           </h3>
@@ -496,9 +499,6 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
                             occupancyPercent={booking.dynamic_pricing_occupancy_percent}
                             ruleId={booking.dynamic_pricing_rule_id}
                           />
-                          {booking.reference && (
-                            <span className="text-sm text-gray-500">#{booking.reference}</span>
-                          )}
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-600">
                           <div>
