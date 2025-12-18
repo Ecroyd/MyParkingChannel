@@ -11,10 +11,11 @@ function normalisePlate(plate: string): string {
 
 export async function PUT(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const vehicleId = params.id;
+    const { id } = await params;
+    const vehicleId = id;
     const body = await req.json();
     const { plate, description, is_active } = body;
 
@@ -108,10 +109,11 @@ export async function PUT(
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const vehicleId = params.id;
+    const { id } = await params;
+    const vehicleId = id;
 
     const supabase = await createServerClient();
     const adminClient = createAdminClient();
