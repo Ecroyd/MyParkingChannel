@@ -102,31 +102,32 @@ export async function POST(req: NextRequest) {
         .maybeSingle();
 
       if (!bookingError && booking?.id) {
-      matchedBookingId = booking.id;
-      result = 'allow';
-      reason = null;
+        matchedBookingId = booking.id;
+        result = 'allow';
+        reason = null;
 
-      // Update check-in / check-out timestamps on the booking
-      if (body.direction === 'entry') {
-        // Only set checked_in_at if not already set (don't overwrite existing)
-        await supabase
-          .from('bookings')
-          .update({ 
-            checked_in_at: booking.checked_in_at || eventAt.toISOString(),
-            checked_out_at: null, // Clear check-out if they're checking in again
-            gate_status: 'arrived'
-          })
-          .eq('id', booking.id);
-      } else if (body.direction === 'exit') {
-        // Set checked_out_at, and ensure checked_in_at is set if missing
-        await supabase
-          .from('bookings')
-          .update({ 
-            checked_out_at: eventAt.toISOString(),
-            checked_in_at: booking.checked_in_at || eventAt.toISOString(),
-            gate_status: 'departed'
-          })
-          .eq('id', booking.id);
+        // Update check-in / check-out timestamps on the booking
+        if (body.direction === 'entry') {
+          // Only set checked_in_at if not already set (don't overwrite existing)
+          await supabase
+            .from('bookings')
+            .update({ 
+              checked_in_at: booking.checked_in_at || eventAt.toISOString(),
+              checked_out_at: null, // Clear check-out if they're checking in again
+              gate_status: 'arrived'
+            })
+            .eq('id', booking.id);
+        } else if (body.direction === 'exit') {
+          // Set checked_out_at, and ensure checked_in_at is set if missing
+          await supabase
+            .from('bookings')
+            .update({ 
+              checked_out_at: eventAt.toISOString(),
+              checked_in_at: booking.checked_in_at || eventAt.toISOString(),
+              gate_status: 'departed'
+            })
+            .eq('id', booking.id);
+        }
       } else {
         result = 'deny';
         reason = 'No matching booking for plate';
