@@ -61,13 +61,48 @@ export async function GET(req: NextRequest) {
       departure_grace_minutes: 480,
       whitelist_lookahead_days: 7,
       whitelist_keep_after_end_hours: 24,
+      videofit_api_url: null,
+      videofit_username: null,
+      videofit_password: null,
       csv_token_last_rotated_at: null,
     };
 
     // Merge defaults with existing config to ensure new fields are present
     const mergedConfig = config ? { ...defaultConfig, ...config } : defaultConfig;
 
-    return NextResponse.json({ config: mergedConfig });
+    // Fetch Videofit secrets from tenant_secrets
+    const { data: videofitSecrets } = await adminClient
+      .from('tenant_secrets')
+      .select('key, value')
+      .eq('tenant_id', tenantId)
+      .in('key', [
+        'videofit_base_url',
+        'videofit_site_client_license',
+        'videofit_loc_pc_no',
+        'videofit_default_group',
+      ]);
+
+    const getSecret = (key: string): string | null => {
+      const secret = videofitSecrets?.find((s) => s.key === key);
+      return secret?.value || null;
+    };
+
+    // Add Videofit config to response
+    const responseConfig = {
+      ...mergedConfig,
+      videofit_base_url: getSecret('videofit_base_url'),
+      videofit_site_client_license: getSecret('videofit_site_client_license')
+        ? parseInt(getSecret('videofit_site_client_license')!, 10)
+        : null,
+      videofit_loc_pc_no: getSecret('videofit_loc_pc_no')
+        ? parseInt(getSecret('videofit_loc_pc_no')!, 10)
+        : 0,
+      videofit_default_group: getSecret('videofit_default_group')
+        ? parseInt(getSecret('videofit_default_group')!, 10)
+        : 4,
+    };
+
+    return NextResponse.json({ config: responseConfig });
   } catch (error: any) {
     console.error('ANPR config GET error:', error);
     return NextResponse.json(
@@ -118,6 +153,10 @@ export async function PUT(req: NextRequest) {
       departure_grace_minutes,
       whitelist_lookahead_days,
       whitelist_keep_after_end_hours,
+      videofit_base_url,
+      videofit_site_client_license,
+      videofit_loc_pc_no,
+      videofit_default_group,
     } = body;
 
     // Validate inputs
@@ -163,6 +202,47 @@ export async function PUT(req: NextRequest) {
       );
     }
 
+    if (videofit_base_url !== undefined && videofit_base_url && typeof videofit_base_url === 'string') {
+      try {
+        new URL(videofit_base_url);
+      } catch {
+        return NextResponse.json(
+          { error: 'videofit_base_url must be a valid URL' },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (videofit_site_client_license !== undefined && videofit_site_client_license !== null) {
+      const license = parseInt(String(videofit_site_client_license), 10);
+      if (isNaN(license) || license <= 0) {
+        return NextResponse.json(
+          { error: 'videofit_site_client_license must be a positive integer' },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (videofit_loc_pc_no !== undefined && videofit_loc_pc_no !== null) {
+      const locPcNo = parseInt(String(videofit_loc_pc_no), 10);
+      if (isNaN(locPcNo) || locPcNo < 0) {
+        return NextResponse.json(
+          { error: 'videofit_loc_pc_no must be a non-negative integer' },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (videofit_default_group !== undefined && videofit_default_group !== null) {
+      const group = parseInt(String(videofit_default_group), 10);
+      if (isNaN(group) || group <= 0) {
+        return NextResponse.json(
+          { error: 'videofit_default_group must be a positive integer' },
+          { status: 400 }
+        );
+      }
+    }
+
     // Build update object
     const updateData: any = {
       updated_at: new Date().toISOString(),
@@ -176,6 +256,63 @@ export async function PUT(req: NextRequest) {
     if (departure_grace_minutes !== undefined) updateData.departure_grace_minutes = departure_grace_minutes;
     if (whitelist_lookahead_days !== undefined) updateData.whitelist_lookahead_days = whitelist_lookahead_days;
     if (whitelist_keep_after_end_hours !== undefined) updateData.whitelist_keep_after_end_hours = whitelist_keep_after_end_hours;
+
+    // Save Videofit secrets to tenant_secrets
+    const videofitSecrets: Array<{ tenant_id: string; key: string; value: string }> = [];
+    if (videofit_base_url !== undefined) {
+      videofitSecrets.push({
+        tenant_id: tenantId,
+        key: 'videofit_base_url',
+        value: videofit_base_url || '',
+      });
+    }
+    if (videofit_site_client_license !== undefined) {
+      videofitSecrets.push({
+        tenant_id: tenantId,
+        key: 'videofit_site_client_license',
+        value: String(videofit_site_client_license || ''),
+      });
+    }
+    if (videofit_loc_pc_no !== undefined) {
+      videofitSecrets.push({
+        tenant_id: tenantId,
+        key: 'videofit_loc_pc_no',
+        value: String(videofit_loc_pc_no ?? 0),
+      });
+    }
+    if (videofit_default_group !== undefined) {
+      videofitSecrets.push({
+        tenant_id: tenantId,
+        key: 'videofit_default_group',
+        value: String(videofit_default_group ?? 4),
+      });
+    }
+
+    // Upsert Videofit secrets
+    if (videofitSecrets.length > 0) {
+      for (const secret of videofitSecrets) {
+        if (secret.value) {
+          await adminClient
+            .from('tenant_secrets')
+            .upsert(
+              {
+                tenant_id: secret.tenant_id,
+                key: secret.key,
+                value: secret.value,
+                updated_at: new Date().toISOString(),
+              },
+              { onConflict: 'tenant_id,key' }
+            );
+        } else {
+          // Delete if empty
+          await adminClient
+            .from('tenant_secrets')
+            .delete()
+            .eq('tenant_id', secret.tenant_id)
+            .eq('key', secret.key);
+        }
+      }
+    }
 
     // Upsert config
     const { data: config, error: configError } = await adminClient

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServerSupabase } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server';
 
 export async function POST(req: Request) {
   try {
@@ -23,6 +24,24 @@ export async function POST(req: Request) {
     if (error) {
       console.error('BOOKING_UPDATE_ERROR', { id, updates, error });
       return NextResponse.json({ error: error.message }, { status: status ?? 400 });
+    }
+
+    // Sync to Videofit if configured (fire and forget)
+    if (data) {
+      const { syncBookingToVideofit } = await import('@/lib/videofit/bookingSync');
+      const adminClient = createAdminClient();
+      void syncBookingToVideofit(
+        {
+          id: data.id,
+          tenant_id: data.tenant_id,
+          plate: data.plate,
+          start_at: data.start_at,
+          end_at: data.end_at,
+          status: data.status,
+        },
+        'updated',
+        adminClient
+      ).catch((err) => console.error('[Videofit] Background sync error:', err));
     }
 
     return NextResponse.json({ data });

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { jwtVerify } from 'jose';
 import { createServerClientDirect } from '@/lib/supabase/server-direct';
+import { createAdminClient } from '@/lib/supabase/server';
 
 const COOKIE_NAME = 'booking_session';
 const secret = new TextEncoder().encode(process.env.BOOKING_SESSION_SECRET || 'change-me-in-env');
@@ -58,6 +59,24 @@ export async function POST(req: Request) {
     if (updateError) {
       console.error('Cancel booking error:', updateError);
       return NextResponse.json({ message: updateError.message }, { status: 400 });
+    }
+
+    // Sync to Videofit if configured (fire and forget)
+    if (updatedBooking) {
+      const { syncBookingToVideofit } = await import('@/lib/videofit/bookingSync');
+      const adminClient = createAdminClient();
+      void syncBookingToVideofit(
+        {
+          id: updatedBooking.id,
+          tenant_id: updatedBooking.tenant_id,
+          plate: updatedBooking.plate,
+          start_at: updatedBooking.start_at,
+          end_at: updatedBooking.end_at,
+          status: 'cancelled',
+        },
+        'cancelled',
+        adminClient
+      ).catch((err) => console.error('[Videofit] Background sync error:', err));
     }
 
     return NextResponse.json({ 

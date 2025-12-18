@@ -112,6 +112,23 @@ export async function PATCH(
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
+    // Sync to Videofit if configured (fire and forget)
+    if (data && (gateStatus === 'cancelled' || updates.status === 'cancelled')) {
+      const { syncBookingToVideofit } = await import('@/lib/videofit/bookingSync');
+      void syncBookingToVideofit(
+        {
+          id: data.id,
+          tenant_id: data.tenant_id,
+          plate: data.plate,
+          start_at: data.start_at,
+          end_at: data.end_at,
+          status: 'cancelled',
+        },
+        'cancelled',
+        adminClient
+      ).catch((err) => console.error('[Videofit] Background sync error:', err));
+    }
+
     return NextResponse.json({ booking: data }, { status: 200 });
   } catch (err: any) {
     console.error('Gate status API error', err);

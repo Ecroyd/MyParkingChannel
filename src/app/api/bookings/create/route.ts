@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSupabase } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
 import { evaluateBookingRules } from '@/lib/booking-rules/evaluation'
 import { BookingRule } from '@/lib/validation/booking-rules'
 import { makeDedupeKey, checkDuplicateBooking } from '@/lib/bookings/dedupe'
@@ -186,6 +187,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 400 })
   }
   
+  // Sync to Videofit if configured (fire and forget)
+  if (data) {
+    const { syncBookingToVideofit } = await import('@/lib/videofit/bookingSync');
+    const adminClient = createAdminClient();
+    void syncBookingToVideofit(
+      {
+        id: data.id,
+        tenant_id: tenantId,
+        plate: normalizedPlate,
+        start_at: start_at_uk.toISOString(),
+        end_at: end_at_uk.toISOString(),
+        status: 'reserved',
+      },
+      'created',
+      adminClient
+    ).catch((err) => console.error('[Videofit] Background sync error:', err));
+  }
+
   // Return booking data with surcharge information
   const response = {
     ok: true, 

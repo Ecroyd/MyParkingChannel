@@ -674,6 +674,10 @@ type AnprConfig = {
   departure_grace_minutes: number;
   whitelist_lookahead_days: number;
   whitelist_keep_after_end_hours: number;
+  videofit_base_url?: string | null;
+  videofit_site_client_license?: number | null;
+  videofit_loc_pc_no?: number | null;
+  videofit_default_group?: number | null;
   csv_token_last_rotated_at?: string | null;
 };
 
@@ -688,6 +692,10 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
   const [testingUrl, setTestingUrl] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message?: string; rowCount?: number } | null>(null);
   const [showUrlModal, setShowUrlModal] = useState(false);
+  const [testingVideofitPing, setTestingVideofitPing] = useState(false);
+  const [testingVideofitVehicle, setTestingVideofitVehicle] = useState(false);
+  const [videofitPingResult, setVideofitPingResult] = useState<{ success: boolean; message?: string } | null>(null);
+  const [videofitVehicleResult, setVideofitVehicleResult] = useState<{ success: boolean; message?: string } | null>(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -1021,6 +1029,150 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
             <p className="text-xs text-gray-500 mt-1">
               Hours after booking end to keep in whitelist CSV (default: 24 hours)
             </p>
+          </div>
+        </div>
+
+        {/* Videofit Integration */}
+        <div className="space-y-4 border-t pt-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold">Videofit SendDbBulkUpdate Integration</h3>
+              <p className="text-xs text-gray-600">
+                Push vehicle records directly to Videofit ANPR system
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  try {
+                    setTestingVideofitPing(true);
+                    setVideofitPingResult(null);
+                    const res = await fetch(
+                      `/api/admin/anpr/test-videofit-ping?${new URLSearchParams({ tenantId }).toString()}`,
+                      { method: 'POST' }
+                    );
+                    const data = await res.json();
+                    if (res.ok && data.success) {
+                      setVideofitPingResult({ success: true, message: data.message });
+                    } else {
+                      setVideofitPingResult({ success: false, message: data.error || 'Ping failed' });
+                    }
+                  } catch (err: any) {
+                    setVideofitPingResult({ success: false, message: err.message || 'Ping failed' });
+                  } finally {
+                    setTestingVideofitPing(false);
+                  }
+                }}
+                disabled={testingVideofitPing || !config.videofit_base_url}
+                className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {testingVideofitPing ? 'Testing...' : 'Test ANPR Connection'}
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    setTestingVideofitVehicle(true);
+                    setVideofitVehicleResult(null);
+                    const res = await fetch(
+                      `/api/admin/anpr/test-videofit-vehicle?${new URLSearchParams({ tenantId }).toString()}`,
+                      { method: 'POST' }
+                    );
+                    const data = await res.json();
+                    if (res.ok && data.success) {
+                      setVideofitVehicleResult({ success: true, message: data.message });
+                    } else {
+                      setVideofitVehicleResult({ success: false, message: data.error || 'Test failed' });
+                    }
+                  } catch (err: any) {
+                    setVideofitVehicleResult({ success: false, message: err.message || 'Test failed' });
+                  } finally {
+                    setTestingVideofitVehicle(false);
+                  }
+                }}
+                disabled={testingVideofitVehicle || !config.videofit_base_url || !config.videofit_site_client_license}
+                className="px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {testingVideofitVehicle ? 'Sending...' : 'Send Test Vehicle'}
+              </button>
+            </div>
+          </div>
+
+          {(videofitPingResult || videofitVehicleResult) && (
+            <div
+              className={`border rounded px-3 py-2 text-sm ${
+                (videofitPingResult?.success || videofitVehicleResult?.success)
+                  ? 'bg-green-50 border-green-200 text-green-800'
+                  : 'bg-red-50 border-red-200 text-red-800'
+              }`}
+            >
+              {videofitPingResult?.message || videofitVehicleResult?.message}
+            </div>
+          )}
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Base URL
+              </label>
+              <input
+                type="url"
+                value={config.videofit_base_url || ''}
+                onChange={(e) => setConfig({ ...config, videofit_base_url: e.target.value || null })}
+                placeholder="https://192.168.1.50"
+                className="w-full border rounded px-2 py-1 text-sm"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Videofit server base URL (e.g. https://192.168.1.50)
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Site Client License
+              </label>
+              <input
+                type="number"
+                value={config.videofit_site_client_license || ''}
+                onChange={(e) => setConfig({ ...config, videofit_site_client_license: e.target.value ? parseInt(e.target.value, 10) : null })}
+                placeholder="18834562"
+                className="w-full border rounded px-2 py-1 text-sm"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Videofit site client license number
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Location PC No
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={config.videofit_loc_pc_no ?? 0}
+                onChange={(e) => setConfig({ ...config, videofit_loc_pc_no: parseInt(e.target.value) || 0 })}
+                className="w-full border rounded px-2 py-1 text-sm"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Location PC number (default: 0)
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Default Group
+              </label>
+              <input
+                type="number"
+                min="1"
+                value={config.videofit_default_group ?? 4}
+                onChange={(e) => setConfig({ ...config, videofit_default_group: parseInt(e.target.value) || 4 })}
+                className="w-full border rounded px-2 py-1 text-sm"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Default vehicle group (default: 4 = Self Park)
+              </p>
+            </div>
           </div>
         </div>
 
