@@ -44,43 +44,17 @@ export async function POST(req: NextRequest) {
     // Generate strong token (64 hex chars = 32 bytes)
     const token = randomBytes(32).toString('hex');
 
-    // Try column-based approach first (like stripe_secret_key)
-    let upsertError = null;
-    try {
-      const { error } = await adminClient
-        .from('tenant_secrets')
-        .upsert(
-          {
-            tenant_id: tenantId,
-            anpr_relay_token: token,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'tenant_id' }
-        );
-      upsertError = error;
-    } catch (err: any) {
-      upsertError = err;
-    }
-
-    // If column-based fails, try key-value approach
-    if (upsertError) {
-      try {
-        const { error: kvError } = await adminClient
-          .from('tenant_secrets')
-          .upsert(
-            {
-              tenant_id: tenantId,
-              key: 'anpr_relay_token',
-              value: token,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: 'tenant_id,key' }
-          );
-        upsertError = kvError;
-      } catch (kvErr: any) {
-        upsertError = kvErr;
-      }
-    }
+    // Use column-based approach (like stripe_secret_key, anpr_api_key)
+    const { error: upsertError } = await adminClient
+      .from('tenant_secrets')
+      .upsert(
+        {
+          tenant_id: tenantId,
+          anpr_relay_token: token,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'tenant_id' }
+      );
 
     if (upsertError) {
       console.error('[ANPR Relay Token] Failed to save token:', upsertError);
