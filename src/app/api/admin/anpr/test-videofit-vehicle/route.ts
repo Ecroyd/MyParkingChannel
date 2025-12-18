@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { sendDbBulkUpdate, type VideofitConfig, type VideofitRow } from '@/lib/videofit/sendDbBulkUpdate';
+import crypto from 'crypto';
 
 export async function POST(req: NextRequest) {
   try {
