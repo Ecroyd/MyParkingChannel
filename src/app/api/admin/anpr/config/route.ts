@@ -70,35 +70,25 @@ export async function GET(req: NextRequest) {
     // Merge defaults with existing config to ensure new fields are present
     const mergedConfig = config ? { ...defaultConfig, ...config } : defaultConfig;
 
-    // Fetch Videofit secrets from tenant_secrets
+    // Fetch Videofit secrets from tenant_secrets (column-based storage)
     const { data: videofitSecrets } = await adminClient
       .from('tenant_secrets')
-      .select('key, value')
+      .select('videofit_base_url, videofit_site_client_license, videofit_loc_pc_no, videofit_default_group')
       .eq('tenant_id', tenantId)
-      .in('key', [
-        'videofit_base_url',
-        'videofit_site_client_license',
-        'videofit_loc_pc_no',
-        'videofit_default_group',
-      ]);
-
-    const getSecret = (key: string): string | null => {
-      const secret = videofitSecrets?.find((s) => s.key === key);
-      return secret?.value || null;
-    };
+      .maybeSingle();
 
     // Add Videofit config to response
     const responseConfig = {
       ...mergedConfig,
-      videofit_base_url: getSecret('videofit_base_url'),
-      videofit_site_client_license: getSecret('videofit_site_client_license')
-        ? parseInt(getSecret('videofit_site_client_license')!, 10)
+      videofit_base_url: videofitSecrets?.videofit_base_url || null,
+      videofit_site_client_license: videofitSecrets?.videofit_site_client_license
+        ? parseInt(String(videofitSecrets.videofit_site_client_license), 10)
         : null,
-      videofit_loc_pc_no: getSecret('videofit_loc_pc_no')
-        ? parseInt(getSecret('videofit_loc_pc_no')!, 10)
+      videofit_loc_pc_no: videofitSecrets?.videofit_loc_pc_no
+        ? parseInt(String(videofitSecrets.videofit_loc_pc_no), 10)
         : 0,
-      videofit_default_group: getSecret('videofit_default_group')
-        ? parseInt(getSecret('videofit_default_group')!, 10)
+      videofit_default_group: videofitSecrets?.videofit_default_group
+        ? parseInt(String(videofitSecrets.videofit_default_group), 10)
         : 4,
     };
 
@@ -257,60 +247,40 @@ export async function PUT(req: NextRequest) {
     if (whitelist_lookahead_days !== undefined) updateData.whitelist_lookahead_days = whitelist_lookahead_days;
     if (whitelist_keep_after_end_hours !== undefined) updateData.whitelist_keep_after_end_hours = whitelist_keep_after_end_hours;
 
-    // Save Videofit secrets to tenant_secrets
-    const videofitSecrets: Array<{ tenant_id: string; key: string; value: string }> = [];
+    // Save Videofit secrets to tenant_secrets (column-based storage)
+    const videofitSecretsData: any = {
+      tenant_id: tenantId,
+      updated_at: new Date().toISOString(),
+    };
+
     if (videofit_base_url !== undefined) {
-      videofitSecrets.push({
-        tenant_id: tenantId,
-        key: 'videofit_base_url',
-        value: videofit_base_url || '',
-      });
+      videofitSecretsData.videofit_base_url = videofit_base_url || null;
     }
     if (videofit_site_client_license !== undefined) {
-      videofitSecrets.push({
-        tenant_id: tenantId,
-        key: 'videofit_site_client_license',
-        value: String(videofit_site_client_license || ''),
-      });
+      videofitSecretsData.videofit_site_client_license = videofit_site_client_license
+        ? String(videofit_site_client_license)
+        : null;
     }
     if (videofit_loc_pc_no !== undefined) {
-      videofitSecrets.push({
-        tenant_id: tenantId,
-        key: 'videofit_loc_pc_no',
-        value: String(videofit_loc_pc_no ?? 0),
-      });
+      videofitSecretsData.videofit_loc_pc_no = videofit_loc_pc_no !== null && videofit_loc_pc_no !== undefined
+        ? String(videofit_loc_pc_no)
+        : '0';
     }
     if (videofit_default_group !== undefined) {
-      videofitSecrets.push({
-        tenant_id: tenantId,
-        key: 'videofit_default_group',
-        value: String(videofit_default_group ?? 4),
-      });
+      videofitSecretsData.videofit_default_group = videofit_default_group !== null && videofit_default_group !== undefined
+        ? String(videofit_default_group)
+        : '4';
     }
 
-    // Upsert Videofit secrets
-    if (videofitSecrets.length > 0) {
-      for (const secret of videofitSecrets) {
-        if (secret.value) {
-          await adminClient
-            .from('tenant_secrets')
-            .upsert(
-              {
-                tenant_id: secret.tenant_id,
-                key: secret.key,
-                value: secret.value,
-                updated_at: new Date().toISOString(),
-              },
-              { onConflict: 'tenant_id,key' }
-            );
-        } else {
-          // Delete if empty
-          await adminClient
-            .from('tenant_secrets')
-            .delete()
-            .eq('tenant_id', secret.tenant_id)
-            .eq('key', secret.key);
-        }
+    // Upsert Videofit secrets (only if at least one field is being updated)
+    if (Object.keys(videofitSecretsData).length > 2) { // More than just tenant_id and updated_at
+      const { error: secretsError } = await adminClient
+        .from('tenant_secrets')
+        .upsert(videofitSecretsData, { onConflict: 'tenant_id' });
+
+      if (secretsError) {
+        console.error('Error saving Videofit secrets:', secretsError);
+        // Don't fail the whole request, just log it
       }
     }
 

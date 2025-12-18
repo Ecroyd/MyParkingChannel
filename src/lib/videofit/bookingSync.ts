@@ -27,34 +27,29 @@ async function getVideofitConfig(
   adminClient: SupabaseClient
 ): Promise<{ defaultGroup: number } | null> {
   try {
-    const { data: secrets, error } = await adminClient
+    const { data: secret, error } = await adminClient
       .from('tenant_secrets')
-      .select('key, value')
+      .select('videofit_base_url, videofit_site_client_license, videofit_default_group')
       .eq('tenant_id', tenantId)
-      .in('key', [
-        'videofit_base_url',
-        'videofit_site_client_license',
-        'videofit_default_group',
-      ]);
+      .maybeSingle();
 
-    if (error || !secrets || secrets.length === 0) {
+    if (error || !secret) {
       return null;
     }
 
-    const getValue = (key: string): string | null => {
-      const secret = secrets.find((s) => s.key === key);
-      return secret?.value || null;
-    };
-
-    const baseUrl = getValue('videofit_base_url');
-    const siteClientLicense = parseInt(getValue('videofit_site_client_license') || '0', 10);
+    const baseUrl = secret.videofit_base_url;
+    const siteClientLicense = secret.videofit_site_client_license
+      ? parseInt(String(secret.videofit_site_client_license), 10)
+      : 0;
     
     // If base URL and license are set, Videofit is configured
     if (!baseUrl || !siteClientLicense) {
       return null;
     }
 
-    const defaultGroup = parseInt(getValue('videofit_default_group') || '4', 10);
+    const defaultGroup = secret.videofit_default_group
+      ? parseInt(String(secret.videofit_default_group), 10)
+      : 4;
 
     return {
       defaultGroup,

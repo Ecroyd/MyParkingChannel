@@ -37,34 +37,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    // Get Videofit config from tenant_secrets
-    const { data: secrets } = await adminClient
+    // Get Videofit config from tenant_secrets (column-based storage)
+    const { data: secret } = await adminClient
       .from('tenant_secrets')
-      .select('key, value')
+      .select('videofit_base_url, videofit_site_client_license, videofit_loc_pc_no, videofit_default_group')
       .eq('tenant_id', tenantId)
-      .in('key', [
-        'videofit_base_url',
-        'videofit_site_client_license',
-        'videofit_loc_pc_no',
-        'videofit_default_group',
-      ]);
+      .maybeSingle();
 
-    if (!secrets || secrets.length === 0) {
+    if (!secret) {
       return NextResponse.json(
         { error: 'Videofit not configured. Please set Videofit settings in ANPR configuration.' },
         { status: 400 }
       );
     }
 
-    const getValue = (key: string): string | null => {
-      const secret = secrets.find((s) => s.key === key);
-      return secret?.value || null;
-    };
-
-    const baseUrl = getValue('videofit_base_url');
-    const siteClientLicense = parseInt(getValue('videofit_site_client_license') || '0', 10);
-    const locPcNo = parseInt(getValue('videofit_loc_pc_no') || '0', 10);
-    const defaultGroup = parseInt(getValue('videofit_default_group') || '4', 10);
+    const baseUrl = secret.videofit_base_url;
+    const siteClientLicense = secret.videofit_site_client_license
+      ? parseInt(String(secret.videofit_site_client_license), 10)
+      : 0;
+    const locPcNo = secret.videofit_loc_pc_no
+      ? parseInt(String(secret.videofit_loc_pc_no), 10)
+      : 0;
+    const defaultGroup = secret.videofit_default_group
+      ? parseInt(String(secret.videofit_default_group), 10)
+      : 4;
 
     if (!baseUrl || !siteClientLicense) {
       return NextResponse.json(
