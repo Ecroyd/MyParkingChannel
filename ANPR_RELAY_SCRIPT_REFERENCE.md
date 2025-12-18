@@ -1,5 +1,57 @@
 # ANPR Relay Script Reference
 
+## SOAP Response Debugging
+
+**Important:** Always log the SOAP response to see if Videofit accepted or rejected the request.
+
+### In your `VideofitBulkUpdate` function, replace this:
+
+```powershell
+$null = Invoke-WebRequest -Method POST -Uri $videofitUrl `
+  -Headers @{ "SOAPAction" = $soapAction } `
+  -ContentType "text/xml; charset=utf-8" `
+  -Body $soap `
+  -UseBasicParsing `
+  -TimeoutSec 20 `
+  -DisableKeepAlive
+
+Write-Host "[relay] SOAP OK"
+```
+
+### With this (captures and prints response):
+
+```powershell
+$resp = Invoke-WebRequest -Method POST -Uri $videofitUrl `
+  -Headers @{ "SOAPAction" = $soapAction } `
+  -ContentType "text/xml; charset=utf-8" `
+  -Body $soap `
+  -UseBasicParsing `
+  -TimeoutSec 20 `
+  -DisableKeepAlive
+
+Write-Host ("[relay] SOAP HTTP " + $resp.StatusCode)
+if ($resp.Content) {
+  $preview = $resp.Content
+  if ($preview.Length -gt 400) { $preview = $preview.Substring(0,400) + "..." }
+  Write-Host ("[relay] SOAP RESP: " + $preview)
+} else {
+  Write-Host "[relay] SOAP RESP: <empty>"
+}
+```
+
+**Why this matters:** The SOAP response body will tell you immediately whether Videofit accepted the request or silently rejected it. This is the key to debugging integration issues.
+
+**What to look for in the response:**
+- **Success indicators:** `<SendDbBulkUpdateResult>true</SendDbBulkUpdateResult>` or similar
+- **Error messages:** SOAP faults, validation errors, or rejection reasons
+- **Status codes:** HTTP 200 doesn't always mean success in SOAP
+
+**To debug:**
+1. Run the relay script
+2. Click "Send Test Vehicle" in the UI
+3. Check the PowerShell console output for lines starting with `[relay] SOAP RESP: ...`
+4. **Paste those lines** - the response will tell us immediately whether Videofit accepted it or silently rejected it
+
 ## Certificate Validation Callback Fix
 
 In the `VideofitBulkUpdate` function, replace the certificate callback assignment with this version:
@@ -218,3 +270,121 @@ if ($okIds.Count -gt 0) {
   Write-Host "[relay] No successful items to ACK."
 }
 ```
+
+## Diagnostics Collection
+
+The relay script should periodically collect diagnostic information about the Videofit system and POST it to the server. This helps locate where Videofit stores the known vehicles database and verify the system is running correctly.
+
+### Collect Diagnostics Function:
+
+```powershell
+function CollectVideofitDiagnostics {
+  $diag = @{
+    videofitProcess = $null
+    iisEndpoints = @()
+    recentFiles = @()
+    collectedAt = (Get-Date).ToUniversalTime().ToString("o")
+  }
+
+  # 1. Check if videofit.exe is running
+  $vfProcess = Get-Process -Name "videofit" -ErrorAction SilentlyContinue
+  if ($vfProcess) {
+    $diag.videofitProcess = @{
+      running = $true
+      pid = $vfProcess.Id
+      path = $vfProcess.Path
+      commandLine = (Get-WmiObject Win32_Process -Filter "ProcessId = $($vfProcess.Id)").CommandLine
+    }
+  } else {
+    $diag.videofitProcess = @{
+      running = $false
+    }
+  }
+
+  # 2. Find IIS ASMX endpoints under C:\inetpub\wwwroot
+  $wwwRoot = "C:\inetpub\wwwroot"
+  if (Test-Path $wwwRoot) {
+    $asmxFiles = Get-ChildItem -Path $wwwRoot -Filter "*.asmx" -Recurse -ErrorAction SilentlyContinue
+    $diag.iisEndpoints = $asmxFiles | ForEach-Object {
+      $relativePath = $_.FullName.Replace($wwwRoot, "").Replace("\", "/")
+      if (-not $relativePath.StartsWith("/")) { $relativePath = "/" + $relativePath }
+      $relativePath
+    }
+  }
+
+  # 3. Find recent file writes (last 5 minutes) in ProgramData/AppData/Snap directories
+  $cutoffTime = (Get-Date).AddMinutes(-5)
+  $searchPaths = @(
+    "$env:ProgramData",
+    "$env:AppData",
+    "$env:ProgramData\Snap",
+    "$env:AppData\Snap"
+  )
+
+  foreach ($searchPath in $searchPaths) {
+    if (Test-Path $searchPath) {
+      Get-ChildItem -Path $searchPath -Recurse -File -ErrorAction SilentlyContinue | 
+        Where-Object { 
+          $_.LastWriteTime -gt $cutoffTime -and (
+            $_.Extension -match "\.(db|mdb|accdb|sqlite|sqlite3)$" -or
+            $_.FullName -match "videofit" -or
+            $_.FullName -match "snap"
+          )
+        } | ForEach-Object {
+          $diag.recentFiles += $_.FullName
+        }
+    }
+  }
+
+  return $diag
+}
+```
+
+### POST Diagnostics to Server:
+
+```powershell
+function SendDiagnostics {
+  param($diagnostics)
+  
+  $body = $diagnostics | ConvertTo-Json -Depth 10
+
+  try {
+    $response = Invoke-RestMethod -Uri "$baseUrl/api/internal/anpr/videofit/diagnostics?tenantId=$tenantId" `
+      -Method POST `
+      -Headers @{ 
+        "Authorization" = "Bearer $relayToken"
+        "Content-Type" = "application/json" 
+      } `
+      -Body $body
+
+    Write-Host "[relay] Diagnostics sent successfully"
+    return $true
+  } catch {
+    Write-Host ("[relay] Failed to send diagnostics: " + $_.Exception.Message)
+    return $false
+  }
+}
+```
+
+### Usage in Relay Loop:
+
+```powershell
+# Collect and send diagnostics every 5 minutes (or on demand)
+$lastDiagnostics = Get-Date
+$diagnosticsInterval = New-TimeSpan -Minutes 5
+
+while ($true) {
+  # ... existing polling logic ...
+  
+  # Send diagnostics periodically
+  if ((Get-Date) - $lastDiagnostics -gt $diagnosticsInterval) {
+    $diag = CollectVideofitDiagnostics
+    SendDiagnostics -diagnostics $diag
+    $lastDiagnostics = Get-Date
+  }
+  
+  Start-Sleep -Seconds 60
+}
+```
+
+**Note:** The admin UI "Verify Test Vehicle" button retrieves the most recent diagnostics from the server. The relay script should POST diagnostics periodically or on-demand.

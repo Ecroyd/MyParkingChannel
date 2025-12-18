@@ -695,8 +695,14 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
   const [showUrlModal, setShowUrlModal] = useState(false);
   const [testingVideofitPing, setTestingVideofitPing] = useState(false);
   const [testingVideofitVehicle, setTestingVideofitVehicle] = useState(false);
+  const [verifyingDiagnostics, setVerifyingDiagnostics] = useState(false);
   const [videofitPingResult, setVideofitPingResult] = useState<{ success: boolean; message?: string } | null>(null);
   const [videofitVehicleResult, setVideofitVehicleResult] = useState<{ success: boolean; message?: string } | null>(null);
+  const [diagnosticsResult, setDiagnosticsResult] = useState<{
+    success: boolean;
+    diagnostics?: any;
+    message?: string;
+  } | null>(null);
   const [relayToken, setRelayToken] = useState<string | null>(null);
   const [relayTokenLoading, setRelayTokenLoading] = useState(false);
   const [relayTokenGenerating, setRelayTokenGenerating] = useState(false);
@@ -1126,18 +1132,119 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
               >
                 {testingVideofitVehicle ? 'Sending...' : 'Send Test Vehicle'}
               </button>
+              {config.videofit_mode === 'relay' && (
+                <button
+                  onClick={async () => {
+                    try {
+                      setVerifyingDiagnostics(true);
+                      setDiagnosticsResult(null);
+                      // Use admin endpoint that requires user auth (not relay token)
+                      const res = await fetch(
+                        `/api/admin/anpr/videofit/diagnostics?${new URLSearchParams({ tenantId }).toString()}`,
+                        { method: 'GET' }
+                      );
+                      const data = await res.json();
+                      if (res.ok && data.ok) {
+                        if (data.diagnostics) {
+                          setDiagnosticsResult({ success: true, diagnostics: data.diagnostics });
+                        } else {
+                          setDiagnosticsResult({
+                            success: false,
+                            message: data.message || 'No diagnostics available. The relay script should collect and POST diagnostics.',
+                          });
+                        }
+                      } else {
+                        setDiagnosticsResult({ success: false, message: data.error || 'Failed to fetch diagnostics' });
+                      }
+                    } catch (err: any) {
+                      setDiagnosticsResult({ success: false, message: err.message || 'Failed to fetch diagnostics' });
+                    } finally {
+                      setVerifyingDiagnostics(false);
+                    }
+                  }}
+                  disabled={verifyingDiagnostics || !relayToken}
+                  className="px-3 py-1.5 bg-purple-600 text-white text-sm rounded hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {verifyingDiagnostics ? 'Verifying...' : 'Verify Test Vehicle'}
+                </button>
+              )}
             </div>
           </div>
 
-          {(videofitPingResult || videofitVehicleResult) && (
-            <div
-              className={`border rounded px-3 py-2 text-sm ${
-                (videofitPingResult?.success || videofitVehicleResult?.success)
-                  ? 'bg-green-50 border-green-200 text-green-800'
-                  : 'bg-red-50 border-red-200 text-red-800'
-              }`}
-            >
-              {videofitPingResult?.message || videofitVehicleResult?.message}
+          {(videofitPingResult || videofitVehicleResult || diagnosticsResult) && (
+            <div className="space-y-2">
+              {(videofitPingResult || videofitVehicleResult) && (
+                <div
+                  className={`border rounded px-3 py-2 text-sm ${
+                    (videofitPingResult?.success || videofitVehicleResult?.success)
+                      ? 'bg-green-50 border-green-200 text-green-800'
+                      : 'bg-red-50 border-red-200 text-red-800'
+                  }`}
+                >
+                  {videofitPingResult?.message || videofitVehicleResult?.message}
+                </div>
+              )}
+              {diagnosticsResult && (
+                <div
+                  className={`border rounded px-3 py-2 text-sm ${
+                    diagnosticsResult.success
+                      ? 'bg-blue-50 border-blue-200 text-blue-800'
+                      : 'bg-red-50 border-red-200 text-red-800'
+                  }`}
+                >
+                  {diagnosticsResult.message ? (
+                    <div>{diagnosticsResult.message}</div>
+                  ) : diagnosticsResult.diagnostics ? (
+                    <div className="space-y-2">
+                      <div className="font-semibold">Videofit Diagnostics:</div>
+                      {diagnosticsResult.diagnostics.videofitProcess && (
+                        <div>
+                          <strong>Videofit Process:</strong>{' '}
+                          {diagnosticsResult.diagnostics.videofitProcess.running ? (
+                            <span className="text-green-700">
+                              Running (PID: {diagnosticsResult.diagnostics.videofitProcess.pid})
+                              {diagnosticsResult.diagnostics.videofitProcess.path && (
+                                <div className="text-xs mt-1 ml-4">
+                                  Path: {diagnosticsResult.diagnostics.videofitProcess.path}
+                                </div>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-red-700">Not running</span>
+                          )}
+                        </div>
+                      )}
+                      {diagnosticsResult.diagnostics.iisEndpoints && diagnosticsResult.diagnostics.iisEndpoints.length > 0 && (
+                        <div>
+                          <strong>IIS ASMX Endpoints:</strong>
+                          <ul className="list-disc list-inside text-xs mt-1 ml-4">
+                            {diagnosticsResult.diagnostics.iisEndpoints.map((endpoint: string, idx: number) => (
+                              <li key={idx}>{endpoint}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {diagnosticsResult.diagnostics.recentFiles && diagnosticsResult.diagnostics.recentFiles.length > 0 && (
+                        <div>
+                          <strong>Recent Files (last 5 min):</strong>
+                          <ul className="list-disc list-inside text-xs mt-1 ml-4">
+                            {diagnosticsResult.diagnostics.recentFiles.map((file: string, idx: number) => (
+                              <li key={idx}>{file}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {diagnosticsResult.diagnostics.collectedAt && (
+                        <div className="text-xs text-gray-600 mt-2">
+                          Collected at: {new Date(diagnosticsResult.diagnostics.collectedAt).toLocaleString()}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div>No diagnostics data available</div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

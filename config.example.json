@@ -1,0 +1,10 @@
+{
+  "parkingChannelBaseUrl": "https://your-parking-channel-domain.com",
+  "tenantId": "your-tenant-uuid",
+  "relayToken": "your-relay-token-from-tenant-secrets",
+  "siteClientLicense": "your-videofit-license",
+  "locPcNo": "your-location-pc-number",
+  "defaultGroup": "default-group-name",
+  "pollSeconds": 60,
+  "videofitEndpoint": "http://localhost/Videofit/SendCaptureWebService.asmx"
+}
