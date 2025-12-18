@@ -44,6 +44,7 @@ export async function POST(req: NextRequest) {
       .eq('tenant_id', tenantId)
       .eq('scope', 'anpr')
       .in('key', [
+        'videofit_mode',
         'videofit_base_url',
         'videofit_site_client_license',
         'videofit_loc_pc_no',
@@ -72,6 +73,7 @@ export async function POST(req: NextRequest) {
       }
     };
 
+    const mode = (getValue('videofit_mode') || 'relay') as 'relay' | 'direct';
     const baseUrl = getValue('videofit_base_url');
     const siteClientLicense = getValue('videofit_site_client_license')
       ? parseInt(getValue('videofit_site_client_license')!, 10)
@@ -83,47 +85,88 @@ export async function POST(req: NextRequest) {
       ? parseInt(getValue('videofit_default_group')!, 10)
       : 4;
 
-    if (!baseUrl || !siteClientLicense) {
-      return NextResponse.json(
-        { error: 'Videofit configuration incomplete. Please set Base URL and Site Client License.' },
-        { status: 400 }
-      );
+    // Validate based on mode
+    if (mode === 'relay') {
+      if (!siteClientLicense || locPcNo === null || locPcNo === undefined) {
+        return NextResponse.json(
+          { error: 'Videofit configuration incomplete. Please set Site Client License and Location PC No.' },
+          { status: 400 }
+        );
+      }
+    } else {
+      // direct mode
+      if (!baseUrl || !siteClientLicense || locPcNo === null || locPcNo === undefined) {
+        return NextResponse.json(
+          { error: 'Videofit configuration incomplete. Please set Base URL, Site Client License, and Location PC No.' },
+          { status: 400 }
+        );
+      }
     }
-
-    const config: VideofitConfig = {
-      baseUrl,
-      siteClientLicense,
-      locPcNo,
-      defaultGroup,
-    };
 
     // Create test record: TEST123 valid for 10 minutes
     const now = new Date();
     const validUntil = new Date(now.getTime() + 10 * 60 * 1000); // 10 minutes from now
 
-    const testRow: VideofitRow = {
-      plate: 'TEST123',
-      group: defaultGroup,
-      validFrom: now,
-      validUntil: validUntil,
-      action: 'upsert',
-    };
+    let result: { success: boolean; error?: string; statusCode?: number; response?: any; durationMs?: number };
 
-    // Send test update
-    const result = await sendDbBulkUpdate(config, [testRow]);
+    if (mode === 'relay') {
+      // Relay mode: enqueue to outbox (no direct call)
+      const { error: outboxError } = await adminClient.from('anpr_outbox').insert({
+        tenant_id: tenantId,
+        booking_id: null, // Test vehicle has no booking
+        plate: 'TEST123',
+        group_number: defaultGroup,
+        valid_from: now.toISOString(),
+        valid_until: validUntil.toISOString(),
+        action: 'upsert',
+        status: 'pending',
+      });
+
+      if (outboxError) {
+        result = {
+          success: false,
+          error: outboxError.message || 'Failed to enqueue test vehicle to outbox',
+        };
+      } else {
+        result = {
+          success: true,
+          durationMs: 0,
+        };
+      }
+    } else {
+      // Direct mode: call Videofit directly
+      const config: VideofitConfig = {
+        baseUrl: baseUrl!,
+        siteClientLicense,
+        locPcNo,
+        defaultGroup,
+      };
+
+      const testRow: VideofitRow = {
+        plate: 'TEST123',
+        group: defaultGroup,
+        validFrom: now,
+        validUntil: validUntil,
+        action: 'upsert',
+      };
+
+      result = await sendDbBulkUpdate(config, [testRow]);
+    }
 
     // Log integration event
     const idempotencyKey = `videofit_test_vehicle_${tenantId}_${Date.now()}`;
     const payload = {
       test: true,
-      rows: [testRow],
+      mode,
+      plate: 'TEST123',
+      group: defaultGroup,
     };
     const payloadHash = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 
     await adminClient.from('integration_events').insert({
       tenant_id: tenantId,
-      direction: 'outbound',
-      event_type: 'videofit_send_db_bulk_update',
+      direction: mode === 'relay' ? 'internal' : 'outbound',
+      event_type: mode === 'relay' ? 'videofit_outbox_insert' : 'videofit_send_db_bulk_update',
       idempotency_key: idempotencyKey,
       payload_hash: payloadHash,
       status: result.success ? 'success' : 'failed',
@@ -135,11 +178,16 @@ export async function POST(req: NextRequest) {
     });
 
     if (result.success) {
+      const message =
+        mode === 'relay'
+          ? 'Test vehicle enqueued to outbox. The on-site relay script will pick it up on the next poll.'
+          : 'Test vehicle sent successfully. Check Videofit Database list to confirm receipt.';
       return NextResponse.json({
         success: true,
-        message: 'Test vehicle sent successfully. Check Videofit Database list to confirm receipt.',
+        message,
         plate: 'TEST123',
         group: defaultGroup,
+        mode,
         durationMs: result.durationMs,
       });
     } else {

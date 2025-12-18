@@ -65,6 +65,7 @@ export async function GET(req: NextRequest) {
       videofit_username: null,
       videofit_password: null,
       csv_token_last_rotated_at: null,
+      videofit_mode: 'relay' as 'relay' | 'direct',
     };
 
     // Merge defaults with existing config to ensure new fields are present
@@ -98,9 +99,14 @@ export async function GET(req: NextRequest) {
       }
     };
 
+    // Get videofit_mode from secrets (default to 'relay')
+    const videofitMode = getSecret('videofit_mode') || 'relay';
+    const mode = (videofitMode === 'direct' ? 'direct' : 'relay') as 'relay' | 'direct';
+
     // Add Videofit config to response
     const responseConfig = {
       ...mergedConfig,
+      videofit_mode: mode,
       videofit_base_url: getSecret('videofit_base_url') || null,
       videofit_site_client_license: getSecret('videofit_site_client_license')
         ? parseInt(getSecret('videofit_site_client_license')!, 10)
@@ -164,6 +170,7 @@ export async function PUT(req: NextRequest) {
       departure_grace_minutes,
       whitelist_lookahead_days,
       whitelist_keep_after_end_hours,
+      videofit_mode,
       videofit_base_url,
       videofit_site_client_license,
       videofit_loc_pc_no,
@@ -254,6 +261,15 @@ export async function PUT(req: NextRequest) {
       }
     }
 
+    if (videofit_mode !== undefined && videofit_mode !== null) {
+      if (videofit_mode !== 'relay' && videofit_mode !== 'direct') {
+        return NextResponse.json(
+          { error: 'videofit_mode must be either "relay" or "direct"' },
+          { status: 400 }
+        );
+      }
+    }
+
     // Build update object
     const updateData: any = {
       updated_at: new Date().toISOString(),
@@ -272,6 +288,16 @@ export async function PUT(req: NextRequest) {
     // (like APH SFTP credentials and ANPR relay token)
     const videofitSecrets: Array<{ tenant_id: string; scope: string; key: string; value: string; updated_at: string }> = [];
     const now = new Date().toISOString();
+
+    if (videofit_mode !== undefined) {
+      videofitSecrets.push({
+        tenant_id: tenantId,
+        scope: 'anpr',
+        key: 'videofit_mode',
+        value: videofit_mode || 'relay',
+        updated_at: now,
+      });
+    }
 
     if (videofit_base_url !== undefined) {
       videofitSecrets.push({
@@ -363,7 +389,56 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({ config });
+    // Re-fetch Videofit secrets to include in response (same as GET route)
+    const { data: videofitSecrets } = await adminClient
+      .from('tenant_secrets')
+      .select('key, value_ciphertext')
+      .eq('tenant_id', tenantId)
+      .eq('scope', 'anpr')
+      .in('key', [
+        'videofit_mode',
+        'videofit_base_url',
+        'videofit_site_client_license',
+        'videofit_loc_pc_no',
+        'videofit_default_group',
+      ]);
+
+    // Decrypt helper
+    const decryptSecret = (encryptedValue: string): string => {
+      return Buffer.from(encryptedValue, 'base64').toString();
+    };
+
+    const getSecret = (key: string): string | null => {
+      const secret = videofitSecrets?.find((s) => s.key === key);
+      if (!secret?.value_ciphertext) return null;
+      try {
+        return decryptSecret(secret.value_ciphertext);
+      } catch {
+        return null;
+      }
+    };
+
+    // Get videofit_mode from secrets (default to 'relay')
+    const videofitMode = getSecret('videofit_mode') || 'relay';
+    const mode = (videofitMode === 'direct' ? 'direct' : 'relay') as 'relay' | 'direct';
+
+    // Merge Videofit config into response
+    const responseConfig = {
+      ...config,
+      videofit_mode: mode,
+      videofit_base_url: getSecret('videofit_base_url') || null,
+      videofit_site_client_license: getSecret('videofit_site_client_license')
+        ? parseInt(getSecret('videofit_site_client_license')!, 10)
+        : null,
+      videofit_loc_pc_no: getSecret('videofit_loc_pc_no')
+        ? parseInt(getSecret('videofit_loc_pc_no')!, 10)
+        : 0,
+      videofit_default_group: getSecret('videofit_default_group')
+        ? parseInt(getSecret('videofit_default_group')!, 10)
+        : 4,
+    };
+
+    return NextResponse.json({ config: responseConfig });
   } catch (error: any) {
     console.error('ANPR config PUT error:', error);
     return NextResponse.json(

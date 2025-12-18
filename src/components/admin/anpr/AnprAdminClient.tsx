@@ -674,6 +674,7 @@ type AnprConfig = {
   departure_grace_minutes: number;
   whitelist_lookahead_days: number;
   whitelist_keep_after_end_hours: number;
+  videofit_mode?: 'relay' | 'direct';
   videofit_base_url?: string | null;
   videofit_site_client_license?: number | null;
   videofit_loc_pc_no?: number | null;
@@ -1062,36 +1063,38 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
             <div>
               <h3 className="text-sm font-semibold">Videofit SendDbBulkUpdate Integration</h3>
               <p className="text-xs text-gray-600">
-                Push vehicle records directly to Videofit ANPR system
+                Push vehicle records to Videofit ANPR system
               </p>
             </div>
             <div className="flex gap-2">
-              <button
-                onClick={async () => {
-                  try {
-                    setTestingVideofitPing(true);
-                    setVideofitPingResult(null);
-                    const res = await fetch(
-                      `/api/admin/anpr/test-videofit-ping?${new URLSearchParams({ tenantId }).toString()}`,
-                      { method: 'POST' }
-                    );
-                    const data = await res.json();
-                    if (res.ok && data.success) {
-                      setVideofitPingResult({ success: true, message: data.message });
-                    } else {
-                      setVideofitPingResult({ success: false, message: data.error || 'Ping failed' });
+              {config.videofit_mode === 'direct' && (
+                <button
+                  onClick={async () => {
+                    try {
+                      setTestingVideofitPing(true);
+                      setVideofitPingResult(null);
+                      const res = await fetch(
+                        `/api/admin/anpr/test-videofit-ping?${new URLSearchParams({ tenantId }).toString()}`,
+                        { method: 'POST' }
+                      );
+                      const data = await res.json();
+                      if (res.ok && data.success) {
+                        setVideofitPingResult({ success: true, message: data.message });
+                      } else {
+                        setVideofitPingResult({ success: false, message: data.error || 'Ping failed' });
+                      }
+                    } catch (err: any) {
+                      setVideofitPingResult({ success: false, message: err.message || 'Ping failed' });
+                    } finally {
+                      setTestingVideofitPing(false);
                     }
-                  } catch (err: any) {
-                    setVideofitPingResult({ success: false, message: err.message || 'Ping failed' });
-                  } finally {
-                    setTestingVideofitPing(false);
-                  }
-                }}
-                disabled={testingVideofitPing || !config.videofit_base_url}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {testingVideofitPing ? 'Testing...' : 'Test ANPR Connection'}
-              </button>
+                  }}
+                  disabled={testingVideofitPing || !config.videofit_base_url}
+                  className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {testingVideofitPing ? 'Testing...' : 'Test ANPR Connection'}
+                </button>
+              )}
               <button
                 onClick={async () => {
                   try {
@@ -1113,7 +1116,12 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
                     setTestingVideofitVehicle(false);
                   }
                 }}
-                disabled={testingVideofitVehicle || !config.videofit_base_url || !config.videofit_site_client_license}
+                disabled={
+                  testingVideofitVehicle ||
+                  !config.videofit_site_client_license ||
+                  !config.videofit_loc_pc_no ||
+                  (config.videofit_mode === 'relay' ? !relayToken : !config.videofit_base_url)
+                }
                 className="px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {testingVideofitVehicle ? 'Sending...' : 'Send Test Vehicle'}
@@ -1133,26 +1141,48 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
             </div>
           )}
 
+          {/* Mode Selector */}
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Integration Mode
+            </label>
+            <select
+              value={config.videofit_mode || 'relay'}
+              onChange={(e) => setConfig({ ...config, videofit_mode: e.target.value as 'relay' | 'direct' })}
+              className="w-full border rounded px-2 py-1 text-sm"
+            >
+              <option value="relay">Local Relay (Recommended)</option>
+              <option value="direct">Direct Network (Advanced)</option>
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              {config.videofit_mode === 'relay'
+                ? 'Uses on-site relay script to poll for updates. No direct network access required.'
+                : 'Direct connection from server to Videofit. Requires network access to Videofit server.'}
+            </p>
+          </div>
+
           <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Base URL
-              </label>
-              <input
-                type="url"
-                value={config.videofit_base_url || ''}
-                onChange={(e) => setConfig({ ...config, videofit_base_url: e.target.value || null })}
-                placeholder="https://192.168.1.50"
-                className="w-full border rounded px-2 py-1 text-sm"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Videofit server base URL (e.g. https://192.168.1.50)
-              </p>
-            </div>
+            {config.videofit_mode === 'direct' && (
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Base URL <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="url"
+                  value={config.videofit_base_url || ''}
+                  onChange={(e) => setConfig({ ...config, videofit_base_url: e.target.value || null })}
+                  placeholder="https://192.168.1.50"
+                  className="w-full border rounded px-2 py-1 text-sm"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Videofit server base URL (e.g. https://192.168.1.50)
+                </p>
+              </div>
+            )}
 
             <div>
               <label className="block text-sm font-medium mb-1">
-                Site Client License
+                Site Client License <span className="text-red-500">*</span>
               </label>
               <input
                 type="number"
@@ -1168,7 +1198,7 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
 
             <div>
               <label className="block text-sm font-medium mb-1">
-                Location PC No
+                Location PC No <span className="text-red-500">*</span>
               </label>
               <input
                 type="number"
