@@ -390,7 +390,7 @@ export async function PUT(req: NextRequest) {
     }
 
     // Re-fetch Videofit secrets to include in response (same as GET route)
-    const { data: videofitSecrets } = await adminClient
+    const { data: fetchedVideofitSecrets } = await adminClient
       .from('tenant_secrets')
       .select('key, value_ciphertext')
       .eq('tenant_id', tenantId)
@@ -409,7 +409,7 @@ export async function PUT(req: NextRequest) {
     };
 
     const getSecret = (key: string): string | null => {
-      const secret = videofitSecrets?.find((s) => s.key === key);
+      const secret = fetchedVideofitSecrets?.find((s) => s.key === key);
       if (!secret?.value_ciphertext) return null;
       try {
         return decryptSecret(secret.value_ciphertext);
