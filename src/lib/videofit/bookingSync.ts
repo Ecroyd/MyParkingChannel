@@ -3,8 +3,6 @@
 
 import { createAdminClient } from '@/lib/supabase/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { sendDbBulkUpdate, type VideofitConfig, type VideofitRow } from './sendDbBulkUpdate';
-import { toVideofitTicks } from './ticks';
 
 type BookingRow = {
   id: string;
@@ -21,12 +19,13 @@ type AnprConfig = {
 };
 
 /**
- * Get Videofit config from tenant_secrets
+ * Check if Videofit is configured for relay mode (outbox) or direct push
+ * Returns config if configured, null otherwise
  */
 async function getVideofitConfig(
   tenantId: string,
   adminClient: SupabaseClient
-): Promise<VideofitConfig | null> {
+): Promise<{ defaultGroup: number } | null> {
   try {
     const { data: secrets, error } = await adminClient
       .from('tenant_secrets')
@@ -35,7 +34,6 @@ async function getVideofitConfig(
       .in('key', [
         'videofit_base_url',
         'videofit_site_client_license',
-        'videofit_loc_pc_no',
         'videofit_default_group',
       ]);
 
@@ -49,22 +47,16 @@ async function getVideofitConfig(
     };
 
     const baseUrl = getValue('videofit_base_url');
-    if (!baseUrl) {
-      return null;
-    }
-
     const siteClientLicense = parseInt(getValue('videofit_site_client_license') || '0', 10);
-    if (!siteClientLicense) {
+    
+    // If base URL and license are set, Videofit is configured
+    if (!baseUrl || !siteClientLicense) {
       return null;
     }
 
-    const locPcNo = parseInt(getValue('videofit_loc_pc_no') || '0', 10);
     const defaultGroup = parseInt(getValue('videofit_default_group') || '4', 10);
 
     return {
-      baseUrl,
-      siteClientLicense,
-      locPcNo,
       defaultGroup,
     };
   } catch {
@@ -125,46 +117,50 @@ export async function syncBookingToVideofit(
     const validFrom = new Date(startAt.getTime() - arrivalGrace * 60 * 1000);
     const validUntil = new Date(endAt.getTime() + departureGrace * 60 * 1000);
 
-    // Build row
-    const row: VideofitRow = {
-      plate,
-      group: videofitConfig.defaultGroup,
-      validFrom,
-      validUntil,
-      action: videofitAction,
-    };
-
-    // Send to Videofit
-    const result = await sendDbBulkUpdate(videofitConfig, [row]);
-
-    // Log integration event
-    const idempotencyKey = `videofit_${booking.tenant_id}_${booking.id}_${action}_${Date.now()}`;
-    const payload = {
-      action: videofitAction,
-      booking_id: booking.id,
-      booking_reference: (booking as any).reference || null,
-      plate: plate,
-      rows: [row],
-    };
-    const payloadHash = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
-
-    await adminClient.from('integration_events').insert({
+    // Write to outbox for relay/polling approach
+    const { error: outboxError } = await adminClient.from('anpr_outbox').insert({
       tenant_id: booking.tenant_id,
-      direction: 'outbound',
-      event_type: 'videofit_send_db_bulk_update',
-      idempotency_key: idempotencyKey,
-      payload_hash: payloadHash,
-      status: result.success ? 'success' : 'failed',
-      http_status: result.statusCode || null,
-      duration_ms: result.durationMs || null,
-      payload: payload,
-      response: result.response || null,
-      error: result.error || null,
+      booking_id: booking.id,
+      plate: plate,
+      group_number: videofitConfig.defaultGroup,
+      valid_from: validFrom.toISOString(),
+      valid_until: validUntil.toISOString(),
+      action: videofitAction,
+      status: 'pending',
     });
 
-    if (!result.success) {
-      console.error('[Videofit] Failed to sync booking:', booking.id, result.error);
-      // TODO: Queue for retry with exponential backoff
+    if (outboxError) {
+      console.error('[Videofit] Failed to write to outbox:', booking.id, outboxError);
+      // Log error event
+      const idempotencyKey = `videofit_outbox_${booking.tenant_id}_${booking.id}_${action}_${Date.now()}`;
+      await adminClient.from('integration_events').insert({
+        tenant_id: booking.tenant_id,
+        direction: 'outbound',
+        event_type: 'videofit_outbox_insert',
+        idempotency_key: idempotencyKey,
+        status: 'failed',
+        error: outboxError.message || String(outboxError),
+        payload: {
+          booking_id: booking.id,
+          plate: plate,
+          action: videofitAction,
+        },
+      });
+    } else {
+      // Log successful outbox insert
+      const idempotencyKey = `videofit_outbox_${booking.tenant_id}_${booking.id}_${action}_${Date.now()}`;
+      await adminClient.from('integration_events').insert({
+        tenant_id: booking.tenant_id,
+        direction: 'outbound',
+        event_type: 'videofit_outbox_insert',
+        idempotency_key: idempotencyKey,
+        status: 'success',
+        payload: {
+          booking_id: booking.id,
+          plate: plate,
+          action: videofitAction,
+        },
+      });
     }
   } catch (error: any) {
     console.error('[Videofit] Error syncing booking:', booking.id, error);
