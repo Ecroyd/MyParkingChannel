@@ -7,6 +7,14 @@ import { createAdminClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Simple decryption helper (matches pattern from APH integration)
+ * TODO: Implement proper decryption using ENCRYPTION_KEY
+ */
+function decryptSecret(encryptedValue: string): string {
+  return Buffer.from(encryptedValue, 'base64').toString();
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -40,11 +48,13 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Fetch token from tenant_secrets using column-based approach
+    // Fetch token from tenant_secrets using encrypted key-value pattern
     const { data: secret, error: secretError } = await adminClient
       .from('tenant_secrets')
-      .select('anpr_relay_token, updated_at')
+      .select('value_ciphertext, updated_at')
       .eq('tenant_id', tenantId)
+      .eq('scope', 'anpr_relay')
+      .eq('key', 'RELAY_TOKEN')
       .maybeSingle();
 
     if (secretError && secretError.code !== 'PGRST116') {
@@ -56,10 +66,23 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    let token: string | null = null;
+    if (secret?.value_ciphertext) {
+      try {
+        token = decryptSecret(secret.value_ciphertext);
+      } catch (error) {
+        console.error('[ANPR Relay Token] Error decrypting token:', error);
+        return NextResponse.json(
+          { error: 'Failed to decrypt relay token' },
+          { status: 500 }
+        );
+      }
+    }
+
     return NextResponse.json(
       {
         ok: true,
-        token: secret?.anpr_relay_token || null,
+        token,
         rotatedAt: secret?.updated_at || null,
       },
       {

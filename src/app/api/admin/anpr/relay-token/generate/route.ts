@@ -8,6 +8,22 @@ import { randomBytes, createHash } from 'crypto';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Simple encryption helper (matches pattern from APH integration)
+ * TODO: Implement proper encryption using ENCRYPTION_KEY
+ */
+function encryptSecret(value: string): string {
+  return Buffer.from(value).toString('base64');
+}
+
+/**
+ * Simple decryption helper (matches pattern from APH integration)
+ * TODO: Implement proper decryption using ENCRYPTION_KEY
+ */
+function decryptSecret(encryptedValue: string): string {
+  return Buffer.from(encryptedValue, 'base64').toString();
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -44,16 +60,20 @@ export async function POST(req: NextRequest) {
     // Generate strong token (64 hex chars = 32 bytes)
     const token = randomBytes(32).toString('hex');
 
-    // Use column-based approach (like stripe_secret_key, anpr_api_key)
+    // Use encrypted key-value pattern (like APH SFTP credentials)
+    const encrypted = encryptSecret(token);
+
     const { error: upsertError } = await adminClient
       .from('tenant_secrets')
       .upsert(
         {
           tenant_id: tenantId,
-          anpr_relay_token: token,
+          scope: 'anpr_relay',
+          key: 'RELAY_TOKEN',
+          value_ciphertext: encrypted,
           updated_at: new Date().toISOString(),
         },
-        { onConflict: 'tenant_id' }
+        { onConflict: 'tenant_id,scope,key' }
       );
 
     if (upsertError) {

@@ -36,25 +36,40 @@ export async function POST(request: Request) {
 
   const eventTime = event_at ? parseISO(event_at) : new Date()
   const tenantTimezone = device.tenants.timezone || 'Europe/London'
+  const normalisedPlate = plate.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
 
-  // Find active booking for this plate
-  const { data: booking } = await supabase
-    .from('bookings')
-    .select('*')
+  // Check if this is a staff vehicle first (staff vehicles always allowed)
+  const { data: staffVehicle } = await supabase
+    .from('staff_vehicles')
+    .select('id, description')
     .eq('tenant_id', device.tenant_id)
-    .eq('plate', plate.toUpperCase())
-    .in('status', ['reserved', 'checked_in'])
-    .lte('start_at', eventTime.toISOString())
-    .gte('end_at', eventTime.toISOString())
-    .order('start_at', { ascending: false })
-    .limit(1)
-    .single()
+    .eq('plate', normalisedPlate)
+    .eq('is_active', true)
+    .maybeSingle()
 
   let result: 'allow' | 'deny' = 'deny'
   let reason = 'No active booking found'
   let bookingId: string | null = null
 
-  if (booking) {
+  // If it's a staff vehicle, always allow
+  if (staffVehicle) {
+    result = 'allow'
+    reason = 'Staff vehicle - always allowed'
+  } else {
+    // Find active booking for this plate
+    const { data: booking } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('tenant_id', device.tenant_id)
+      .eq('plate', normalisedPlate)
+      .in('status', ['reserved', 'checked_in'])
+      .lte('start_at', eventTime.toISOString())
+      .gte('end_at', eventTime.toISOString())
+      .order('start_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (booking) {
     bookingId = booking.id
     
     // Determine if this is check-in or check-out based on time proximity
@@ -98,6 +113,7 @@ export async function POST(request: Request) {
     } else {
       result = 'deny'
       reason = 'Outside check-in window'
+      }
     }
   }
 
@@ -109,7 +125,7 @@ export async function POST(request: Request) {
       device_id: device.id,
       event_at: eventTime.toISOString(),
       mode: 'anpr',
-      plate: plate.toUpperCase(),
+      plate: normalisedPlate,
       booking_id: bookingId,
       result,
       reason
@@ -125,7 +141,7 @@ export async function POST(request: Request) {
     result,
     reason,
     booking_id: bookingId,
-    plate: plate.toUpperCase(),
+    plate: normalisedPlate,
     event_at: eventTime.toISOString()
   })
 }

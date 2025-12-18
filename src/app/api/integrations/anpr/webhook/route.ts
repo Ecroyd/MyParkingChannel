@@ -182,15 +182,29 @@ export async function POST(req: NextRequest) {
       // Continue anyway - don't fail the webhook
     }
 
-    // 9) Try to match booking by plate with grace periods
+    // 9) Check if this is a staff vehicle first (staff vehicles always allowed)
+    const { data: staffVehicle } = await supabase
+      .from('staff_vehicles')
+      .select('id, description')
+      .eq('tenant_id', tenantId)
+      .eq('plate', plate)
+      .eq('is_active', true)
+      .maybeSingle();
+
     let matchedBookingId: string | null = null;
     let result: 'allow' | 'deny' = 'deny';
     let reason: string | null = null;
 
-    const arrivalGrace = config.arrival_grace_minutes || 240; // 4 hours default
-    const departureGrace = config.departure_grace_minutes || 480; // 8 hours default
+    // If it's a staff vehicle, always allow
+    if (staffVehicle) {
+      result = 'allow';
+      reason = 'Staff vehicle - always allowed';
+    } else {
+      // Try to match booking by plate with grace periods
+      const arrivalGrace = config.arrival_grace_minutes || 240; // 4 hours default
+      const departureGrace = config.departure_grace_minutes || 480; // 8 hours default
 
-    if (direction === 'entry') {
+      if (direction === 'entry') {
       const from = new Date(event_at.getTime() - arrivalGrace * 60 * 1000).toISOString();
       const to = new Date(event_at.getTime() + departureGrace * 60 * 1000).toISOString();
 
@@ -239,6 +253,7 @@ export async function POST(req: NextRequest) {
         result = 'deny';
         reason = 'No matching booking for plate';
       }
+    }
     }
 
     // 10) Insert gate_events row with mode='anpr'
