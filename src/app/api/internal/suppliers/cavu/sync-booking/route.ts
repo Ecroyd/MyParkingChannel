@@ -94,6 +94,10 @@ export async function POST(req: NextRequest) {
       car_model: booking.Vehicle?.Model ?? null,
       car_color: booking.Vehicle?.Colour ?? null,
       flight_number: booking.OutboundFlight ?? null,
+      return_flight_number: booking.ReturnFlight ?? null,
+      returning_from: booking.ReturningFrom ?? null,
+      outbound_terminal: booking.OutboundTerminal ?? null,
+      return_terminal: booking.ReturnTerminal ?? null,
       flight_date: flightDate,
       source: 'cavu',
       status: mapCavuStatus(booking.Status),
@@ -104,11 +108,13 @@ export async function POST(req: NextRequest) {
       missing_fields: missingFields,
     };
 
-    const { error } = await supabase
+    const { data: upsertedBooking, error } = await supabase
       .from('bookings')
       .upsert(row as any, {
         onConflict: 'tenant_id,reference',
-      } as any);
+      } as any)
+      .select('id, tenant_id, reference')
+      .single();
 
     if (error) {
       console.error('[CAVU SYNC BOOKING] Upsert failed', error);
@@ -116,6 +122,27 @@ export async function POST(req: NextRequest) {
         { ok: false, error: `Failed to upsert booking: ${error.message}` },
         { status: 500 }
       );
+    }
+
+    // Save full booking payload to booking_external_payloads
+    if (upsertedBooking?.id) {
+      const { error: payloadError } = await supabase
+        .from('booking_external_payloads')
+        .upsert({
+          tenant_id: upsertedBooking.tenant_id,
+          booking_id: upsertedBooking.id,
+          source: 'cavu',
+          reference: upsertedBooking.reference,
+          payload: booking as any,
+          fetched_at: new Date().toISOString(),
+        } as any, {
+          onConflict: 'tenant_id,source,reference',
+        } as any);
+
+      if (payloadError) {
+        console.warn('[CAVU SYNC BOOKING] Failed to save payload:', payloadError.message);
+        // Don't fail the request if payload save fails
+      }
     }
 
     return NextResponse.json({

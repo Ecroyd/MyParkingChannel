@@ -8,6 +8,8 @@ type TenantAnprConfig = {
   arrival_grace_minutes: number | null;
   departure_grace_minutes: number | null;
   default_group: string | null;
+  whitelist_lookahead_days: number | null;
+  whitelist_keep_after_end_hours: number | null;
 };
 
 function normalizePlate(input: string) {
@@ -45,12 +47,14 @@ export async function generateKnownVehiclesCsv(
   let arrivalGraceMin = 240; // 4h
   let departureGraceMin = 480; // 8h
   let defaultGroup = 'Self Park'; // Default group
+  let lookaheadDays = 7; // 7 days ahead
+  let keepAfterEndHours = 24; // 24 hours after end
 
   // Try load per-tenant ANPR config (safe fallback if table not exists)
   try {
     const { data: cfg, error: cfgErr } = await adminClient
       .from('tenant_anpr_config')
-      .select('arrival_grace_minutes,departure_grace_minutes,default_group')
+      .select('arrival_grace_minutes,departure_grace_minutes,default_group,whitelist_lookahead_days,whitelist_keep_after_end_hours')
       .eq('tenant_id', tenantId)
       .maybeSingle<TenantAnprConfig>();
 
@@ -58,30 +62,35 @@ export async function generateKnownVehiclesCsv(
       if (typeof cfg.arrival_grace_minutes === 'number') arrivalGraceMin = cfg.arrival_grace_minutes;
       if (typeof cfg.departure_grace_minutes === 'number') departureGraceMin = cfg.departure_grace_minutes;
       if (typeof cfg.default_group === 'string' && cfg.default_group) defaultGroup = cfg.default_group;
+      if (typeof cfg.whitelist_lookahead_days === 'number') lookaheadDays = cfg.whitelist_lookahead_days;
+      if (typeof cfg.whitelist_keep_after_end_hours === 'number') keepAfterEndHours = cfg.whitelist_keep_after_end_hours;
     }
   } catch {
     // ignore: table may not exist yet
   }
 
   const now = new Date();
-  const todayStart = startOfUtcDay(now);
-  const todayEnd = endOfUtcDay(now);
-  const tomorrow = addMinutes(todayStart, 24 * 60);
-  const tomorrowEnd = endOfUtcDay(tomorrow);
-
-  // We want bookings overlapping [today .. end of tomorrow], with grace applied
-  const windowStart = addMinutes(todayStart, -arrivalGraceMin);
-  const windowEnd = addMinutes(tomorrowEnd, departureGraceMin);
+  
+  // Rolling window: windowStart = now - keepAfterEndHours, windowEnd = now + lookaheadDays
+  const windowStart = addMinutes(now, -keepAfterEndHours * 60);
+  const windowEnd = addMinutes(now, lookaheadDays * 24 * 60);
 
   // Fetch bookings for this tenant in the window
+  // Include bookings where:
+  // - tenant_id = tenantId
+  // - status != 'cancelled'
+  // - plate not null/empty
+  // - start_at <= windowEnd
+  // - end_at >= windowStart
   const { data: bookings, error: bookingsErr } = await adminClient
     .from('bookings')
     .select('id, reference, plate, start_at, end_at, status')
     .eq('tenant_id', tenantId)
+    .neq('status', 'cancelled')
     .not('plate', 'is', null)
     .neq('plate', '')
-    .gte('end_at', windowStart.toISOString()) // booking ends after window starts
-    .lte('start_at', windowEnd.toISOString()); // booking starts before window ends
+    .lte('start_at', windowEnd.toISOString()) // booking starts before window ends
+    .gte('end_at', windowStart.toISOString()); // booking ends after window starts
 
   if (bookingsErr) {
     throw new Error(`Failed to fetch bookings: ${bookingsErr.message}`);

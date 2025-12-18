@@ -672,6 +672,8 @@ type AnprConfig = {
   camera_direction_map: Record<string, string>;
   arrival_grace_minutes: number;
   departure_grace_minutes: number;
+  whitelist_lookahead_days: number;
+  whitelist_keep_after_end_hours: number;
   csv_token_last_rotated_at?: string | null;
 };
 
@@ -842,7 +844,7 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
               download
               className="inline-block px-3 py-1.5 bg-gray-100 border rounded text-sm hover:bg-gray-200"
             >
-              Download CSV (Today + Tomorrow)
+              Download CSV (Rolling Window)
             </a>
             <p className="text-xs text-gray-600">
               Authenticated export for manual download
@@ -984,6 +986,40 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
             />
             <p className="text-xs text-gray-500 mt-1">
               Late departure tolerance (default: 8 hours)
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Whitelist Lookahead Days
+            </label>
+            <input
+              type="number"
+              min="1"
+              max="365"
+              value={config.whitelist_lookahead_days}
+              onChange={(e) => setConfig({ ...config, whitelist_lookahead_days: parseInt(e.target.value) || 7 })}
+              className="w-full border rounded px-2 py-1 text-sm"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Number of days ahead to include bookings in whitelist CSV (default: 7 days)
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Keep After End (hours)
+            </label>
+            <input
+              type="number"
+              min="0"
+              max="168"
+              value={config.whitelist_keep_after_end_hours}
+              onChange={(e) => setConfig({ ...config, whitelist_keep_after_end_hours: parseInt(e.target.value) || 24 })}
+              className="w-full border rounded px-2 py-1 text-sm"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Hours after booking end to keep in whitelist CSV (default: 24 hours)
             </p>
           </div>
         </div>

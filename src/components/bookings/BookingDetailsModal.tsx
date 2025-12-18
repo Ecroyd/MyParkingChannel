@@ -5,6 +5,12 @@ import { createClient } from '@supabase/supabase-js';
 import { toMoney } from '@/lib/money';
 import { BookingHighlightIcon } from './BookingHighlightIcon';
 import { BookingHighlightCode } from '@/types/bookings';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
 
 type Booking = {
   id: string;
@@ -72,10 +78,32 @@ export default function BookingDetailsModal({
 }) {
   const [tab, setTab] = React.useState<'overview'|'edit'|'extend'|'refund'>('overview');
   const [loading, setLoading] = React.useState(false);
+  const [payloadOpen, setPayloadOpen] = React.useState(false);
+  const [payload, setPayload] = React.useState<any>(null);
+  const [payloadLoading, setPayloadLoading] = React.useState(false);
 
   const refresh = async () => {
     if (onBookingUpdated) {
       onBookingUpdated();
+    }
+  };
+
+  const loadPayload = async () => {
+    if (!booking?.id) return;
+    setPayloadLoading(true);
+    try {
+      const res = await fetch(`/api/admin/bookings/${booking.id}/external-payload`);
+      const json = await res.json();
+      if (res.ok && json.payload) {
+        setPayload(json.payload);
+        setPayloadOpen(true);
+      } else {
+        alert(json.error || 'Failed to load payload');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to load payload');
+    } finally {
+      setPayloadLoading(false);
     }
   };
 
@@ -115,46 +143,59 @@ export default function BookingDetailsModal({
           {loading && <p>Loading…</p>}
 
               {!loading && booking && tab === 'overview' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <Info label="Customer" value={booking.customer_name} />
-                  <Info label="Email" value={booking.customer_email} />
-                  <Info label="Phone" value={booking.customer_phone || '—'} />
-                  <Info label="Plate" value={booking.plate} />
-                  <Info label="Make" value={booking.car_make || '—'} />
-                  <Info label="Model" value={booking.car_model || '—'} />
-                  <Info label="Colour" value={booking.car_color || '—'} />
-                  <Info label="Source/Channel" value={
-                    <div className="flex flex-col">
-                      <span className="text-sm font-medium">
-                        {getBookingSourceLabel(booking)}
-                      </span>
-                      {booking.external_source && booking.source && (
-                        <span className="text-xs text-gray-500">
-                          {formatBookingSource(booking.source)}
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Info label="Customer" value={booking.customer_name} />
+                    <Info label="Email" value={booking.customer_email} />
+                    <Info label="Phone" value={booking.customer_phone || '—'} />
+                    <Info label="Plate" value={booking.plate} />
+                    <Info label="Make" value={booking.car_make || '—'} />
+                    <Info label="Model" value={booking.car_model || '—'} />
+                    <Info label="Colour" value={booking.car_color || '—'} />
+                    <Info label="Source/Channel" value={
+                      <div className="flex flex-col">
+                        <span className="text-sm font-medium">
+                          {getBookingSourceLabel(booking)}
                         </span>
-                      )}
+                        {booking.external_source && booking.source && (
+                          <span className="text-xs text-gray-500">
+                            {formatBookingSource(booking.source)}
+                          </span>
+                        )}
+                      </div>
+                    } />
+                    <Info label="Arrival Date & Time" value={new Date(booking.start_at).toLocaleString('en-GB', { 
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })} />
+                    <Info label="Departure Date & Time" value={new Date(booking.end_at).toLocaleString('en-GB', { 
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })} />
+                    <Info label="Charged" value={toMoney(Math.round((booking.money_charged ?? 0) * 100))} />
+                    <Info label="Flight" value={booking.flight_number || '—'} />
+                    <div className="col-span-2">
+                      <Info label="Notes" value={booking.notes || '—'} />
                     </div>
-                  } />
-                  <Info label="Arrival Date & Time" value={new Date(booking.start_at).toLocaleString('en-GB', { 
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })} />
-                  <Info label="Departure Date & Time" value={new Date(booking.end_at).toLocaleString('en-GB', { 
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })} />
-                  <Info label="Charged" value={toMoney(Math.round((booking.money_charged ?? 0) * 100))} />
-                  <Info label="Flight" value={booking.flight_number || '—'} />
-                  <div className="col-span-2">
-                    <Info label="Notes" value={booking.notes || '—'} />
                   </div>
-                </div>
+                  {booking.source === 'cavu' && (
+                    <div className="mt-4 pt-4 border-t">
+                      <button
+                        onClick={loadPayload}
+                        disabled={payloadLoading}
+                        className="px-3 py-1.5 text-sm border rounded hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        {payloadLoading ? 'Loading…' : 'View CAVU raw payload'}
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
 
           {!loading && booking && tab === 'edit' && (
@@ -170,6 +211,23 @@ export default function BookingDetailsModal({
           )}
         </div>
       </div>
+
+      <Sheet open={payloadOpen} onOpenChange={setPayloadOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>CAVU Raw Payload</SheetTitle>
+          </SheetHeader>
+          <div className="mt-4">
+            {payload ? (
+              <pre className="bg-gray-50 p-4 rounded text-xs overflow-auto">
+                {JSON.stringify(payload, null, 2)}
+              </pre>
+            ) : (
+              <p className="text-sm text-gray-500">No payload data available</p>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

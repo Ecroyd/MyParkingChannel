@@ -192,7 +192,7 @@ async function runCavuCron(req?: NextRequest) {
 
                     const healIsIncomplete = healMissingFields.length > 0;
 
-                    const { error: healError } = await supabase
+                    const { data: healedBooking, error: healError } = await supabase
                       .from('bookings')
                       .upsert({
                         tenant_id: tenantId,
@@ -207,6 +207,10 @@ async function runCavuCron(req?: NextRequest) {
                         car_model: healBooking.Vehicle?.Model ?? null,
                         car_color: healBooking.Vehicle?.Colour ?? null,
                         flight_number: healBooking.OutboundFlight ?? null,
+                        return_flight_number: healBooking.ReturnFlight ?? null,
+                        returning_from: healBooking.ReturningFrom ?? null,
+                        outbound_terminal: healBooking.OutboundTerminal ?? null,
+                        return_terminal: healBooking.ReturnTerminal ?? null,
                         flight_date: flightDate,
                         source: 'cavu',
                         status: mapCavuStatus(healBooking.Status),
@@ -217,7 +221,25 @@ async function runCavuCron(req?: NextRequest) {
                         missing_fields: healMissingFields,
                       } as any, {
                         onConflict: 'tenant_id,reference',
-                      } as any);
+                      } as any)
+                      .select('id, tenant_id, reference')
+                      .single();
+
+                    if (!healError && healedBooking?.id) {
+                      // Save full booking payload to booking_external_payloads
+                      await supabase
+                        .from('booking_external_payloads')
+                        .upsert({
+                          tenant_id: tenantId,
+                          booking_id: healedBooking.id,
+                          source: 'cavu',
+                          reference: healBooking.Reference,
+                          payload: healBooking as any,
+                          fetched_at: new Date().toISOString(),
+                        } as any, {
+                          onConflict: 'tenant_id,source,reference',
+                        } as any);
+                    }
 
                     if (!healError) {
                       healedCount++;

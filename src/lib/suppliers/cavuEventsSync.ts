@@ -229,6 +229,10 @@ export async function syncCavuEventsForTenant(
       car_model: booking.Vehicle?.Model ?? null,
       car_color: booking.Vehicle?.Colour ?? null,
       flight_number: booking.OutboundFlight ?? null,
+      return_flight_number: booking.ReturnFlight ?? null,
+      returning_from: booking.ReturningFrom ?? null,
+      outbound_terminal: booking.OutboundTerminal ?? null,
+      return_terminal: booking.ReturnTerminal ?? null,
       flight_date: flightDate,
       source: 'cavu',
       status: mapCavuStatus(booking.Status),
@@ -239,16 +243,39 @@ export async function syncCavuEventsForTenant(
       missing_fields: missingFields,
     };
 
-    const { error } = await supabase
+    const { data: upsertedBooking, error } = await supabase
       .from('bookings')
       .upsert(row as any, {
         onConflict: 'tenant_id,reference',
-      } as any);
+      } as any)
+      .select('id, tenant_id, reference')
+      .single();
 
     if (error) {
       errors.push(`Upsert failed for ${ref}: ${error.message}`);
     } else {
       bookingsUpserted++;
+
+      // Save full booking payload to booking_external_payloads
+      if (upsertedBooking?.id) {
+        const { error: payloadError } = await supabase
+          .from('booking_external_payloads')
+          .upsert({
+            tenant_id: upsertedBooking.tenant_id,
+            booking_id: upsertedBooking.id,
+            source: 'cavu',
+            reference: upsertedBooking.reference,
+            payload: booking as any,
+            fetched_at: new Date().toISOString(),
+          } as any, {
+            onConflict: 'tenant_id,source,reference',
+          } as any);
+
+        if (payloadError) {
+          // Log but don't fail the sync if payload save fails
+          console.warn(`[CAVU SYNC] Failed to save payload for ${ref}:`, payloadError.message);
+        }
+      }
     }
   }
 

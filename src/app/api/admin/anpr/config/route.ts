@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Return config or defaults
+    // Return config or defaults, merging defaults for missing fields
     const defaultConfig = {
       tenant_id: tenantId,
       enabled: false,
@@ -59,10 +59,15 @@ export async function GET(req: NextRequest) {
       camera_direction_map: {},
       arrival_grace_minutes: 240,
       departure_grace_minutes: 480,
+      whitelist_lookahead_days: 7,
+      whitelist_keep_after_end_hours: 24,
       csv_token_last_rotated_at: null,
     };
 
-    return NextResponse.json({ config: config || defaultConfig });
+    // Merge defaults with existing config to ensure new fields are present
+    const mergedConfig = config ? { ...defaultConfig, ...config } : defaultConfig;
+
+    return NextResponse.json({ config: mergedConfig });
   } catch (error: any) {
     console.error('ANPR config GET error:', error);
     return NextResponse.json(
@@ -111,6 +116,8 @@ export async function PUT(req: NextRequest) {
       camera_direction_map,
       arrival_grace_minutes,
       departure_grace_minutes,
+      whitelist_lookahead_days,
+      whitelist_keep_after_end_hours,
     } = body;
 
     // Validate inputs
@@ -142,6 +149,20 @@ export async function PUT(req: NextRequest) {
       );
     }
 
+    if (whitelist_lookahead_days !== undefined && (whitelist_lookahead_days < 1 || whitelist_lookahead_days > 365)) {
+      return NextResponse.json(
+        { error: 'whitelist_lookahead_days must be between 1 and 365' },
+        { status: 400 }
+      );
+    }
+
+    if (whitelist_keep_after_end_hours !== undefined && (whitelist_keep_after_end_hours < 0 || whitelist_keep_after_end_hours > 168)) {
+      return NextResponse.json(
+        { error: 'whitelist_keep_after_end_hours must be between 0 and 168' },
+        { status: 400 }
+      );
+    }
+
     // Build update object
     const updateData: any = {
       updated_at: new Date().toISOString(),
@@ -153,6 +174,8 @@ export async function PUT(req: NextRequest) {
     if (camera_direction_map !== undefined) updateData.camera_direction_map = camera_direction_map;
     if (arrival_grace_minutes !== undefined) updateData.arrival_grace_minutes = arrival_grace_minutes;
     if (departure_grace_minutes !== undefined) updateData.departure_grace_minutes = departure_grace_minutes;
+    if (whitelist_lookahead_days !== undefined) updateData.whitelist_lookahead_days = whitelist_lookahead_days;
+    if (whitelist_keep_after_end_hours !== undefined) updateData.whitelist_keep_after_end_hours = whitelist_keep_after_end_hours;
 
     // Upsert config
     const { data: config, error: configError } = await adminClient
