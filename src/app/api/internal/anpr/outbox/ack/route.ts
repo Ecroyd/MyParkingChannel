@@ -27,14 +27,24 @@ export async function POST(req: NextRequest) {
     const { itemIds, success } = body;
 
     if (!Array.isArray(itemIds) || itemIds.length === 0) {
-      return NextResponse.json(
+      return Response.json(
         { error: 'itemIds must be a non-empty array' },
         { status: 400 }
       );
     }
 
+    // Validate that all itemIds are valid UUIDs
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const invalidIds = itemIds.filter((id: any) => typeof id !== 'string' || !uuidRegex.test(id));
+    if (invalidIds.length > 0) {
+      return Response.json(
+        { error: 'All itemIds must be valid UUIDs', invalidIds },
+        { status: 400 }
+      );
+    }
+
     if (typeof success !== 'boolean') {
-      return NextResponse.json(
+      return Response.json(
         { error: 'success must be a boolean' },
         { status: 400 }
       );
