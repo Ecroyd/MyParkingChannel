@@ -40,25 +40,33 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Verify all items belong to this tenant and are pending/processing
+    // Verify all items belong to this tenant and are not yet processed
+    // Match the outbox route logic: filter by processed_at IS NULL
     const { data: items, error: verifyError } = await supabase
       .from('anpr_outbox')
-      .select('id, tenant_id, status')
+      .select('id, tenant_id, processed_at')
       .in('id', itemIds)
       .eq('tenant_id', tenantId)
-      .in('status', ['pending', 'processing']);
+      .is('processed_at', null);
 
     if (verifyError) {
       console.error('[ANPR Outbox ACK] Verify error:', verifyError);
-      return NextResponse.json(
-        { error: 'Failed to verify items' },
+      return Response.json(
+        { error: 'Failed to verify items', details: verifyError.message },
         { status: 500 }
       );
     }
 
-    if (!items || items.length !== itemIds.length) {
+    if (!items || items.length === 0) {
       return Response.json(
-        { error: 'Some items not found or not in pending/processing status' },
+        { error: 'No items found or all items already processed', found: items?.length ?? 0, requested: itemIds.length },
+        { status: 400 }
+      );
+    }
+
+    if (items.length !== itemIds.length) {
+      return Response.json(
+        { error: 'Some items not found or already processed', found: items.length, requested: itemIds.length },
         { status: 400 }
       );
     }
@@ -75,14 +83,14 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Mark items as processed (only if still pending/processing)
+    // Mark items as processed (only if still unprocessed)
     const { error: updateError } = await supabase
       .from('anpr_outbox')
       .update({
         processed_at: now,
       })
       .in('id', verifiedIds)
-      .in('status', ['pending', 'processing']);
+      .is('processed_at', null);
 
     if (updateError) {
       console.error('[ANPR Outbox ACK] Update error:', updateError);
