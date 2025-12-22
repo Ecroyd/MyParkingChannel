@@ -26,6 +26,11 @@ CREATE INDEX IF NOT EXISTS idx_anpr_sites_enabled ON anpr_sites(tenant_id, enabl
 -- Enable RLS
 ALTER TABLE anpr_sites ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if they exist (for idempotency)
+DROP POLICY IF EXISTS "Service role can do everything on anpr_sites" ON anpr_sites;
+DROP POLICY IF EXISTS "Tenant admins can manage their anpr_sites" ON anpr_sites;
+DROP POLICY IF EXISTS "Tenant admins can update enabled on their anpr_sites" ON anpr_sites;
+
 -- RLS Policy: Service role can do everything (for admin operations)
 CREATE POLICY "Service role can do everything on anpr_sites" ON anpr_sites
   FOR ALL TO service_role USING (true) WITH CHECK (true);
@@ -60,6 +65,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Trigger to automatically update updated_at
+DROP TRIGGER IF EXISTS anpr_sites_updated_at ON anpr_sites;
 CREATE TRIGGER anpr_sites_updated_at
   BEFORE UPDATE ON anpr_sites
   FOR EACH ROW

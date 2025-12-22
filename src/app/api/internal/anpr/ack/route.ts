@@ -6,6 +6,48 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { assertRelayAuth } from '@/lib/anpr/auth';
 
+/**
+ * Quick auth helper for specific tenant with hardcoded token
+ */
+function checkRelayAuth(req: NextRequest, tenantId: string): Response | null {
+  // Special case for tenant bab45dab-19e8-4230-b18e-ee1f663608e5
+  if (tenantId === 'bab45dab-19e8-4230-b18e-ee1f663608e5') {
+    // Read token from multiple sources
+    let token: string | null = req.headers.get('x-relay-token');
+    
+    if (!token) {
+      const authHeader = req.headers.get('authorization');
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.substring(7);
+      }
+    }
+    
+    if (!token) {
+      const { searchParams } = new URL(req.url);
+      token = searchParams.get('token');
+    }
+    
+    if (!token) {
+      return NextResponse.json(
+        { error: 'Invalid or missing relay token' },
+        { status: 401 }
+      );
+    }
+    
+    const expectedToken = process.env.ANPR_RELAY_TOKEN_BAB45DAB;
+    if (!expectedToken || token !== expectedToken) {
+      return NextResponse.json(
+        { error: 'Invalid or missing relay token' },
+        { status: 401 }
+      );
+    }
+    
+    return null; // Auth successful
+  }
+  
+  return null; // Not the special tenant, use normal auth
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -32,7 +74,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Authenticate using per-tenant relay token
+    // Check quick auth first (for specific tenant)
+    const quickAuthError = checkRelayAuth(req, tenantId);
+    if (quickAuthError) {
+      return quickAuthError;
+    }
+
+    // Authenticate using per-tenant relay token (for other tenants)
     try {
       await assertRelayAuth(req, tenantId);
     } catch (authError) {
