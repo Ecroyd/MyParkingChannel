@@ -79,6 +79,31 @@ function Fetch-Outbox {
     }
 }
 
+# Fetch staff vehicles from API
+function Fetch-StaffVehicles {
+    param(
+        [object]$Config
+    )
+    
+    $uri = "$($Config.parkingChannelBaseUrl)/api/internal/anpr/staff-vehicles?tenantId=$($Config.tenantId)"
+    
+    try {
+        $response = Invoke-RestMethod -Uri $uri `
+            -Method GET `
+            -Headers @{ 
+                "Authorization" = "Bearer $($Config.relayToken)"
+            } `
+            -ErrorAction Stop
+        
+        Write-Host "[relay] Staff vehicles fetched: $($response.count) vehicles" -ForegroundColor Green
+        return $response
+    } catch {
+        Write-Host "[relay] Staff vehicles fetch failed: $($_.Exception.Message)" -ForegroundColor Red
+        # Don't throw - staff vehicles are optional, continue without them
+        return $null
+    }
+}
+
 # Load cache file
 function Load-Cache {
     if (Test-Path $CachePath) {
@@ -217,6 +242,136 @@ function Send-ToVideofit {
     }
 }
 
+# Send staff vehicles to Videofit as bulk update
+function Send-StaffVehiclesToVideofit {
+    param(
+        [array]$StaffVehicles,
+        [object]$Config
+    )
+    
+    if ($StaffVehicles -eq $null -or $StaffVehicles.Count -eq 0) {
+        return $true
+    }
+    
+    $videofitUrl = $Config.videofitEndpoint
+    $siteClientLicense = $Config.siteClientLicense
+    $locPcNo = $Config.locPcNo
+    $defaultGroup = $Config.defaultGroup
+    
+    # Staff vehicles should always be valid (wide time window)
+    # Set valid from 10 years ago to 10 years in the future
+    $epoch = New-Object DateTime(1970, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)
+    $validFromDate = ([DateTime]::UtcNow).AddYears(-10)
+    $validUntilDate = ([DateTime]::UtcNow).AddYears(10)
+    $visitArrivalTime = [long](($validFromDate - $epoch).TotalMilliseconds)
+    $visitorDepTime = [long](($validUntilDate - $epoch).TotalMilliseconds)
+    
+    # Build arrays for bulk update
+    $deleteVehicleArray = @()
+    $editVehicleArray = @()
+    $vehPlateArray = @()
+    $vehGroupArray = @()
+    $visitArrivalTimeArray = @()
+    $visitorDepTimeArray = @()
+    
+    foreach ($vehicle in $StaffVehicles) {
+        $deleteVehicleArray += $false
+        $editVehicleArray += $true
+        $escapedPlate = $vehicle.plate -replace '&', '&amp;' -replace '<', '&lt;' -replace '>', '&gt;' -replace '"', '&quot;' -replace "'", '&apos;'
+        $vehPlateArray += $escapedPlate
+        $vehGroupArray += $defaultGroup
+        $visitArrivalTimeArray += $visitArrivalTime
+        $visitorDepTimeArray += $visitorDepTime
+    }
+    
+    # Build SOAP envelope with arrays
+    $soapAction = "http://www.videofit.co.uk/Videofit/SendDbBulkUpdateWebService/SendDbBulkUpdate"
+    $updateGeneratedAt = [long](([DateTime]::UtcNow - $epoch).TotalMilliseconds)
+    
+    # Build array XML elements
+    $deleteVehicleXml = ($deleteVehicleArray | ForEach-Object { "<boolean>$_</boolean>" }) -join "`n      "
+    $editVehicleXml = ($editVehicleArray | ForEach-Object { "<boolean>$_</boolean>" }) -join "`n      "
+    $vehPlateXml = ($vehPlateArray | ForEach-Object { "<string>$_</string>" }) -join "`n      "
+    $vehGroupXml = ($vehGroupArray | ForEach-Object { "<int>$_</int>" }) -join "`n      "
+    $visitArrivalTimeXml = ($visitArrivalTimeArray | ForEach-Object { "<long>$_</long>" }) -join "`n      "
+    $visitorDepTimeXml = ($visitorDepTimeArray | ForEach-Object { "<long>$_</long>" }) -join "`n      "
+    
+    $soap = @"
+<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Body>
+    <SendDbBulkUpdate xmlns="http://www.videofit.co.uk/Videofit/SendDbBulkUpdateWebService">
+      <siteClientLicense>$siteClientLicense</siteClientLicense>
+      <locPcNo>$locPcNo</locPcNo>
+      <deleteVehicle>
+      $deleteVehicleXml
+      </deleteVehicle>
+      <editVehicle>
+      $editVehicleXml
+      </editVehicle>
+      <vehPlate>
+      $vehPlateXml
+      </vehPlate>
+      <vehGroup>
+      $vehGroupXml
+      </vehGroup>
+      <visitArrivalTime>
+      $visitArrivalTimeXml
+      </visitArrivalTime>
+      <visitorDepTime>
+      $visitorDepTimeXml
+      </visitorDepTime>
+      <updateGeneratedAt>$updateGeneratedAt</updateGeneratedAt>
+    </SendDbBulkUpdate>
+  </soap:Body>
+</soap:Envelope>
+"@
+    
+    # Save old certificate callback
+    $oldCb = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
+    
+    try {
+        # Trust all certificates
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = 
+            New-Object System.Net.Security.RemoteCertificateValidationCallback([TrustAll]::Validate)
+        
+        # Send SOAP request
+        $resp = Invoke-WebRequest -Method POST -Uri $videofitUrl `
+            -Headers @{ "SOAPAction" = $soapAction } `
+            -ContentType "text/xml; charset=utf-8" `
+            -Body $soap `
+            -UseBasicParsing `
+            -TimeoutSec 20 `
+            -DisableKeepAlive `
+            -ErrorAction Stop
+        
+        Write-Host "[relay] Staff vehicles SOAP HTTP $($resp.StatusCode)" -ForegroundColor Gray
+        if ($resp.Content) {
+            $preview = $resp.Content
+            if ($preview.Length -gt 400) { 
+                $preview = $preview.Substring(0, 400) + "..." 
+            }
+            Write-Host "[relay] Staff vehicles SOAP RESP: $preview" -ForegroundColor Gray
+        } else {
+            Write-Host "[relay] Staff vehicles SOAP RESP: <empty>" -ForegroundColor Gray
+        }
+        
+        # Check for SOAP faults
+        if ($resp.Content -match '<faultstring[^>]*>([^<]+)</faultstring>' -or $resp.Content -match '<soap:Fault>') {
+            throw "SOAP fault in response"
+        }
+        
+        Write-Host "[relay] Staff vehicles sent successfully: $($StaffVehicles.Count) vehicles" -ForegroundColor Green
+        return $true
+    } catch {
+        Write-Host "[relay] Staff vehicles Videofit error: $($_.Exception.Message)" -ForegroundColor Red
+        throw
+    } finally {
+        # Restore certificate callback
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $oldCb
+    }
+}
+
 # Send ACK for processed items
 function Send-Ack {
     param(
@@ -318,6 +473,31 @@ function Start-Relay {
                 Write-Host "[relay] No outbox data available, sleeping $backoffSeconds seconds" -ForegroundColor Yellow
                 Start-Sleep -Seconds $backoffSeconds
                 continue
+            }
+            
+            # Fetch and send staff vehicles first (always include them when we have a connection)
+            # Only fetch if we successfully connected (not using cache from offline mode)
+            if (-not $useCache) {
+                try {
+                    $staffVehiclesResponse = Fetch-StaffVehicles -Config $Config
+                    if ($staffVehiclesResponse -ne $null -and $staffVehiclesResponse.vehicles.Count -gt 0) {
+                        Write-Host "[relay] Sending $($staffVehiclesResponse.vehicles.Count) staff vehicles to Videofit..." -ForegroundColor Cyan
+                        try {
+                            Send-StaffVehiclesToVideofit -StaffVehicles $staffVehiclesResponse.vehicles -Config $Config
+                            Write-Host "[relay] Staff vehicles updated successfully" -ForegroundColor Green
+                        } catch {
+                            Write-Host "[relay] Failed to send staff vehicles: $($_.Exception.Message)" -ForegroundColor Red
+                            # Don't fail the entire loop if staff vehicles fail
+                        }
+                    } else {
+                        Write-Host "[relay] No staff vehicles to send" -ForegroundColor Gray
+                    }
+                } catch {
+                    Write-Host "[relay] Failed to fetch staff vehicles: $($_.Exception.Message)" -ForegroundColor Yellow
+                    # Don't fail the entire loop if staff vehicles fetch fails
+                }
+            } else {
+                Write-Host "[relay] Skipping staff vehicles (using cache, safe mode)" -ForegroundColor Yellow
             }
             
             # Check minimum items requirement
