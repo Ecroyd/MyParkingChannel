@@ -72,6 +72,7 @@ export const ADMIN_NAV: NavNode[] = [
       { key: "members", label: "Members", href: "/admin/settings/members", minRole: "admin" },
       { key: "staff-vehicles", label: "Staff Vehicles", href: "/admin/settings/staff-vehicles", minRole: "admin" },
       { key: "capacity", label: "Capacity", href: "/admin/settings/capacity", minRole: "admin" },
+      { key: "anpr", label: "ANPR Relay", href: "/admin/settings/anpr", minRole: "admin" },
       { key: "pwa", label: "PWA Settings", href: "/admin/pwa-settings", minRole: "admin" },
       { key: "setup", label: "Initial Setup", href: "/admin/setup", minRole: "admin" },
     ],

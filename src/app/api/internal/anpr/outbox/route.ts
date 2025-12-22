@@ -1,29 +1,9 @@
-// GET /api/internal/anpr/outbox - Poll pending vehicle updates
-// Authenticated via Bearer token (tenant relay token from tenant_secrets)
+// GET /api/internal/anpr/outbox - Poll pending vehicle updates (NON-DESTRUCTIVE)
+// Authenticated via x-relay-token header (SHA256 hash comparison)
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import crypto from 'crypto';
-
-/**
- * Simple decryption helper (matches pattern from other integrations)
- * TODO: Implement proper decryption using ENCRYPTION_KEY
- */
-function decryptSecret(encryptedValue: string): string {
-  return Buffer.from(encryptedValue, 'base64').toString();
-}
-
-/**
- * Timing-safe comparison to prevent timing attacks
- */
-function timingSafeEqual(a: string, b: string): boolean {
-  const aBuf = Buffer.from(a, 'utf8');
-  const bBuf = Buffer.from(b, 'utf8');
-  if (aBuf.length !== bBuf.length) {
-    return false;
-  }
-  return crypto.timingSafeEqual(aBuf, bBuf);
-}
+import { authenticateRelayRequest } from '@/lib/anpr/relayAuth';
 
 export async function GET(req: NextRequest) {
   try {
@@ -38,65 +18,38 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Authenticate via Bearer token
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    // Authenticate via x-relay-token header
+    const relayToken = req.headers.get('x-relay-token');
+    const site = await authenticateRelayRequest(tenantId, relayToken);
+
+    if (!site) {
       return NextResponse.json(
-        { error: 'Missing or invalid Authorization header. Expected: Bearer <token>' },
+        { error: 'Invalid or missing relay token' },
         { status: 401 }
       );
     }
 
-    const providedToken = authHeader.substring(7); // Remove "Bearer " prefix
+    if (!site.enabled) {
+      return NextResponse.json(
+        { error: 'ANPR site is not enabled' },
+        { status: 403 }
+      );
+    }
+
     const supabase = createAdminClient();
 
-    // Fetch relay token from tenant_secrets
-    const { data: secret, error: secretError } = await supabase
-      .from('tenant_secrets')
-      .select('value_ciphertext')
-      .eq('tenant_id', tenantId)
-      .eq('scope', 'anpr')
-      .eq('key', 'anpr_relay_token')
-      .maybeSingle();
-
-    if (secretError || !secret || !secret.value_ciphertext) {
-      return NextResponse.json(
-        { error: 'Invalid relay token' },
-        { status: 401 }
-      );
-    }
-
-    // Decrypt the stored token
-    let storedToken: string;
-    try {
-      storedToken = decryptSecret(secret.value_ciphertext);
-    } catch (error) {
-      console.error('[ANPR Outbox] Error decrypting relay token:', error);
-      return NextResponse.json(
-        { error: 'Invalid relay token' },
-        { status: 401 }
-      );
-    }
-
-    // Timing-safe comparison
-    if (!timingSafeEqual(providedToken, storedToken)) {
-      return NextResponse.json(
-        { error: 'Invalid relay token' },
-        { status: 401 }
-      );
-    }
-
-    // Get query parameters (reuse searchParams from above)
+    // Get query parameters
     const limit = Math.min(parseInt(searchParams.get('limit') || '100', 10), 1000); // Max 1000 items
     const maxAge = parseInt(searchParams.get('maxAge') || '86400', 10); // Default 24 hours in seconds
 
     // Calculate cutoff time (only return items created within maxAge)
     const cutoffTime = new Date(Date.now() - maxAge * 1000).toISOString();
 
-    // Fetch pending items for this tenant, ordered by created_at
+    // IMPORTANT: NON-DESTRUCTIVE - Just fetch pending items, don't mark as processing
+    // The relay will ACK items after successful SOAP processing
     const { data: items, error: fetchError } = await supabase
       .from('anpr_outbox')
-      .select('id, plate, group_number, valid_from, valid_until, action, created_at, retry_count')
+      .select('id, plate, group_number, valid_from, valid_until, action, created_at, retry_count, type, reason')
       .eq('tenant_id', tenantId)
       .eq('status', 'pending')
       .gte('created_at', cutoffTime)
@@ -111,21 +64,6 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Mark items as processing (atomic update)
-    if (items && items.length > 0) {
-      const itemIds = items.map((item) => item.id);
-      const { error: updateError } = await supabase
-        .from('anpr_outbox')
-        .update({ status: 'processing' })
-        .in('id', itemIds)
-        .eq('status', 'pending'); // Only update if still pending (prevents race conditions)
-
-      if (updateError) {
-        console.error('[ANPR Outbox] Update to processing error:', updateError);
-        // Continue anyway - return items but they may be processed by another poller
-      }
-    }
-
     // Format response
     const formattedItems = (items || []).map((item) => ({
       id: item.id,
@@ -136,6 +74,8 @@ export async function GET(req: NextRequest) {
       action: item.action,
       createdAt: item.created_at,
       retryCount: item.retry_count,
+      type: item.type || null,
+      reason: item.reason || null,
     }));
 
     return NextResponse.json({
