@@ -3,8 +3,15 @@
 // Only acks items if body.success === true
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createAdminClient } from '@/lib/supabase/server';
+import { createClient } from '@supabase/supabase-js';
 import { requireRelayTokenForTenant } from '../_relayAuth';
+
+function supabaseAdmin() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  return createClient(url, key, { auth: { persistSession: false } });
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -44,10 +51,10 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const supabase = createAdminClient();
+    const admin = supabaseAdmin();
 
     // Mark item as processed (only if still pending/processing)
-    const { data: item, error: updateError } = await supabase
+    const { data: item, error: updateError } = await admin
       .from('anpr_outbox')
       .update({ status: 'processed' })
       .eq('id', outboxItemId)
