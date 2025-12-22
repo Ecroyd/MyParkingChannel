@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { requireRelayTokenForTenant } from '../_relayAuth';
+import { requireRelayAuth } from '../_relayAuth';
 
 function supabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -18,15 +18,8 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { tenantId, outboxItemId, success } = body;
 
-    if (!tenantId) {
-      return NextResponse.json(
-        { error: 'tenantId is required' },
-        { status: 400 }
-      );
-    }
-
-    const authResp = requireRelayTokenForTenant(req, tenantId);
-    if (authResp) return authResp;
+    const auth = await requireRelayAuth(req, tenantId ?? "");
+    if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
 
     if (!outboxItemId) {
       return NextResponse.json(

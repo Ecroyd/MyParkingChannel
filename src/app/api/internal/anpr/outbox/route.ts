@@ -1,9 +1,9 @@
 // GET /api/internal/anpr/outbox - Poll pending vehicle updates (NON-DESTRUCTIVE)
 // Authenticated via per-tenant relay token (x-relay-token header or Bearer)
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { requireRelayTokenForTenant } from '../_relayAuth';
+import { requireRelayAuth } from '../_relayAuth';
 
 function supabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -14,19 +14,9 @@ function supabaseAdmin() {
 
 export async function GET(req: NextRequest) {
   try {
-    // Get tenantId from query params
-    const url = new URL(req.url);
-    const tenantId = url.searchParams.get('tenantId') || '';
-
-    if (!tenantId) {
-      return NextResponse.json(
-        { error: 'tenantId query parameter is required' },
-        { status: 400 }
-      );
-    }
-
-    const authResp = requireRelayTokenForTenant(req, tenantId);
-    if (authResp) return authResp;
+    const tenantId = req.nextUrl.searchParams.get("tenantId") ?? "";
+    const auth = await requireRelayAuth(req, tenantId);
+    if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
 
     const admin = supabaseAdmin();
 
@@ -51,7 +41,7 @@ export async function GET(req: NextRequest) {
     return Response.json({ items: data ?? [] });
   } catch (error: any) {
     console.error('[ANPR Outbox] Unexpected error:', error);
-    return NextResponse.json(
+    return Response.json(
       { error: 'Internal server error', details: error?.message ?? String(error) },
       { status: 500 }
     );
