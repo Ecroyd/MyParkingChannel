@@ -30,9 +30,10 @@ ALTER TABLE anpr_sites ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Service role can do everything on anpr_sites" ON anpr_sites
   FOR ALL TO service_role USING (true) WITH CHECK (true);
 
--- RLS Policy: Tenant admins can CRUD their tenant's anpr_sites
-CREATE POLICY "Tenant admins can manage their anpr_sites" ON anpr_sites
-  FOR ALL TO authenticated USING (
+-- RLS Policy: Tenant admins can update enabled, but NOT read relay_token_hash
+-- Service role is used in server routes to read the hash for authentication
+CREATE POLICY "Tenant admins can update enabled on their anpr_sites" ON anpr_sites
+  FOR UPDATE TO authenticated USING (
     tenant_id IN (
       SELECT tenant_id FROM user_tenants 
       WHERE user_id = auth.uid() 
@@ -45,6 +46,9 @@ CREATE POLICY "Tenant admins can manage their anpr_sites" ON anpr_sites
       AND role IN ('admin', 'owner')
     )
   );
+
+-- Note: relay_token_hash is only readable by service_role (via server routes)
+-- Tenant admins can update other fields but cannot read the hash for security
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_anpr_sites_updated_at()

@@ -130,7 +130,7 @@ export default function AnprSettingsClient() {
     setSaving(true)
     setError('')
     try {
-      const res = await fetch('/api/admin/anpr-sites/generate-token', {
+      const res = await fetch('/api/internal/anpr/rotate-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tenantId }),

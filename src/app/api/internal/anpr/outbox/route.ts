@@ -1,9 +1,9 @@
 // GET /api/internal/anpr/outbox - Poll pending vehicle updates (NON-DESTRUCTIVE)
-// Authenticated via x-relay-token header (SHA256 hash comparison)
+// Authenticated via per-tenant relay token (x-relay-token header or Bearer)
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { authenticateRelayRequest } from '@/lib/anpr/relayAuth';
+import { assertRelayAuth } from '@/lib/anpr/auth';
 
 export async function GET(req: NextRequest) {
   try {
@@ -18,22 +18,12 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Authenticate via x-relay-token header
-    const relayToken = req.headers.get('x-relay-token');
-    const site = await authenticateRelayRequest(tenantId, relayToken);
-
-    if (!site) {
-      return NextResponse.json(
-        { error: 'Invalid or missing relay token' },
-        { status: 401 }
-      );
-    }
-
-    if (!site.enabled) {
-      return NextResponse.json(
-        { error: 'ANPR site is not enabled' },
-        { status: 403 }
-      );
+    // Authenticate using per-tenant relay token
+    try {
+      await assertRelayAuth(req, tenantId);
+    } catch (authError) {
+      // assertRelayAuth throws a Response object on failure
+      return authError as Response;
     }
 
     const supabase = createAdminClient();
@@ -65,7 +55,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Format response
-    const formattedItems = (items || []).map((item) => ({
+    const formattedItems = (items || []).map((item: any) => ({
       id: item.id,
       plate: item.plate,
       group: item.group_number,

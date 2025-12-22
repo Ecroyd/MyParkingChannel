@@ -1,14 +1,15 @@
 // POST /api/internal/anpr/ack - Acknowledge processed outbox item
-// Authenticated via x-relay-token header
+// Authenticated via per-tenant relay token
+// Only acks items if body.success === true
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { authenticateRelayRequest } from '@/lib/anpr/relayAuth';
+import { assertRelayAuth } from '@/lib/anpr/auth';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { tenantId, outboxItemId } = body;
+    const { tenantId, outboxItemId, success } = body;
 
     if (!tenantId) {
       return NextResponse.json(
@@ -24,22 +25,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Authenticate via x-relay-token header
-    const relayToken = req.headers.get('x-relay-token');
-    const site = await authenticateRelayRequest(tenantId, relayToken);
-
-    if (!site) {
+    if (typeof success !== 'boolean') {
       return NextResponse.json(
-        { error: 'Invalid or missing relay token' },
-        { status: 401 }
+        { error: 'success must be a boolean' },
+        { status: 400 }
       );
     }
 
-    if (!site.enabled) {
-      return NextResponse.json(
-        { error: 'ANPR site is not enabled' },
-        { status: 403 }
-      );
+    // Authenticate using per-tenant relay token
+    try {
+      await assertRelayAuth(req, tenantId);
+    } catch (authError) {
+      // assertRelayAuth throws a Response object on failure
+      return authError as Response;
+    }
+
+    // Only ack if success === true
+    // If SOAP fails on the PC, the relay should not call ack, so this route should not clear anything on failure
+    if (!success) {
+      return NextResponse.json({
+        success: false,
+        message: 'Item not acknowledged (success=false). Item remains in outbox for retry.',
+      });
     }
 
     const supabase = createAdminClient();
@@ -81,4 +88,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-
