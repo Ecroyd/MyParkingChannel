@@ -85,34 +85,8 @@ export async function POST(req: NextRequest) {
       ? parseInt(getValue('videofit_default_group')!, 10)
       : 4;
 
-    // Validate based on mode
+    // Relay mode is disabled - only direct mode is supported for test vehicles
     if (mode === 'relay') {
-      if (!siteClientLicense || locPcNo === null || locPcNo === undefined) {
-        return NextResponse.json(
-          { error: 'Videofit configuration incomplete. Please set Site Client License and Location PC No.' },
-          { status: 400 }
-        );
-      }
-    } else {
-      // direct mode
-      if (!baseUrl || !siteClientLicense || locPcNo === null || locPcNo === undefined) {
-        return NextResponse.json(
-          { error: 'Videofit configuration incomplete. Please set Base URL, Site Client License, and Location PC No.' },
-          { status: 400 }
-        );
-      }
-    }
-
-    // Create test record: TEST123 valid for 10 minutes
-    const now = new Date();
-    const validUntil = new Date(now.getTime() + 10 * 60 * 1000); // 10 minutes from now
-
-    let result: { success: boolean; error?: string; statusCode?: number; response?: any; durationMs?: number };
-
-    if (mode === 'relay') {
-      // DISABLED: Test vehicle insertion to outbox
-      // Test vehicles should not be inserted into production outbox
-      // Use snapshot generation or direct mode for testing instead
       return NextResponse.json(
         {
           success: false,
@@ -120,31 +94,43 @@ export async function POST(req: NextRequest) {
         },
         { status: 400 }
       );
-    } else {
-      // Direct mode: call Videofit directly
-      const config: VideofitConfig = {
-        baseUrl: baseUrl!,
-        siteClientLicense,
-        locPcNo,
-        defaultGroup,
-      };
-
-      const testRow: VideofitRow = {
-        plate: 'TEST123',
-        group: defaultGroup,
-        validFrom: now,
-        validUntil: validUntil,
-        action: 'upsert',
-      };
-
-      result = await sendDbBulkUpdate(config, [testRow]);
     }
 
-    // Log integration event
+    // Validate direct mode configuration
+    if (!baseUrl || !siteClientLicense || locPcNo === null || locPcNo === undefined) {
+      return NextResponse.json(
+        { error: 'Videofit configuration incomplete. Please set Base URL, Site Client License, and Location PC No.' },
+        { status: 400 }
+      );
+    }
+
+    // Create test record: TEST123 valid for 10 minutes
+    const now = new Date();
+    const validUntil = new Date(now.getTime() + 10 * 60 * 1000); // 10 minutes from now
+
+    // Direct mode: call Videofit directly
+    const config: VideofitConfig = {
+      baseUrl: baseUrl!,
+      siteClientLicense,
+      locPcNo,
+      defaultGroup,
+    };
+
+    const testRow: VideofitRow = {
+      plate: 'TEST123',
+      group: defaultGroup,
+      validFrom: now,
+      validUntil: validUntil,
+      action: 'upsert',
+    };
+
+    const result = await sendDbBulkUpdate(config, [testRow]);
+
+    // Log integration event (always outbound for direct mode)
     const idempotencyKey = `videofit_test_vehicle_${tenantId}_${Date.now()}`;
     const payload = {
       test: true,
-      mode,
+      mode: 'direct' as const,
       plate: 'TEST123',
       group: defaultGroup,
     };
@@ -152,8 +138,8 @@ export async function POST(req: NextRequest) {
 
     await adminClient.from('integration_events').insert({
       tenant_id: tenantId,
-      direction: mode === 'relay' ? 'internal' : 'outbound',
-      event_type: mode === 'relay' ? 'videofit_outbox_insert' : 'videofit_send_db_bulk_update',
+      direction: 'outbound',
+      event_type: 'videofit_send_db_bulk_update',
       idempotency_key: idempotencyKey,
       payload_hash: payloadHash,
       status: result.success ? 'success' : 'failed',
@@ -165,16 +151,12 @@ export async function POST(req: NextRequest) {
     });
 
     if (result.success) {
-      const message =
-        mode === 'relay'
-          ? 'Test vehicle enqueued to outbox. The on-site relay script will pick it up on the next poll.'
-          : 'Test vehicle sent successfully. Check Videofit Database list to confirm receipt.';
       return NextResponse.json({
         success: true,
-        message,
+        message: 'Test vehicle sent successfully. Check Videofit Database list to confirm receipt.',
         plate: 'TEST123',
         group: defaultGroup,
-        mode,
+        mode: 'direct',
         durationMs: result.durationMs,
       });
     } else {
