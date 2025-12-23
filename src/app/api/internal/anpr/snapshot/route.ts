@@ -1,9 +1,18 @@
-// GET /api/internal/anpr/snapshot - Get full snapshot of vehicles from bookings
+// GET /api/internal/anpr/snapshot - Get full snapshot of vehicles from bookings (read-only)
+// POST /api/internal/anpr/snapshot - Generate snapshot and insert/update outbox items (self-healing)
 // Authenticated via x-relay-token header
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createAdminClient } from '@/lib/supabase/server';
-import { authenticateRelayRequest } from '@/lib/anpr/relayAuth';
+import { createClient } from '@supabase/supabase-js';
+import { requireRelayAuth } from '../_relayAuth';
+import { generateAnprSnapshot } from '@/lib/anpr/generateSnapshot';
+
+function supabaseAdmin() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  return createClient(url, key, { auth: { persistSession: false } });
+}
 
 /**
  * Normalize plate: uppercase alphanumeric only
@@ -18,35 +27,20 @@ function normalizePlate(plate: string | null | undefined): string | null {
 export async function GET(req: NextRequest) {
   try {
     // Get tenantId from query params
-    const { searchParams } = new URL(req.url);
-    const tenantId = searchParams.get('tenantId');
+    const tenantId = req.nextUrl.searchParams.get('tenantId') ?? '';
 
     if (!tenantId) {
-      return NextResponse.json(
+      return Response.json(
         { error: 'tenantId query parameter is required' },
         { status: 400 }
       );
     }
 
     // Authenticate via x-relay-token header
-    const relayToken = req.headers.get('x-relay-token');
-    const site = await authenticateRelayRequest(tenantId, relayToken);
+    const auth = await requireRelayAuth(req, tenantId);
+    if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
 
-    if (!site) {
-      return NextResponse.json(
-        { error: 'Invalid or missing relay token' },
-        { status: 401 }
-      );
-    }
-
-    if (!site.enabled) {
-      return NextResponse.json(
-        { error: 'ANPR site is not enabled' },
-        { status: 403 }
-      );
-    }
-
-    const supabase = createAdminClient();
+    const supabase = supabaseAdmin();
 
     // Fetch ANPR site config for snapshot rules
     const { data: anprSite, error: siteError } = await supabase
@@ -201,14 +195,68 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    return NextResponse.json({
+    return Response.json({
       ok: true,
       items: snapshotItems,
       count: snapshotItems.length,
     });
   } catch (error: any) {
     console.error('[ANPR Snapshot] Error:', error);
-    return NextResponse.json(
+    return Response.json(
+      { error: error.message || 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * POST /api/internal/anpr/snapshot - Generate snapshot and insert/update outbox items
+ * Self-healing mode: ANPR PC can trigger snapshot if outbox is empty
+ */
+export async function POST(req: NextRequest) {
+  try {
+    // Get tenantId from query params
+    const tenantId = req.nextUrl.searchParams.get('tenantId') ?? '';
+
+    if (!tenantId) {
+      return Response.json(
+        { error: 'tenantId query parameter is required' },
+        { status: 400 }
+      );
+    }
+
+    // Authenticate via x-relay-token header
+    const auth = await requireRelayAuth(req, tenantId);
+    if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
+
+    const adminClient = supabaseAdmin();
+
+    // Generate snapshot and insert/update outbox items
+    const snapshotResult = await generateAnprSnapshot(tenantId, adminClient, 'self-healing');
+
+    if (snapshotResult.errors.length > 0) {
+      console.error('[ANPR Snapshot POST] Errors:', snapshotResult.errors);
+      return Response.json(
+        {
+          ok: false,
+          error: 'Failed to generate snapshot',
+          details: snapshotResult.errors,
+          inserted: snapshotResult.inserted,
+          updated: snapshotResult.updated,
+        },
+        { status: 500 }
+      );
+    }
+
+    return Response.json({
+      ok: true,
+      inserted: snapshotResult.inserted,
+      updated: snapshotResult.updated,
+      message: `Snapshot generated: ${snapshotResult.inserted} inserted, ${snapshotResult.updated} updated`,
+    });
+  } catch (error: any) {
+    console.error('[ANPR Snapshot POST] Error:', error);
+    return Response.json(
       { error: error.message || 'Internal server error' },
       { status: 500 }
     );

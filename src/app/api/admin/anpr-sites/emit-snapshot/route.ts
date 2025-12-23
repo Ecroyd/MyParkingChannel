@@ -1,8 +1,10 @@
 // POST /api/admin/anpr-sites/emit-snapshot - Manually emit outbox snapshot
+// Generates full snapshot from bookings and inserts/updates outbox items
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { getServerSupabase } from '@/lib/supabase/server';
+import { generateAnprSnapshot } from '@/lib/anpr/generateSnapshot';
 
 export async function POST(req: NextRequest) {
   try {
@@ -34,34 +36,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Access denied. Admin role required.' }, { status: 403 });
     }
 
-    // Insert snapshot outbox item
-    const { data: outboxItem, error: insertError } = await adminClient
-      .from('anpr_outbox')
-      .insert({
-        tenant_id: tenantId,
-        type: 'snapshot',
-        reason: 'manual',
-        status: 'pending',
-        plate: '', // Snapshot items don't need plate
-        group_number: 0,
-        valid_from: new Date().toISOString(),
-        valid_until: new Date().toISOString(),
-        action: 'snapshot',
-      })
-      .select()
-      .single();
+    // Generate snapshot and insert/update outbox items
+    const snapshotResult = await generateAnprSnapshot(tenantId, adminClient, 'manual');
 
-    if (insertError) {
-      console.error('Error inserting snapshot outbox item:', insertError);
+    if (snapshotResult.errors.length > 0) {
+      console.error('Error generating snapshot:', snapshotResult.errors);
       return NextResponse.json(
-        { error: 'Failed to emit snapshot' },
+        {
+          success: false,
+          error: 'Failed to generate snapshot',
+          details: snapshotResult.errors,
+          inserted: snapshotResult.inserted,
+          updated: snapshotResult.updated,
+        },
         { status: 500 }
       );
     }
 
     return NextResponse.json({
       success: true,
-      outboxItemId: outboxItem.id,
+      inserted: snapshotResult.inserted,
+      updated: snapshotResult.updated,
+      message: `Snapshot generated: ${snapshotResult.inserted} inserted, ${snapshotResult.updated} updated`,
     });
   } catch (error: any) {
     console.error('POST /api/admin/anpr-sites/emit-snapshot error:', error);
