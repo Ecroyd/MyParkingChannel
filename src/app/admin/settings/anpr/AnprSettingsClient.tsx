@@ -168,22 +168,24 @@ export default function AnprSettingsClient() {
     if (!tenantId) return
     setSaving(true)
     try {
-      const res = await fetch('/api/admin/anpr-sites/emit-snapshot', {
+      const res = await fetch('/api/admin/anpr-sites/emit-snapshot?debug=1', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tenantId }),
+        body: JSON.stringify({ tenantId, debug: true }),
       })
 
       const json = await res.json()
       if (json.success) {
+        const debugInfo = json.debug ? ` (Scanned: ${json.debug.bookingsScanned}, Upserts: ${json.debug.outboxUpserts}, Pending: ${json.debug.pendingCount})` : ''
         toast({
           title: 'Success',
-          description: 'Snapshot emitted to outbox',
+          description: `Snapshot generated: ${json.inserted} inserted, ${json.updated} updated${debugInfo}`,
         })
       } else {
+        const errorDetails = json.details ? ` Details: ${JSON.stringify(json.details)}` : ''
         toast({
           title: 'Error',
-          description: json.error || 'Failed to emit snapshot',
+          description: (json.error || 'Failed to emit snapshot') + errorDetails,
           variant: 'destructive',
         })
       }
@@ -191,7 +193,7 @@ export default function AnprSettingsClient() {
       console.error('Failed to emit snapshot:', err)
       toast({
         title: 'Error',
-        description: 'Failed to emit snapshot',
+        description: `Failed to emit snapshot: ${err instanceof Error ? err.message : String(err)}`,
         variant: 'destructive',
       })
     } finally {
@@ -441,21 +443,45 @@ export default function AnprSettingsClient() {
         </CardContent>
       </Card>
 
-      <Card className="shadow-soft">
+      <Card className="shadow-soft border-blue-200">
         <CardHeader>
-          <CardTitle className="text-sm">Testing</CardTitle>
+          <CardTitle className="text-sm flex items-center gap-2">
+            <RefreshCw className="h-4 w-4" />
+            Snapshot Generator
+          </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <div>
+            <p className="text-sm text-gray-600 mb-3">
+              Generate a full snapshot of all active bookings and add them to the ANPR outbox. This will:
+            </p>
+            <ul className="text-xs text-gray-500 space-y-1 mb-4 list-disc list-inside">
+              <li>Scan all bookings with status 'reserved' or 'checked_in'</li>
+              <li>Include bookings within ±24 hours of current time</li>
+              <li>Create outbox items for each booking with a valid plate number</li>
+              <li>Normalize plate numbers (uppercase alphanumeric only)</li>
+            </ul>
+          </div>
           <Button
-            variant="outline"
+            variant="default"
             onClick={handleEmitSnapshot}
             disabled={saving}
+            className="w-full sm:w-auto"
           >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Emit Outbox Snapshot Now
+            {saving ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Generating Snapshot...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Generate Snapshot Now
+              </>
+            )}
           </Button>
-          <p className="text-xs text-gray-500 mt-2">
-            Manually trigger a snapshot to be added to the outbox for testing
+          <p className="text-xs text-gray-500">
+            Click to manually trigger snapshot generation. Results will show in the notification.
           </p>
         </CardContent>
       </Card>
