@@ -51,28 +51,35 @@ export async function generateAnprSnapshot(
 
     const defaultGroup = anprSite?.default_group ?? 4;
 
-    // Query bookings: plate != '' AND start_at <= now() + 24h AND end_at >= now() - 24h
-    // Only include confirmed bookings (exclude cancelled, test bookings)
+    // Query bookings: start_at <= now() + 24h AND end_at >= now() - 24h
+    // Include reserved and checked_in statuses (exclude cancelled and checked_out)
+    // Require plate <> ''
     const now = new Date();
     const futureCutoff = new Date(now.getTime() + 24 * 60 * 60 * 1000); // +24h
     const pastCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000); // -24h
 
+    // Query: tenant_id = X AND status IN ('reserved', 'checked_in') AND plate <> '' 
+    //        AND start_at <= (now + 24h) AND end_at >= (now - 24h)
     const { data: bookings, error: bookingsError } = await adminClient
       .from('bookings')
-      .select('id, plate, start_at, end_at, status, reference')
+      .select('id, tenant_id, plate, start_at, end_at, status')
       .eq('tenant_id', tenantId)
-      .eq('status', 'confirmed') // Only confirmed bookings
+      .in('status', ['reserved', 'checked_in'])
       .neq('plate', '')
       .not('plate', 'is', null)
       .lte('start_at', futureCutoff.toISOString())
       .gte('end_at', pastCutoff.toISOString());
 
     if (bookingsError) {
+      console.error('[ANPR Snapshot] Query error:', bookingsError);
       result.errors.push(`Failed to fetch bookings: ${bookingsError.message}`);
       return result;
     }
 
+    // Count all bookings found
     result.bookingsScanned = bookings?.length ?? 0;
+    
+    console.log(`[ANPR Snapshot] Found ${result.bookingsScanned} bookings for tenant ${tenantId} in date range`);
 
     if (!bookings || bookings.length === 0) {
       return result; // No bookings to process
@@ -80,17 +87,10 @@ export async function generateAnprSnapshot(
 
     // Process each booking: create one outbox row per booking
     for (const booking of bookings) {
-      // Skip test bookings (identified by reference containing "TEST" or plate being "TEST123")
-      const isTestBooking =
-        (booking.reference && booking.reference.toUpperCase().includes('TEST')) ||
-        normalizePlate(booking.plate) === 'TEST123';
-      
-      if (isTestBooking) {
-        continue; // Skip test bookings
-      }
-
       const plate = normalizePlate(booking.plate);
-      if (!plate) continue; // Skip if plate normalizes to empty
+      
+      // Skip if plate normalizes to empty (shouldn't happen since we filter, but safety check)
+      if (!plate) continue;
 
       const outboxData = {
         tenant_id: tenantId,
