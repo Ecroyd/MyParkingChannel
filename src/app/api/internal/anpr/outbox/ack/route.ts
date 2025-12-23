@@ -50,14 +50,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Verify all items belong to this tenant and are not yet processed
-    // Match the outbox route logic: filter by processed_at IS NULL
+    // Verify all items belong to this tenant and have status='pending'
     const { data: items, error: verifyError } = await supabase
       .from('anpr_outbox')
-      .select('id, tenant_id, processed_at')
+      .select('id, tenant_id, status')
       .in('id', itemIds)
       .eq('tenant_id', tenantId)
-      .is('processed_at', null);
+      .eq('status', 'pending');
 
     if (verifyError) {
       console.error('[ANPR Outbox ACK] Verify error:', verifyError);
@@ -93,14 +92,15 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Mark items as processed (only if still unprocessed)
+    // Mark items as processed: set processed_at=now() and status='processed'
     const { error: updateError } = await supabase
       .from('anpr_outbox')
       .update({
         processed_at: now,
+        status: 'processed',
       })
       .in('id', verifiedIds)
-      .is('processed_at', null);
+      .eq('status', 'pending');
 
     if (updateError) {
       console.error('[ANPR Outbox ACK] Update error:', updateError);

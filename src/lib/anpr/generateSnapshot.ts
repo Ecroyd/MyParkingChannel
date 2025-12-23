@@ -48,25 +48,67 @@ export async function generateAnprSnapshot(
 
     const defaultGroup = anprSite?.default_group ?? 4;
 
-    // Query bookings: plate != '' and start_at <= now() + 24h and end_at >= now() - 24h
+    // Query bookings: today + on-site window
+    // Include:
+    // 1. Currently on-site (checked_in_at not null, checked_out_at null)
+    // 2. Today's bookings (start_at or end_at overlaps with today)
+    // 3. Upcoming bookings within next 24h
     const now = new Date();
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+    const endOfToday = new Date(now);
+    endOfToday.setHours(23, 59, 59, 999);
     const futureCutoff = new Date(now.getTime() + 24 * 60 * 60 * 1000); // +24h
-    const pastCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000); // -24h
 
-    const { data: bookings, error: bookingsError } = await adminClient
+    // Query 1: Currently on-site bookings
+    const { data: onSiteBookings, error: onSiteError } = await adminClient
       .from('bookings')
-      .select('id, plate, start_at, end_at, status')
+      .select('id, plate, start_at, end_at, status, checked_in_at, checked_out_at')
       .eq('tenant_id', tenantId)
       .neq('plate', '')
       .not('plate', 'is', null)
-      .lte('start_at', futureCutoff.toISOString())
-      .gte('end_at', pastCutoff.toISOString())
-      .eq('status', 'confirmed');
+      .eq('status', 'confirmed')
+      .not('checked_in_at', 'is', null)
+      .is('checked_out_at', null);
 
-    if (bookingsError) {
-      result.errors.push(`Failed to fetch bookings: ${bookingsError.message}`);
+    // Query 2: Today's bookings (start or end overlaps with today)
+    const { data: todayBookings, error: todayError } = await adminClient
+      .from('bookings')
+      .select('id, plate, start_at, end_at, status, checked_in_at, checked_out_at')
+      .eq('tenant_id', tenantId)
+      .neq('plate', '')
+      .not('plate', 'is', null)
+      .eq('status', 'confirmed')
+      .lte('start_at', endOfToday.toISOString())
+      .gte('end_at', startOfToday.toISOString());
+
+    // Query 3: Upcoming bookings within 24h
+    const { data: upcomingBookings, error: upcomingError } = await adminClient
+      .from('bookings')
+      .select('id, plate, start_at, end_at, status, checked_in_at, checked_out_at')
+      .eq('tenant_id', tenantId)
+      .neq('plate', '')
+      .not('plate', 'is', null)
+      .eq('status', 'confirmed')
+      .gt('start_at', now.toISOString())
+      .lte('start_at', futureCutoff.toISOString());
+
+    if (onSiteError || todayError || upcomingError) {
+      result.errors.push(
+        `Failed to fetch bookings: ${onSiteError?.message || todayError?.message || upcomingError?.message}`
+      );
       return result;
     }
+
+    // Combine and deduplicate by booking ID
+    const bookingMap = new Map<string, any>();
+    for (const booking of [...(onSiteBookings || []), ...(todayBookings || []), ...(upcomingBookings || [])]) {
+      if (!bookingMap.has(booking.id)) {
+        bookingMap.set(booking.id, booking);
+      }
+    }
+
+    const bookings = Array.from(bookingMap.values());
 
     if (!bookings || bookings.length === 0) {
       return result; // No bookings to process
@@ -114,13 +156,13 @@ export async function generateAnprSnapshot(
 
     // Insert/update outbox items for each unique plate
     for (const [plate, data] of plateMap.entries()) {
-      // Check if an unprocessed outbox item already exists for this plate
+      // Check if a pending outbox item already exists for this plate
       const { data: existing } = await adminClient
         .from('anpr_outbox')
         .select('id')
         .eq('tenant_id', tenantId)
         .eq('plate', plate)
-        .is('processed_at', null)
+        .eq('status', 'pending')
         .maybeSingle();
 
       if (existing) {

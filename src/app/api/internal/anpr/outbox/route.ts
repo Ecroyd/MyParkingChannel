@@ -20,13 +20,12 @@ export async function GET(req: NextRequest) {
 
     const admin = supabaseAdmin();
 
-    // IMPORTANT: replace table/fields below if your schema differs.
-    // Start by trying "anpr_outbox" (most likely), then adjust if error says table missing.
+    // Fetch only status='pending' rows with required fields
     const { data, error } = await admin
       .from("anpr_outbox")
-      .select("*")
+      .select("id, plate, group_number, valid_from, valid_until, action")
       .eq("tenant_id", tenantId)
-      .is("processed_at", null)
+      .eq("status", "pending")
       .order("created_at", { ascending: true })
       .limit(200);
 
