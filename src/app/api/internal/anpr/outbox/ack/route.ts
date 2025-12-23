@@ -1,9 +1,10 @@
 // POST /api/internal/anpr/outbox/ack - Acknowledge processed items
 // Authenticated via per-tenant relay token (x-relay-token header or Bearer)
+// Lease model: ACK success = mark completed, ACK failure = requeue to pending
 
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { requireRelayAuth } from '../../_relayAuth';
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+import { requireRelayAuth } from "../../_relayAuth";
 
 function supabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -14,119 +15,88 @@ function supabaseAdmin() {
 
 export async function POST(req: NextRequest) {
   try {
-    // Get tenantId from query params
-    const tenantId = req.nextUrl.searchParams.get('tenantId') ?? '';
+    const { searchParams } = new URL(req.url);
+    const tenantId = searchParams.get("tenantId");
+    
+    if (!tenantId) {
+      return NextResponse.json({ error: "tenantId required" }, { status: 400 });
+    }
 
+    // Relay token auth check
     const auth = await requireRelayAuth(req, tenantId);
-    if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
+    if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
     const supabase = supabaseAdmin();
 
-    // Parse request body
-    const body = await req.json();
-    const { itemIds, success } = body;
+    const body = await req.json().catch(() => null);
+    const itemIds: string[] = body?.itemIds;
+    const success: boolean = body?.success;
+    const errorMsg: string | undefined = body?.error;
 
     if (!Array.isArray(itemIds) || itemIds.length === 0) {
-      return Response.json(
-        { error: 'itemIds must be a non-empty array' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "itemIds must be a non-empty array" }, { status: 400 });
+    }
+    if (typeof success !== "boolean") {
+      return NextResponse.json({ error: "success must be a boolean" }, { status: 400 });
     }
 
-    // Validate that all itemIds are valid UUIDs
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const invalidIds = itemIds.filter((id: any) => typeof id !== 'string' || !uuidRegex.test(id));
-    if (invalidIds.length > 0) {
-      return Response.json(
-        { error: 'All itemIds must be valid UUIDs', invalidIds },
-        { status: 400 }
-      );
-    }
+    if (success) {
+      // Mark completed
+      const { data, error } = await supabase
+        .from("anpr_outbox")
+        .update({
+          status: "completed",
+          processed_at: new Date().toISOString(),
+          error_message: null,
+          leased_at: null,
+          lease_expires_at: null,
+        })
+        .eq("tenant_id", tenantId)
+        .in("id", itemIds)
+        .is("processed_at", null)
+        .select("id");
 
-    if (typeof success !== 'boolean') {
-      return Response.json(
-        { error: 'success must be a boolean' },
-        { status: 400 }
-      );
-    }
+      if (error) {
+        console.error('[ANPR Outbox ACK] Update error:', error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
 
-    // Verify all items belong to this tenant and have status='processing' (they were marked when fetched)
-    const { data: items, error: verifyError } = await supabase
-      .from('anpr_outbox')
-      .select('id, tenant_id, status')
-      .in('id', itemIds)
-      .eq('tenant_id', tenantId)
-      .eq('status', 'processing');
+      return NextResponse.json({ 
+        ok: true, 
+        found: data?.length ?? 0, 
+        requested: itemIds.length 
+      });
+    } else {
+      // Requeue (critical: prevents no-man's-land)
+      const { data, error } = await supabase
+        .from("anpr_outbox")
+        .update({
+          status: "pending",
+          error_message: errorMsg ?? "relay_failed",
+          leased_at: null,
+          lease_expires_at: null,
+        })
+        .eq("tenant_id", tenantId)
+        .in("id", itemIds)
+        .is("processed_at", null)
+        .select("id");
 
-    if (verifyError) {
-      console.error('[ANPR Outbox ACK] Verify error:', verifyError);
-      return Response.json(
-        { error: 'Failed to verify items', details: verifyError.message },
-        { status: 500 }
-      );
-    }
+      if (error) {
+        console.error('[ANPR Outbox ACK] Requeue error:', error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
 
-    if (!items || items.length === 0) {
-      return Response.json(
-        { error: 'No items found or all items already processed', found: items?.length ?? 0, requested: itemIds.length },
-        { status: 400 }
-      );
-    }
-
-    if (items.length !== itemIds.length) {
-      return Response.json(
-        { error: 'Some items not found or not in processing status', found: items.length, requested: itemIds.length },
-        { status: 400 }
-      );
-    }
-
-    const verifiedIds = items.map((item) => item.id);
-    const now = new Date().toISOString();
-
-    // Only ack if success === true
-    // If SOAP fails on the PC, the relay should not call ack, so this route should not clear anything on failure
-    if (!success) {
-      // Reset status back to 'pending' for retry
-      await supabase
-        .from('anpr_outbox')
-        .update({ status: 'pending' })
-        .in('id', verifiedIds)
-        .eq('status', 'processing');
-      
-      return Response.json({
-        success: false,
-        message: 'Items not acknowledged (success=false). Items reset to pending for retry.',
+      return NextResponse.json({ 
+        ok: true, 
+        requeued: true, 
+        found: data?.length ?? 0, 
+        requested: itemIds.length 
       });
     }
-
-    // Mark items as completed: set processed_at=now(), status='completed', error_message=null
-    const { error: updateError } = await supabase
-      .from('anpr_outbox')
-      .update({
-        processed_at: now,
-        status: 'completed',
-        error_message: null,
-      })
-      .in('id', verifiedIds)
-      .eq('status', 'processing');
-
-    if (updateError) {
-      console.error('[ANPR Outbox ACK] Update error:', updateError);
-      return Response.json(
-        { error: 'Failed to acknowledge items. They may have already been processed.' },
-        { status: 400 }
-      );
-    }
-
-    return Response.json({
-      ok: true,
-      acknowledged: verifiedIds.length,
-      message: 'Items acknowledged',
-    });
   } catch (error: any) {
     console.error('[ANPR Outbox ACK] Error:', error);
-    return Response.json(
-      { error: error.message || 'Internal server error' },
+    return NextResponse.json(
+      { error: error?.message || 'Internal server error' },
       { status: 500 }
     );
   }

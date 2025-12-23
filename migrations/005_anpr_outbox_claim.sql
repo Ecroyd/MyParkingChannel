@@ -1,73 +1,49 @@
 -- Migration: Create RPC function for atomically claiming ANPR outbox items
--- Purpose: Requeue stale items and claim pending items with FOR UPDATE SKIP LOCKED
+-- Purpose: Lease-based model with explicit lease expiry timestamps
+-- 
+-- Lease Model:
+--   pending = available to lease
+--   processing = leased by a relay (5 minute lease)
+--   If lease expires (relay crashes/SOAP fails/no ACK) → automatically requeue to pending
+--   ACK success = mark completed
+--   ACK failure = put back to pending + store error
 
-CREATE OR REPLACE FUNCTION anpr_outbox_claim(
-  p_tenant_id UUID,
-  p_limit INTEGER DEFAULT 50
+create or replace function public.anpr_outbox_claim(
+  p_tenant_id uuid,
+  p_limit int,
+  p_lease_seconds int
 )
-RETURNS TABLE (
-  id UUID,
-  booking_id UUID,
-  plate TEXT,
-  group_number INTEGER,
-  valid_from TIMESTAMPTZ,
-  valid_until TIMESTAMPTZ,
-  action TEXT,
-  created_at TIMESTAMPTZ
-) 
-LANGUAGE plpgsql
-AS $$
-DECLARE
-  v_stale_cutoff TIMESTAMPTZ;
-BEGIN
-  -- Calculate cutoff for stale items (10 minutes ago)
-  v_stale_cutoff := NOW() - INTERVAL '10 minutes';
-  
-  -- Step 1: Requeue stale processing items back to pending
-  -- Items that have been in 'processing' status for more than 10 minutes
-  UPDATE anpr_outbox
-  SET 
-    status = 'pending',
-    retry_count = COALESCE(retry_count, 0) + 1,
-    error_message = NULL,
-    updated_at = NOW()
-  WHERE 
-    tenant_id = p_tenant_id
-    AND status = 'processing'
-    AND updated_at < v_stale_cutoff;
-  
-  -- Step 2: Select and claim pending items using FOR UPDATE SKIP LOCKED
-  -- This ensures only one process can claim each row
-  -- Use a CTE to lock rows, then update them
-  RETURN QUERY
-  WITH locked_rows AS (
-    SELECT id
-    FROM anpr_outbox
-    WHERE 
-      tenant_id = p_tenant_id
-      AND status = 'pending'
-    ORDER BY created_at ASC
-    LIMIT p_limit
-    FOR UPDATE SKIP LOCKED
+returns setof public.anpr_outbox
+language plpgsql
+as $$
+begin
+  return query
+  with eligible as (
+    select id
+    from public.anpr_outbox
+    where tenant_id = p_tenant_id
+      and processed_at is null
+      and (
+        status = 'pending'
+        or (status = 'processing' and lease_expires_at is not null and lease_expires_at < now())
+        or (status = 'processing' and lease_expires_at is null) -- safety for older rows
+      )
+    order by created_at asc
+    limit p_limit
+    for update skip locked
+  ),
+  upd as (
+    update public.anpr_outbox o
+    set status = 'processing',
+        leased_at = now(),
+        lease_expires_at = now() + make_interval(secs => p_lease_seconds),
+        error_message = null
+    where o.id in (select id from eligible)
+    returning o.*
   )
-  UPDATE anpr_outbox o
-  SET 
-    status = 'processing',
-    updated_at = NOW()
-  FROM locked_rows lr
-  WHERE o.id = lr.id
-  RETURNING 
-    o.id,
-    o.booking_id,
-    o.plate,
-    o.group_number,
-    o.valid_from,
-    o.valid_until,
-    o.action,
-    o.created_at;
-END;
+  select * from upd;
+end;
 $$;
 
 -- Grant execute permission to service role (for API routes)
-GRANT EXECUTE ON FUNCTION anpr_outbox_claim(UUID, INTEGER) TO service_role;
-
+GRANT EXECUTE ON FUNCTION anpr_outbox_claim(UUID, INTEGER, INTEGER) TO service_role;
