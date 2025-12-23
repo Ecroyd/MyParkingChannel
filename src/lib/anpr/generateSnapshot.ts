@@ -52,14 +52,16 @@ export async function generateAnprSnapshot(
     const defaultGroup = anprSite?.default_group ?? 4;
 
     // Query bookings: plate != '' AND start_at <= now() + 24h AND end_at >= now() - 24h
+    // Only include confirmed bookings (exclude cancelled, test bookings)
     const now = new Date();
     const futureCutoff = new Date(now.getTime() + 24 * 60 * 60 * 1000); // +24h
     const pastCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000); // -24h
 
     const { data: bookings, error: bookingsError } = await adminClient
       .from('bookings')
-      .select('id, plate, start_at, end_at')
+      .select('id, plate, start_at, end_at, status, reference')
       .eq('tenant_id', tenantId)
+      .eq('status', 'confirmed') // Only confirmed bookings
       .neq('plate', '')
       .not('plate', 'is', null)
       .lte('start_at', futureCutoff.toISOString())
@@ -78,6 +80,15 @@ export async function generateAnprSnapshot(
 
     // Process each booking: create one outbox row per booking
     for (const booking of bookings) {
+      // Skip test bookings (identified by reference containing "TEST" or plate being "TEST123")
+      const isTestBooking =
+        (booking.reference && booking.reference.toUpperCase().includes('TEST')) ||
+        normalizePlate(booking.plate) === 'TEST123';
+      
+      if (isTestBooking) {
+        continue; // Skip test bookings
+      }
+
       const plate = normalizePlate(booking.plate);
       if (!plate) continue; // Skip if plate normalizes to empty
 
