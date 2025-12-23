@@ -50,13 +50,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Verify all items belong to this tenant and have status='pending'
+    // Verify all items belong to this tenant and have status='processing' (they were marked when fetched)
     const { data: items, error: verifyError } = await supabase
       .from('anpr_outbox')
       .select('id, tenant_id, status')
       .in('id', itemIds)
       .eq('tenant_id', tenantId)
-      .eq('status', 'pending');
+      .eq('status', 'processing');
 
     if (verifyError) {
       console.error('[ANPR Outbox ACK] Verify error:', verifyError);
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
 
     if (items.length !== itemIds.length) {
       return Response.json(
-        { error: 'Some items not found or already processed', found: items.length, requested: itemIds.length },
+        { error: 'Some items not found or not in processing status', found: items.length, requested: itemIds.length },
         { status: 400 }
       );
     }
@@ -86,21 +86,29 @@ export async function POST(req: NextRequest) {
     // Only ack if success === true
     // If SOAP fails on the PC, the relay should not call ack, so this route should not clear anything on failure
     if (!success) {
+      // Reset status back to 'pending' for retry
+      await supabase
+        .from('anpr_outbox')
+        .update({ status: 'pending' })
+        .in('id', verifiedIds)
+        .eq('status', 'processing');
+      
       return Response.json({
         success: false,
-        message: 'Items not acknowledged (success=false). Items remain in outbox for retry.',
+        message: 'Items not acknowledged (success=false). Items reset to pending for retry.',
       });
     }
 
-    // Mark items as processed: set processed_at=now() and status='processed'
+    // Mark items as completed: set processed_at=now(), status='completed', error_message=null
     const { error: updateError } = await supabase
       .from('anpr_outbox')
       .update({
         processed_at: now,
-        status: 'processed',
+        status: 'completed',
+        error_message: null,
       })
       .in('id', verifiedIds)
-      .eq('status', 'pending');
+      .eq('status', 'processing');
 
     if (updateError) {
       console.error('[ANPR Outbox ACK] Update error:', updateError);

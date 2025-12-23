@@ -229,10 +229,20 @@ export async function POST(req: NextRequest) {
     const auth = await requireRelayAuth(req, tenantId);
     if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
 
+    const debug = req.nextUrl.searchParams.get('debug') === '1';
     const adminClient = supabaseAdmin();
 
     // Generate snapshot and insert/update outbox items
     const snapshotResult = await generateAnprSnapshot(tenantId, adminClient, 'self-healing');
+
+    // Get pending count for debug
+    const pendingCount = debug
+      ? await adminClient
+          .from('anpr_outbox')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', tenantId)
+          .eq('status', 'pending')
+      : null;
 
     if (snapshotResult.errors.length > 0) {
       console.error('[ANPR Snapshot POST] Errors:', snapshotResult.errors);
@@ -243,6 +253,12 @@ export async function POST(req: NextRequest) {
           details: snapshotResult.errors,
           inserted: snapshotResult.inserted,
           updated: snapshotResult.updated,
+          ...(debug && {
+            debug: {
+              bookingsScanned: snapshotResult.bookingsScanned,
+              pendingCount: pendingCount?.count ?? 0,
+            },
+          }),
         },
         { status: 500 }
       );
@@ -253,6 +269,13 @@ export async function POST(req: NextRequest) {
       inserted: snapshotResult.inserted,
       updated: snapshotResult.updated,
       message: `Snapshot generated: ${snapshotResult.inserted} inserted, ${snapshotResult.updated} updated`,
+      ...(debug && {
+        debug: {
+          bookingsScanned: snapshotResult.bookingsScanned,
+          outboxUpserts: snapshotResult.inserted + snapshotResult.updated,
+          pendingCount: pendingCount?.count ?? 0,
+        },
+      }),
     });
   } catch (error: any) {
     console.error('[ANPR Snapshot POST] Error:', error);

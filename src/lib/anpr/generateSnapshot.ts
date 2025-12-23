@@ -16,11 +16,13 @@ function normalizePlate(plate: string | null | undefined): string | null {
 interface SnapshotResult {
   inserted: number;
   updated: number;
+  bookingsScanned: number;
   errors: string[];
 }
 
 /**
  * Generate full ANPR snapshot for a tenant and insert/update outbox items
+ * Creates one outbox row per booking (no plate deduplication)
  */
 export async function generateAnprSnapshot(
   tenantId: string,
@@ -30,6 +32,7 @@ export async function generateAnprSnapshot(
   const result: SnapshotResult = {
     inserted: 0,
     updated: 0,
+    bookingsScanned: 0,
     errors: [],
   };
 
@@ -48,157 +51,81 @@ export async function generateAnprSnapshot(
 
     const defaultGroup = anprSite?.default_group ?? 4;
 
-    // Query bookings: today + on-site window
-    // Include:
-    // 1. Currently on-site (checked_in_at not null, checked_out_at null)
-    // 2. Today's bookings (start_at or end_at overlaps with today)
-    // 3. Upcoming bookings within next 24h
+    // Query bookings: plate != '' AND start_at <= now() + 24h AND end_at >= now() - 24h
     const now = new Date();
-    const startOfToday = new Date(now);
-    startOfToday.setHours(0, 0, 0, 0);
-    const endOfToday = new Date(now);
-    endOfToday.setHours(23, 59, 59, 999);
     const futureCutoff = new Date(now.getTime() + 24 * 60 * 60 * 1000); // +24h
+    const pastCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000); // -24h
 
-    // Query 1: Currently on-site bookings
-    const { data: onSiteBookings, error: onSiteError } = await adminClient
+    const { data: bookings, error: bookingsError } = await adminClient
       .from('bookings')
-      .select('id, plate, start_at, end_at, status, checked_in_at, checked_out_at')
+      .select('id, plate, start_at, end_at')
       .eq('tenant_id', tenantId)
       .neq('plate', '')
       .not('plate', 'is', null)
-      .eq('status', 'confirmed')
-      .not('checked_in_at', 'is', null)
-      .is('checked_out_at', null);
+      .lte('start_at', futureCutoff.toISOString())
+      .gte('end_at', pastCutoff.toISOString());
 
-    // Query 2: Today's bookings (start or end overlaps with today)
-    const { data: todayBookings, error: todayError } = await adminClient
-      .from('bookings')
-      .select('id, plate, start_at, end_at, status, checked_in_at, checked_out_at')
-      .eq('tenant_id', tenantId)
-      .neq('plate', '')
-      .not('plate', 'is', null)
-      .eq('status', 'confirmed')
-      .lte('start_at', endOfToday.toISOString())
-      .gte('end_at', startOfToday.toISOString());
-
-    // Query 3: Upcoming bookings within 24h
-    const { data: upcomingBookings, error: upcomingError } = await adminClient
-      .from('bookings')
-      .select('id, plate, start_at, end_at, status, checked_in_at, checked_out_at')
-      .eq('tenant_id', tenantId)
-      .neq('plate', '')
-      .not('plate', 'is', null)
-      .eq('status', 'confirmed')
-      .gt('start_at', now.toISOString())
-      .lte('start_at', futureCutoff.toISOString());
-
-    if (onSiteError || todayError || upcomingError) {
-      result.errors.push(
-        `Failed to fetch bookings: ${onSiteError?.message || todayError?.message || upcomingError?.message}`
-      );
+    if (bookingsError) {
+      result.errors.push(`Failed to fetch bookings: ${bookingsError.message}`);
       return result;
     }
 
-    // Combine and deduplicate by booking ID
-    const bookingMap = new Map<string, any>();
-    for (const booking of [...(onSiteBookings || []), ...(todayBookings || []), ...(upcomingBookings || [])]) {
-      if (!bookingMap.has(booking.id)) {
-        bookingMap.set(booking.id, booking);
-      }
-    }
-
-    const bookings = Array.from(bookingMap.values());
+    result.bookingsScanned = bookings?.length ?? 0;
 
     if (!bookings || bookings.length === 0) {
       return result; // No bookings to process
     }
 
-    // Normalize and deduplicate plates
-    // Map: plate -> { booking_id, earliest_valid_from, latest_valid_until }
-    const plateMap = new Map<
-      string,
-      {
-        bookingId: string;
-        validFrom: Date;
-        validUntil: Date;
-      }
-    >();
-
+    // Process each booking: create one outbox row per booking
     for (const booking of bookings) {
       const plate = normalizePlate(booking.plate);
-      if (!plate) continue;
+      if (!plate) continue; // Skip if plate normalizes to empty
 
-      const startAt = new Date(booking.start_at);
-      const endAt = new Date(booking.end_at);
+      const outboxData = {
+        tenant_id: tenantId,
+        booking_id: booking.id,
+        plate: plate,
+        group_number: defaultGroup,
+        valid_from: booking.start_at,
+        valid_until: booking.end_at,
+        action: 'upsert' as const,
+        status: 'pending' as const,
+        retry_count: 0,
+      };
 
-      // Use booking times as validity window (can be extended with grace periods later)
-      const validFrom = startAt;
-      const validUntil = endAt;
-
-      const existing = plateMap.get(plate);
-      if (existing) {
-        // Merge: take earliest valid_from and latest valid_until
-        if (validFrom < existing.validFrom) {
-          existing.validFrom = validFrom;
-        }
-        if (validUntil > existing.validUntil) {
-          existing.validUntil = validUntil;
-        }
-      } else {
-        plateMap.set(plate, {
-          bookingId: booking.id,
-          validFrom,
-          validUntil,
-        });
-      }
-    }
-
-    // Insert/update outbox items for each unique plate
-    for (const [plate, data] of plateMap.entries()) {
-      // Check if a pending outbox item already exists for this plate
+      // Check if row exists for this (tenant_id, booking_id)
       const { data: existing } = await adminClient
         .from('anpr_outbox')
         .select('id')
         .eq('tenant_id', tenantId)
-        .eq('plate', plate)
-        .eq('status', 'pending')
+        .eq('booking_id', booking.id)
         .maybeSingle();
 
       if (existing) {
-        // Update existing unprocessed item
+        // Update existing row
         const { error: updateError } = await adminClient
           .from('anpr_outbox')
           .update({
-            booking_id: data.bookingId,
-            group_number: defaultGroup,
-            valid_from: data.validFrom.toISOString(),
-            valid_until: data.validUntil.toISOString(),
-            action: 'upsert',
-            status: 'pending',
+            plate: outboxData.plate,
+            group_number: outboxData.group_number,
+            valid_from: outboxData.valid_from,
+            valid_until: outboxData.valid_until,
+            action: outboxData.action,
+            status: outboxData.status,
+            retry_count: outboxData.retry_count,
           })
           .eq('id', existing.id);
 
         if (updateError) {
-          result.errors.push(`Failed to update outbox item for plate ${plate}: ${updateError.message}`);
+          result.errors.push(`Failed to update outbox for booking ${booking.id}: ${updateError.message}`);
         } else {
           result.updated++;
         }
       } else {
-        // Insert new item
-        const { error: insertError } = await adminClient.from('anpr_outbox').insert({
-          tenant_id: tenantId,
-          booking_id: data.bookingId,
-          plate: plate,
-          group_number: defaultGroup,
-          valid_from: data.validFrom.toISOString(),
-          valid_until: data.validUntil.toISOString(),
-          action: 'upsert',
-          status: 'pending',
-        });
-
+        // Insert new row
+        const { error: insertError } = await adminClient.from('anpr_outbox').insert(outboxData);
         if (insertError) {
-          result.errors.push(`Failed to insert outbox item for plate ${plate}: ${insertError.message}`);
+          result.errors.push(`Failed to insert outbox for booking ${booking.id}: ${insertError.message}`);
         } else {
           result.inserted++;
         }

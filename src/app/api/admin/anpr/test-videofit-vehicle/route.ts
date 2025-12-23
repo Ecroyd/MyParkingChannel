@@ -110,29 +110,16 @@ export async function POST(req: NextRequest) {
     let result: { success: boolean; error?: string; statusCode?: number; response?: any; durationMs?: number };
 
     if (mode === 'relay') {
-      // Relay mode: enqueue to outbox (no direct call)
-      const { error: outboxError } = await adminClient.from('anpr_outbox').insert({
-        tenant_id: tenantId,
-        booking_id: null, // Test vehicle has no booking
-        plate: 'TEST123',
-        group_number: defaultGroup,
-        valid_from: now.toISOString(),
-        valid_until: validUntil.toISOString(),
-        action: 'upsert',
-        status: 'pending',
-      });
-
-      if (outboxError) {
-        result = {
+      // DISABLED: Test vehicle insertion to outbox
+      // Test vehicles should not be inserted into production outbox
+      // Use snapshot generation or direct mode for testing instead
+      return NextResponse.json(
+        {
           success: false,
-          error: outboxError.message || 'Failed to enqueue test vehicle to outbox',
-        };
-      } else {
-        result = {
-          success: true,
-          durationMs: 0,
-        };
-      }
+          error: 'Test vehicle insertion to outbox is disabled. Use snapshot generation or direct mode for testing.',
+        },
+        { status: 400 }
+      );
     } else {
       // Direct mode: call Videofit directly
       const config: VideofitConfig = {
