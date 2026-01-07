@@ -4,9 +4,9 @@
 # ============================================
 # CONFIGURATION - UPDATE THESE VALUES
 # ============================================
-$apiKey = "Ced529985232efefae56dd53703e17025c4446fd34f21c9ebf4797a61838994e"
+$apiKey = "96e894dc772ee9560041dd092003f6ea9b612e6b8b3a31e1d3be9e04c10feec8"
 $baseUrl = "https://myparkingchannel.app"  # Change to your domain
-$productId = "tenant_pool"
+$productId = "ae9ad7ac-b366-49bc-95ce-4ea089c8c789"
 $startAt = "2026-01-10T08:00:00Z"
 $endAt = "2026-01-15T18:00:00Z"
 $currency = "GBP"
