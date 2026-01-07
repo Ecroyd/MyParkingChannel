@@ -43,7 +43,30 @@ Expected result:
 - `is_active` should be `true`
 - `scopes` should include `'availability'`
 
-## Step 3: Test Availability Endpoint
+## Step 3: Verify API Key First
+
+Before testing, verify your API key exists and is active in the database:
+
+```sql
+SELECT 
+  id,
+  name,
+  scopes,
+  is_test,
+  is_active,
+  created_at,
+  last_used_at
+FROM partner_api_keys
+WHERE name LIKE '%CAVU%'
+ORDER BY created_at DESC;
+```
+
+**Important Checks:**
+- ✅ `is_active` should be `true`
+- ✅ `scopes` should include `'availability'`
+- ✅ The API key you copied should be exactly 64 characters (hex string)
+
+## Step 4: Test Availability Endpoint
 
 ### Base URL
 - **Production**: `https://yourdomain.com/api/supplier/v1/availability`
@@ -55,20 +78,113 @@ Include the API key in the request header:
 X-API-Key: <your-test-api-key>
 ```
 
+**⚠️ PowerShell Note**: PowerShell can have issues with long API keys in curl commands. Use the `Invoke-WebRequest` method below for best results.
+
 ### Test Request Examples
 
-#### Example 1: Basic Availability Check
+#### Example 1: Basic Availability Check (Bash/Linux/Mac)
 ```bash
 curl -X GET \
   "https://yourdomain.com/api/supplier/v1/availability?product_id=tenant_pool&start_at=2026-01-10T08:00:00Z&end_at=2026-01-15T18:00:00Z&currency=GBP" \
   -H "X-API-Key: <your-test-api-key>"
 ```
 
-#### Example 2: With Channel Code
+#### Example 1: Basic Availability Check (PowerShell - Single Line)
+```powershell
+curl.exe -X GET "https://yourdomain.com/api/supplier/v1/availability?product_id=tenant_pool&start_at=2026-01-10T08:00:00Z&end_at=2026-01-15T18:00:00Z&currency=GBP" -H "X-API-Key: <your-test-api-key>"
+```
+
+#### Example 1: Basic Availability Check (PowerShell - Multi-line with backticks)
+```powershell
+curl.exe -X GET `
+  "https://yourdomain.com/api/supplier/v1/availability?product_id=tenant_pool&start_at=2026-01-10T08:00:00Z&end_at=2026-01-15T18:00:00Z&currency=GBP" `
+  -H "X-API-Key: <your-test-api-key>"
+```
+
+#### Example 1: Basic Availability Check (PowerShell - Using Invoke-WebRequest) ⭐ RECOMMENDED
+```powershell
+# Set your API key (replace with your actual key)
+$apiKey = "YOUR_64_CHARACTER_API_KEY_HERE"
+
+# Set the URL
+$url = "https://yourdomain.com/api/supplier/v1/availability?product_id=tenant_pool&start_at=2026-01-10T08:00:00Z&end_at=2026-01-15T18:00:00Z&currency=GBP"
+
+# Create headers
+$headers = @{
+    "X-API-Key" = $apiKey
+}
+
+# Make the request
+try {
+    $response = Invoke-WebRequest -Uri $url -Headers $headers -Method GET
+    $response.Content | ConvertFrom-Json | ConvertTo-Json -Depth 10
+} catch {
+    Write-Host "Error: $($_.Exception.Message)"
+    if ($_.Exception.Response) {
+        $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+        $responseBody = $reader.ReadToEnd()
+        Write-Host "Response: $responseBody"
+    }
+}
+```
+
+#### Example 1: Basic Availability Check (PowerShell - Using curl.exe with proper escaping)
+```powershell
+# Store API key in a variable to avoid PowerShell parsing issues
+$apiKey = "YOUR_64_CHARACTER_API_KEY_HERE"
+$url = "https://yourdomain.com/api/supplier/v1/availability?product_id=tenant_pool&start_at=2026-01-10T08:00:00Z&end_at=2026-01-15T18:00:00Z&currency=GBP"
+
+# Use curl.exe with proper variable substitution
+curl.exe -X GET $url -H "X-API-Key: $apiKey"
+```
+
+#### Example 2: With Channel Code (Bash/Linux/Mac)
 ```bash
 curl -X GET \
   "https://yourdomain.com/api/supplier/v1/availability?product_id=tenant_pool&start_at=2026-01-10T08:00:00Z&end_at=2026-01-15T18:00:00Z&currency=GBP&channel_code=agent" \
   -H "X-API-Key: <your-test-api-key>"
+```
+
+#### Example 2: With Channel Code (PowerShell - Single Line)
+```powershell
+curl.exe -X GET "https://yourdomain.com/api/supplier/v1/availability?product_id=tenant_pool&start_at=2026-01-10T08:00:00Z&end_at=2026-01-15T18:00:00Z&currency=GBP&channel_code=agent" -H "X-API-Key: <your-test-api-key>"
+```
+
+#### Example 2: With Channel Code (PowerShell - Using Invoke-WebRequest) ⭐ RECOMMENDED
+```powershell
+# Set your API key (replace with your actual key)
+$apiKey = "YOUR_64_CHARACTER_API_KEY_HERE"
+
+# Set the URL with channel_code
+$url = "https://yourdomain.com/api/supplier/v1/availability?product_id=tenant_pool&start_at=2026-01-10T08:00:00Z&end_at=2026-01-15T18:00:00Z&currency=GBP&channel_code=agent"
+
+# Create headers
+$headers = @{
+    "X-API-Key" = $apiKey
+}
+
+# Make the request
+try {
+    $response = Invoke-WebRequest -Uri $url -Headers $headers -Method GET
+    $response.Content | ConvertFrom-Json | ConvertTo-Json -Depth 10
+} catch {
+    Write-Host "Error: $($_.Exception.Message)"
+    if ($_.Exception.Response) {
+        $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+        $responseBody = $reader.ReadToEnd()
+        Write-Host "Response: $responseBody"
+    }
+}
+```
+
+#### Example 2: With Channel Code (PowerShell - Using curl.exe with proper escaping)
+```powershell
+# Store API key in a variable to avoid PowerShell parsing issues
+$apiKey = "YOUR_64_CHARACTER_API_KEY_HERE"
+$url = "https://yourdomain.com/api/supplier/v1/availability?product_id=tenant_pool&start_at=2026-01-10T08:00:00Z&end_at=2026-01-15T18:00:00Z&currency=GBP&channel_code=agent"
+
+# Use curl.exe with proper variable substitution
+curl.exe -X GET $url -H "X-API-Key: $apiKey"
 ```
 
 ### Expected Response Format
@@ -92,7 +208,7 @@ curl -X GET \
 }
 ```
 
-## Step 4: Test Scenarios
+## Step 5: Test Scenarios
 
 ### Scenario 1: Valid Date Range
 - **Test**: Request availability for a date range 7 days in the future
@@ -127,7 +243,7 @@ curl -X GET \
 - **Expected**: Returns availability with pricing in requested currency
 - **Verify**: Currency conversion is applied correctly
 
-## Step 5: Monitor API Usage
+## Step 6: Monitor API Usage
 
 Check the `last_used_at` field to verify API calls are being made:
 
@@ -142,7 +258,7 @@ WHERE name LIKE '%CAVU%'
 ORDER BY last_used_at DESC;
 ```
 
-## Step 6: Production Key Creation
+## Step 7: Production Key Creation
 
 Once testing is complete and CAVU confirms everything works:
 
@@ -162,10 +278,13 @@ Once testing is complete and CAVU confirms everything works:
 ## Troubleshooting
 
 ### Issue: API key not working
-- **Check**: Key is copied correctly (no extra spaces)
-- **Check**: Key is active (`is_active = true`)
+- **Check**: Key is copied correctly (no extra spaces, no line breaks)
+- **Check**: Key is exactly 64 characters (hex string)
+- **Check**: Key is active (`is_active = true`) in database
 - **Check**: Key has `availability` scope
 - **Check**: Header name is `X-API-Key` (case-insensitive)
+- **PowerShell Fix**: Use `Invoke-WebRequest` instead of `curl.exe` to avoid parsing issues
+- **PowerShell Fix**: Store API key in a variable first: `$apiKey = "your-key"` then use `$apiKey` in the command
 
 ### Issue: Getting 401 Unauthorized
 - **Check**: API key is correct
