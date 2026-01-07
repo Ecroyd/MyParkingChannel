@@ -33,6 +33,7 @@ type PartnerApiKey = {
   name: string;
   scopes: string[];
   is_active: boolean;
+  is_test?: boolean;
   last_used_at: string | null;
   created_at: string;
   channel_id?: string | null;
@@ -53,6 +54,7 @@ export default function PartnerApisPage() {
   const [selectedScopes, setSelectedScopes] = useState<string[]>([]);
   const [selectedChannelId, setSelectedChannelId] = useState<string>("");
   const [partnerCode, setPartnerCode] = useState<string>(""); // e.g. "cavu", "holiday_extras"
+  const [isTest, setIsTest] = useState<boolean>(false);
   const [channels, setChannels] = useState<Array<{ id: string; code: string; name: string }>>([]);
   const [newRawKey, setNewRawKey] = useState<string | null>(null);
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
@@ -124,6 +126,7 @@ export default function PartnerApisPage() {
           scopes: selectedScopes,
           channel_id: selectedChannelId || null,
           partner_code: partnerCode || null, // Auto-create channel if provided
+          is_test: isTest,
         }),
       });
 
@@ -135,6 +138,7 @@ export default function PartnerApisPage() {
         setSelectedScopes([]);
         setSelectedChannelId("");
         setPartnerCode("");
+        setIsTest(false);
         toast({
           title: "Success",
           description: "API key created successfully. Copy it now - you won't see it again!",
@@ -311,6 +315,7 @@ export default function PartnerApisPage() {
                   <TableHead>Name</TableHead>
                   <TableHead>Channel</TableHead>
                   <TableHead>Scopes</TableHead>
+                  <TableHead>Type</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Last Used</TableHead>
                   <TableHead>Created</TableHead>
@@ -338,6 +343,17 @@ export default function PartnerApisPage() {
                           </Badge>
                         ))}
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      {key.is_test ? (
+                        <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
+                          Test
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                          Production
+                        </Badge>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge variant={key.is_active ? "default" : "secondary"}>
@@ -503,6 +519,21 @@ export default function PartnerApisPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="is_test"
+                    checked={isTest}
+                    onCheckedChange={(checked) => setIsTest(checked === true)}
+                  />
+                  <Label htmlFor="is_test" className="font-normal cursor-pointer">
+                    Test API Key
+                  </Label>
+                </div>
+                <p className="text-xs text-gray-500 ml-6">
+                  Enable this to create a test API key for partner testing. Test keys work identically to production keys but are marked for testing purposes.
+                </p>
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setShowCreateDialog(false)}>

@@ -458,3 +458,4 @@ try {
     Write-Error "Fatal error: $_"
     exit 1
 }
+

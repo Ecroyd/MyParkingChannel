@@ -47,3 +47,4 @@ CREATE TRIGGER staff_vehicles_updated_at
   BEFORE UPDATE ON staff_vehicles
   FOR EACH ROW
   EXECUTE FUNCTION update_staff_vehicles_updated_at();
+

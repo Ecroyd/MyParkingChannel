@@ -30,6 +30,7 @@ export async function GET(req: NextRequest) {
         name,
         scopes,
         is_active,
+        is_test,
         last_used_at,
         created_at,
         channel_id,
@@ -73,7 +74,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { name, scopes, channel_id, partner_code } = body;
+    const { name, scopes, channel_id, partner_code, is_test } = body;
 
     if (!name || !Array.isArray(scopes)) {
       return NextResponse.json(
@@ -139,12 +140,14 @@ export async function POST(req: NextRequest) {
         scopes: scopes,
         channel_id: finalChannelId,
         is_active: true,
+        is_test: is_test === true,
       })
       .select(`
         id,
         name,
         scopes,
         is_active,
+        is_test,
         created_at,
         channel_id,
         tenant_channels (
