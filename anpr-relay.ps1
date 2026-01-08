@@ -138,6 +138,19 @@ function Save-Cache {
     }
 }
 
+# Clamp group number to valid range (2..996)
+function Clamp-Group {
+    param([int]$Group)
+    
+    if ($Group -lt 2) {
+        return 2
+    }
+    if ($Group -gt 996) {
+        return 996
+    }
+    return $Group
+}
+
 # Send vehicle update to Videofit via SOAP
 function Send-ToVideofit {
     param(
@@ -147,11 +160,17 @@ function Send-ToVideofit {
     
     $videofitUrl = $Config.videofitEndpoint
     $siteClientLicense = $Config.siteClientLicense
+    # LocPcNo can be 0 (as per Videofit) - no validation needed
     $locPcNo = $Config.locPcNo
     
     # Determine action flags
+    # Default action is add/upsert (editVehicle=false) unless explicitly "edit"
     $deleteVehicle = ($Item.action -eq "delete")
-    $editVehicle = ($Item.action -eq "upsert")
+    # editVehicle=false for add/upsert (default), true only if action is explicitly "edit"
+    $editVehicle = ($Item.action -eq "edit")
+    
+    # Clamp group to valid range (2..996)
+    $group = Clamp-Group -Group $Item.group
     
     # Convert dates to Videofit ticks (milliseconds since epoch)
     $validFromDate = [DateTime]::Parse($Item.validFrom)
@@ -166,6 +185,10 @@ function Send-ToVideofit {
     # Build SOAP envelope
     $soapAction = "http://www.videofit.co.uk/Videofit/SendDbBulkUpdateWebService/SendDbBulkUpdate"
     $updateGeneratedAt = [long](([DateTime]::UtcNow - $epoch).TotalMilliseconds)
+    
+    # Reserved fields: visitorType=0, visitReason=blank
+    $visitorType = 0
+    $visitReason = ""
     
     $soap = @"
 <?xml version="1.0" encoding="utf-8"?>
@@ -184,7 +207,7 @@ function Send-ToVideofit {
         <string>$escapedPlate</string>
       </vehPlate>
       <vehGroup>
-        <int>$($Item.group)</int>
+        <int>$group</int>
       </vehGroup>
       <visitArrivalTime>
         <long>$visitArrivalTime</long>
@@ -192,6 +215,12 @@ function Send-ToVideofit {
       <visitorDepTime>
         <long>$visitorDepTime</long>
       </visitorDepTime>
+      <visitorType>
+        <int>$visitorType</int>
+      </visitorType>
+      <visitReason>
+        <string>$visitReason</string>
+      </visitReason>
       <updateGeneratedAt>$updateGeneratedAt</updateGeneratedAt>
     </SendDbBulkUpdate>
   </soap:Body>
@@ -255,8 +284,12 @@ function Send-StaffVehiclesToVideofit {
     
     $videofitUrl = $Config.videofitEndpoint
     $siteClientLicense = $Config.siteClientLicense
+    # LocPcNo can be 0 (as per Videofit) - no validation needed
     $locPcNo = $Config.locPcNo
     $defaultGroup = $Config.defaultGroup
+    
+    # Clamp defaultGroup to valid range (2..996)
+    $defaultGroup = Clamp-Group -Group $defaultGroup
     
     # Staff vehicles should always be valid (wide time window)
     # Set valid from 10 years ago to 10 years in the future
@@ -266,6 +299,10 @@ function Send-StaffVehiclesToVideofit {
     $visitArrivalTime = [long](($validFromDate - $epoch).TotalMilliseconds)
     $visitorDepTime = [long](($validUntilDate - $epoch).TotalMilliseconds)
     
+    # Reserved fields: visitorType=0, visitReason=blank
+    $visitorType = 0
+    $visitReason = ""
+    
     # Build arrays for bulk update
     $deleteVehicleArray = @()
     $editVehicleArray = @()
@@ -273,15 +310,20 @@ function Send-StaffVehiclesToVideofit {
     $vehGroupArray = @()
     $visitArrivalTimeArray = @()
     $visitorDepTimeArray = @()
+    $visitorTypeArray = @()
+    $visitReasonArray = @()
     
     foreach ($vehicle in $StaffVehicles) {
+        # Staff vehicles: add/upsert mode (editVehicle=false)
         $deleteVehicleArray += $false
-        $editVehicleArray += $true
+        $editVehicleArray += $false
         $escapedPlate = $vehicle.plate -replace '&', '&amp;' -replace '<', '&lt;' -replace '>', '&gt;' -replace '"', '&quot;' -replace "'", '&apos;'
         $vehPlateArray += $escapedPlate
         $vehGroupArray += $defaultGroup
         $visitArrivalTimeArray += $visitArrivalTime
         $visitorDepTimeArray += $visitorDepTime
+        $visitorTypeArray += $visitorType
+        $visitReasonArray += $visitReason
     }
     
     # Build SOAP envelope with arrays
@@ -295,6 +337,8 @@ function Send-StaffVehiclesToVideofit {
     $vehGroupXml = ($vehGroupArray | ForEach-Object { "<int>$_</int>" }) -join "`n      "
     $visitArrivalTimeXml = ($visitArrivalTimeArray | ForEach-Object { "<long>$_</long>" }) -join "`n      "
     $visitorDepTimeXml = ($visitorDepTimeArray | ForEach-Object { "<long>$_</long>" }) -join "`n      "
+    $visitorTypeXml = ($visitorTypeArray | ForEach-Object { "<int>$_</int>" }) -join "`n      "
+    $visitReasonXml = ($visitReasonArray | ForEach-Object { "<string>$_</string>" }) -join "`n      "
     
     $soap = @"
 <?xml version="1.0" encoding="utf-8"?>
@@ -321,6 +365,12 @@ function Send-StaffVehiclesToVideofit {
       <visitorDepTime>
       $visitorDepTimeXml
       </visitorDepTime>
+      <visitorType>
+      $visitorTypeXml
+      </visitorType>
+      <visitReason>
+      $visitReasonXml
+      </visitReason>
       <updateGeneratedAt>$updateGeneratedAt</updateGeneratedAt>
     </SendDbBulkUpdate>
   </soap:Body>
@@ -624,4 +674,3 @@ try {
     Write-Host "[relay] Fatal error: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
-

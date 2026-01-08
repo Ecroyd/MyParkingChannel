@@ -182,10 +182,32 @@ function Parse-VrnFilename {
         }
     }
     
+    # Extract camera code: 7 digits ending in 100 (e.g., 0000100, 0001100)
+    # Pattern matches 4 digits followed by "100" (total 7 digits)
+    $cameraCodePattern = '(\d{4}100)'
+    $cameraCodeMatch = [regex]::Match($baseName, $cameraCodePattern)
+    
+    $cameraId = $null
+    if ($cameraCodeMatch.Success) {
+        $cameraCode = $cameraCodeMatch.Groups[1].Value  # Full 7-digit code (e.g., "0000100")
+        
+        # Map camera codes to camera IDs
+        switch ($cameraCode) {
+            "0000100" { $cameraId = "1-1" }  # Entry camera
+            "0001100" { $cameraId = "1-5" }  # Exit camera
+            default {
+                # Unknown camera code - log but don't fail
+                Write-Log "Warning: Unknown camera code '$cameraCode' in filename: $FileName" -ForegroundColor Yellow
+                $cameraId = $null
+            }
+        }
+    }
+    
     return @{
         Plate = $plate
         EventDateTime = $eventDateTime
         FileName = $FileName
+        CameraId = $cameraId
     }
 }
 
@@ -313,8 +335,13 @@ function Process-VrnFile {
         Write-Log "Using file modification time: $($parsed.EventDateTime)" -ForegroundColor Gray
     }
     
+    # Log camera ID if found
+    if ($parsed.CameraId) {
+        Write-Log "Extracted camera ID: $($parsed.CameraId)" -ForegroundColor Gray
+    }
+    
     # Post to API (direction defaults to 'unknown', Parking Channel will map via camera_direction_map)
-    $success = Post-AnprEvent -Config $Config -Plate $parsed.Plate -EventAt $parsed.EventDateTime -Direction "unknown" -Confidence $null -SnapshotUrl $null
+    $success = Post-AnprEvent -Config $Config -Plate $parsed.Plate -EventAt $parsed.EventDateTime -CameraId $parsed.CameraId -Direction "unknown" -Confidence $null -SnapshotUrl $null
     
     if ($success) {
         Mark-Processed $FilePath $State
