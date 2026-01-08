@@ -1,0 +1,10 @@
+{
+  "tenantId": "your-tenant-uuid-here",
+  "siteId": "your-anpr-site-uuid-or-null",
+  "apiBaseUrl": "https://myparkingchannel.app",
+  "relayToken": "your-relay-token-from-anpr-sites",
+  "recognitionLogRoot": "C:\\snap\\recognition log1",
+  "vehiclesOnSiteFile": "C:\\snap\\vehicles on site\\vehicles on site list.txt"
+}
+
+
