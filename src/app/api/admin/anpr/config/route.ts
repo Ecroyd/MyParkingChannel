@@ -66,6 +66,7 @@ export async function GET(req: NextRequest) {
       videofit_password: null,
       csv_token_last_rotated_at: null,
       videofit_mode: 'relay' as 'relay' | 'direct',
+      videofit_ingest_enabled: false,
     };
 
     // Merge defaults with existing config to ensure new fields are present
@@ -283,6 +284,7 @@ export async function PUT(req: NextRequest) {
     if (departure_grace_minutes !== undefined) updateData.departure_grace_minutes = departure_grace_minutes;
     if (whitelist_lookahead_days !== undefined) updateData.whitelist_lookahead_days = whitelist_lookahead_days;
     if (whitelist_keep_after_end_hours !== undefined) updateData.whitelist_keep_after_end_hours = whitelist_keep_after_end_hours;
+    if (body.videofit_ingest_enabled !== undefined) updateData.videofit_ingest_enabled = body.videofit_ingest_enabled;
 
     // Save Videofit secrets to tenant_secrets using encrypted key-value pattern
     // (like APH SFTP credentials and ANPR relay token)

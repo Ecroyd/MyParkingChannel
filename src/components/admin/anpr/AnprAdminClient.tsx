@@ -29,10 +29,11 @@ type Props = {
   tenantId: string;
 };
 
-type Tab = 'events' | 'devices' | 'settings';
+type Tab = 'events' | 'snap-relay' | 'devices' | 'settings';
 
 export default function AnprAdminClient({ tenantId }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('events');
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const today = useMemo(() => {
     const d = new Date();
@@ -60,7 +61,7 @@ export default function AnprAdminClient({ tenantId }: Props) {
       </header>
 
       {/* Tabs */}
-      <div className="border-b border-gray-200 flex space-x-4">
+      <div className="border-b border-gray-200 flex items-center space-x-4">
         <button
           onClick={() => setActiveTab('events')}
           className={`pb-2 text-sm font-medium border-b-2 -mb-px ${
@@ -71,27 +72,61 @@ export default function AnprAdminClient({ tenantId }: Props) {
         >
           Gate Events
         </button>
+        <div className="flex-1"></div>
         <button
-          onClick={() => setActiveTab('devices')}
-          className={`pb-2 text-sm font-medium border-b-2 -mb-px ${
-            activeTab === 'devices'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-gray-600 hover:text-gray-800'
+          onClick={() => {
+            const newShowAdvanced = !showAdvanced;
+            setShowAdvanced(newShowAdvanced);
+            // If hiding advanced and we're on an advanced tab, switch to events
+            if (!newShowAdvanced && (activeTab === 'snap-relay' || activeTab === 'devices' || activeTab === 'settings')) {
+              setActiveTab('events');
+            }
+          }}
+          className={`pb-2 text-xs font-medium border-b-2 -mb-px ${
+            showAdvanced
+              ? 'border-gray-400 text-gray-700'
+              : 'border-transparent text-gray-500 hover:text-gray-700'
           }`}
         >
-          Gate Devices
-        </button>
-        <button
-          onClick={() => setActiveTab('settings')}
-          className={`pb-2 text-sm font-medium border-b-2 -mb-px ${
-            activeTab === 'settings'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-gray-600 hover:text-gray-800'
-          }`}
-        >
-          ANPR Settings
+          {showAdvanced ? '▼' : '▶'} Advanced Settings
         </button>
       </div>
+
+      {/* Advanced Settings Tabs (shown when expanded) */}
+      {showAdvanced && (
+        <div className="border-b border-gray-200 flex space-x-4 pb-2">
+          <button
+            onClick={() => setActiveTab('snap-relay')}
+            className={`pb-2 text-sm font-medium border-b-2 -mb-px ${
+              activeTab === 'snap-relay'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            Snap Relay
+          </button>
+          <button
+            onClick={() => setActiveTab('devices')}
+            className={`pb-2 text-sm font-medium border-b-2 -mb-px ${
+              activeTab === 'devices'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            Gate Devices
+          </button>
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={`pb-2 text-sm font-medium border-b-2 -mb-px ${
+              activeTab === 'settings'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            ANPR Settings
+          </button>
+        </div>
+      )}
 
       {/* Filters (events tab only) */}
       {activeTab === 'events' && (
@@ -130,6 +165,8 @@ export default function AnprAdminClient({ tenantId }: Props) {
           fromDate={fromDate}
           toDate={toDate}
         />
+      ) : activeTab === 'snap-relay' ? (
+        <SnapRelayPanel tenantId={tenantId} />
       ) : activeTab === 'devices' ? (
         <GateDevicesPanel tenantId={tenantId} />
       ) : (
@@ -360,6 +397,284 @@ function GateEventsTable({
           </tbody>
         </table>
       </div>
+      </div>
+    </div>
+  );
+}
+
+/* --------------------- SNAP RELAY PANEL ---------------------- */
+
+function SnapRelayPanel({ tenantId }: { tenantId: string }) {
+  // We'll create a simplified version that uses tenantId directly
+  // instead of relying on useTenant hook to avoid extra API calls
+  return <SnapRelaySettings tenantId={tenantId} />;
+}
+
+// Simplified Snap Relay settings component that uses tenantId prop
+function SnapRelaySettings({ tenantId }: { tenantId: string }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [relayToken, setRelayToken] = useState<string | null>(null);
+  const [tokenCopied, setTokenCopied] = useState(false);
+  const [formData, setFormData] = useState<{
+    id: string;
+    name: string;
+    enabled: boolean;
+    loc_pc_no: number;
+    site_client_license: number | null;
+    default_group: number;
+    include_upcoming_hours: number;
+    grace_after_end_hours: number;
+    min_snapshot_plates: number;
+    allow_small_snapshot_manual: boolean;
+  }>({
+    id: '',
+    name: 'Main Site',
+    enabled: false,
+    loc_pc_no: 998,
+    site_client_license: null,
+    default_group: 4,
+    include_upcoming_hours: 48,
+    grace_after_end_hours: 12,
+    min_snapshot_plates: 10,
+    allow_small_snapshot_manual: true,
+  });
+
+  useEffect(() => {
+    if (tenantId) {
+      loadConfig();
+    }
+  }, [tenantId]);
+
+  async function loadConfig() {
+    if (!tenantId) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/admin/anpr-sites?tenantId=${tenantId}`);
+      const json = await res.json();
+      if (json.success) {
+        if (json.data) {
+          setFormData(json.data);
+        }
+      } else {
+        setError(json.error || 'Failed to load ANPR settings');
+      }
+    } catch (err) {
+      console.error('Failed to load ANPR settings:', err);
+      setError('Failed to load ANPR settings');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSave() {
+    if (!tenantId) return;
+    setSaving(true);
+    setError('');
+    try {
+      const res = await fetch('/api/admin/anpr-sites', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenantId,
+          name: formData.name,
+          enabled: formData.enabled,
+          locPcNo: formData.loc_pc_no,
+          siteClientLicense: formData.site_client_license,
+          defaultGroup: formData.default_group,
+          includeUpcomingHours: formData.include_upcoming_hours,
+          graceAfterEndHours: formData.grace_after_end_hours,
+          minSnapshotPlates: formData.min_snapshot_plates,
+          allowSmallSnapshotManual: formData.allow_small_snapshot_manual,
+        }),
+      });
+
+      const json = await res.json();
+      if (json.success) {
+        // Show success (you can use toast here if available)
+        alert('Settings saved successfully');
+      } else {
+        setError(json.error || 'Failed to save settings');
+      }
+    } catch (err) {
+      console.error('Failed to save settings:', err);
+      setError('Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleGenerateToken() {
+    if (!tenantId) return;
+    setSaving(true);
+    setError('');
+    try {
+      const res = await fetch('/api/internal/anpr/rotate-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenantId }),
+      });
+
+      const json = await res.json();
+      if (json.success && json.relayToken) {
+        setRelayToken(json.relayToken);
+        alert('New relay token generated. Copy it now - it will not be shown again!');
+      } else {
+        setError(json.error || 'Failed to generate token');
+      }
+    } catch (err) {
+      console.error('Failed to generate token:', err);
+      setError('Failed to generate relay token');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function copyToken() {
+    if (relayToken) {
+      navigator.clipboard.writeText(relayToken);
+      setTokenCopied(true);
+      setTimeout(() => setTokenCopied(false), 2000);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="p-6 flex items-center justify-center">
+        <div className="text-sm text-gray-600">Loading settings...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold">Snap Relay Settings</h2>
+        <p className="text-sm text-gray-500">Configure SNAP/Videofit ANPR relay integration</p>
+      </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded px-3 py-2 text-sm text-red-800">
+          {error}
+        </div>
+      )}
+
+      {relayToken && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="space-y-2">
+            <p className="font-medium text-sm">New Relay Token Generated</p>
+            <p className="text-xs text-gray-600">
+              Copy this token now - it will not be shown again!
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 p-2 bg-white rounded text-sm font-mono break-all border">
+                {relayToken}
+              </code>
+              <button
+                onClick={copyToken}
+                className="px-3 py-2 border rounded text-sm hover:bg-gray-50"
+              >
+                {tokenCopied ? '✓ Copied' : 'Copy'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="border border-gray-200 rounded-lg p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <label className="text-sm font-medium">Enabled</label>
+            <p className="text-xs text-gray-500">Enable ANPR relay processing</p>
+          </div>
+          <input
+            type="checkbox"
+            checked={formData.enabled}
+            onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })}
+            className="w-4 h-4"
+          />
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div>
+            <label className="block text-sm font-medium mb-1">Site Name</label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className="w-full border rounded px-2 py-1 text-sm"
+              placeholder="Main Site"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Location PC No</label>
+            <input
+              type="number"
+              value={formData.loc_pc_no}
+              onChange={(e) =>
+                setFormData({ ...formData, loc_pc_no: parseInt(e.target.value) || 998 })
+              }
+              className="w-full border rounded px-2 py-1 text-sm"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Site Client License</label>
+            <input
+              type="number"
+              value={formData.site_client_license || ''}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  site_client_license: e.target.value ? parseInt(e.target.value) : null,
+                })
+              }
+              className="w-full border rounded px-2 py-1 text-sm"
+              placeholder="Optional"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Default Group</label>
+            <input
+              type="number"
+              value={formData.default_group}
+              onChange={(e) =>
+                setFormData({ ...formData, default_group: parseInt(e.target.value) || 4 })
+              }
+              className="w-full border rounded px-2 py-1 text-sm"
+            />
+            <p className="text-xs text-gray-500 mt-1">Default vehicle group (default: 4 = Self Park)</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="border border-gray-200 rounded-lg p-4 space-y-4">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleGenerateToken}
+            disabled={saving}
+            className="px-4 py-2 border rounded text-sm hover:bg-gray-50 disabled:opacity-50"
+          >
+            🔑 Generate New Relay Token
+          </button>
+          <p className="text-sm text-gray-500">
+            Generate a new relay token for authentication. The token will only be shown once.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex gap-3">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
+        >
+          {saving ? 'Saving...' : 'Save Settings'}
+        </button>
       </div>
     </div>
   );
@@ -680,6 +995,8 @@ type AnprConfig = {
   videofit_loc_pc_no?: number | null;
   videofit_default_group?: number | null;
   csv_token_last_rotated_at?: string | null;
+  videofit_ingest_enabled?: boolean;
+  videofit_ingest_token_hash?: string | null;
 };
 
 function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
@@ -707,6 +1024,8 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
   const [relayTokenLoading, setRelayTokenLoading] = useState(false);
   const [relayTokenGenerating, setRelayTokenGenerating] = useState(false);
   const [showRelayToken, setShowRelayToken] = useState(false);
+  const [videofitIngestToken, setVideofitIngestToken] = useState<string | null>(null);
+  const [videofitIngestTokenGenerating, setVideofitIngestTokenGenerating] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -1528,6 +1847,129 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
               </button>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Videofit SendCapture SOAP Ingest */}
+      <div className="border border-gray-200 rounded-lg p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Videofit SendCapture SOAP Ingest</h2>
+            <p className="text-xs text-gray-600">
+              Direct SOAP ingestion from Videofit Web Services (replaces VRN filename parsing)
+            </p>
+          </div>
+        </div>
+
+        {/* Enable toggle */}
+        <div className="flex items-center gap-3">
+          <input
+            type="checkbox"
+            id="videofit-ingest-enabled"
+            checked={config.videofit_ingest_enabled ?? false}
+            onChange={(e) => setConfig({ ...config, videofit_ingest_enabled: e.target.checked })}
+            className="w-4 h-4"
+          />
+          <label htmlFor="videofit-ingest-enabled" className="text-sm font-medium">
+            Enable Videofit SendCapture ingest
+          </label>
+        </div>
+
+        {/* Endpoint URL */}
+        <div className="space-y-2">
+          <label className="block text-sm font-medium">SOAP Endpoint URL</label>
+          <div className="bg-gray-50 border rounded px-3 py-2 font-mono text-xs break-all">
+            {integrationOrigin
+              ? `${integrationOrigin}/api/anpr/videofit/send-capture`
+              : '/api/anpr/videofit/send-capture'}
+          </div>
+          <p className="text-xs text-gray-600">
+            Configure this URL in Videofit Web Services as the SendCapture endpoint
+          </p>
+        </div>
+
+        {/* Token generation */}
+        <div className="space-y-2">
+          <label className="block text-sm font-medium">Ingest Token</label>
+          {videofitIngestToken && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded px-3 py-2 space-y-2">
+              <p className="text-sm font-medium text-yellow-800">
+                New token generated - copy it now!
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 p-2 bg-white rounded text-xs font-mono break-all border">
+                  {videofitIngestToken}
+                </code>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(videofitIngestToken).catch(() => {});
+                    alert('Token copied to clipboard!');
+                  }}
+                  className="px-3 py-2 border rounded text-sm hover:bg-gray-50 whitespace-nowrap"
+                >
+                  Copy
+                </button>
+              </div>
+              <p className="text-xs text-yellow-700">
+                This token will not be shown again. Paste it into Videofit configuration as the x-videofit-token header value.
+              </p>
+            </div>
+          )}
+          <button
+            onClick={async () => {
+              try {
+                setVideofitIngestTokenGenerating(true);
+                const res = await fetch('/api/admin/anpr/videofit/generate-token', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ tenantId }),
+                });
+                const data = await res.json();
+                if (data.success && data.relayToken) {
+                  setVideofitIngestToken(data.relayToken);
+                } else {
+                  alert(data.error || 'Failed to generate token');
+                }
+              } catch (err: any) {
+                console.error('Failed to generate token:', err);
+                alert('Failed to generate token');
+              } finally {
+                setVideofitIngestTokenGenerating(false);
+              }
+            }}
+            disabled={videofitIngestTokenGenerating}
+            className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
+          >
+            {videofitIngestTokenGenerating ? 'Generating...' : '🔑 Generate Videofit Ingest Token'}
+          </button>
+          <p className="text-xs text-gray-500">
+            Generate a token for Videofit to authenticate SOAP requests. The token is hashed and stored securely.
+          </p>
+        </div>
+
+        {/* Camera mapping help */}
+        <div className="bg-blue-50 border border-blue-200 rounded px-3 py-2 space-y-2">
+          <p className="text-sm font-medium text-blue-900">Camera Mapping Help</p>
+          <p className="text-xs text-blue-800">
+            Videofit uses internal camera numbers (0-15) that are one less than the UI camera numbers.
+            In the camera direction map above, you can use either format:
+          </p>
+          <ul className="text-xs text-blue-800 list-disc list-inside space-y-1">
+            <li><code>cameraNo:1</code> - UI camera number (internal 0 = UI 1)</li>
+            <li><code>cameraNoInternal:0</code> - Internal camera number (0-15)</li>
+          </ul>
+          <p className="text-xs text-blue-800">
+            Example: If Videofit sends <code>locCameraNo=0</code> (internal), that's UI camera 1.
+            Map it as <code>cameraNo:1</code> → <code>in</code> or <code>cameraNoInternal:0</code> → <code>in</code>.
+          </p>
+        </div>
+
+        {/* Legacy VRN watcher note */}
+        <div className="bg-gray-50 border border-gray-200 rounded px-3 py-2">
+          <p className="text-xs text-gray-600">
+            <strong>Note:</strong> The VRN filename watcher (PowerShell script) is still available as a legacy fallback.
+            When Videofit SendCapture ingest is enabled, it will be used instead of VRN parsing for more accurate plate recognition.
+          </p>
         </div>
       </div>
 
