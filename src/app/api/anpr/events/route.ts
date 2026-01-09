@@ -59,13 +59,6 @@ export async function POST(req: NextRequest) {
 
     const supabase = createAdminClient();
 
-    // Normalize direction
-    const normalizedDirection = direction === 'entry' || direction === 'in' 
-      ? 'in' 
-      : direction === 'exit' || direction === 'out' 
-      ? 'out' 
-      : 'unknown';
-
     // Normalize plate
     const plateNormalized = normalizePlate(plateRaw);
     const plateRawValue = plateRaw.trim();
