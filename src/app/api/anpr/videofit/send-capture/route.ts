@@ -8,9 +8,9 @@ import { assertVideofitIngestAuth } from '@/lib/anpr/videofit-auth';
 import {
   parseSoapSendCapture,
   ticksToDate,
-  getCameraDirection,
   generateCameraId,
 } from '@/lib/anpr/videofit-utils';
+import { getDirectionForVideofit } from '@/lib/anpr/camera-mapping';
 
 /**
  * Normalize plate: uppercase, remove non-alphanumeric
@@ -149,11 +149,11 @@ export async function POST(req: NextRequest) {
     const plateNormalized = normalizePlateForEvent(vehPlate);
     const plateRawValue = vehPlate.trim();
 
-    // Determine direction from camera mapping
-    const direction = getCameraDirection(locCameraNo, cameraDirectionMap);
-
-    // Generate cameraId
+    // Generate cameraId first
     const cameraId = generateCameraId(locPcNo, locCameraNo, locPc, locCamera);
+
+    // Determine direction from camera mapping (using cameraId and locCameraNo for backward compatibility)
+    const direction = getDirectionForVideofit(cameraId, locCameraNo, cameraDirectionMap);
 
     // Dedupe check: same tenant + same plate_normalized + same direction within dedupe_seconds
     const dedupeWindowStart = new Date(eventAtDate.getTime() - dedupeSeconds * 1000);

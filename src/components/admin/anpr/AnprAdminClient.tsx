@@ -1106,17 +1106,6 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
     }
   };
 
-  const handleCameraMapChange = (cameraId: string, direction: string) => {
-    if (!config) return;
-    const newMap = { ...config.camera_direction_map };
-    if (direction) {
-      newMap[cameraId] = direction;
-    } else {
-      delete newMap[cameraId];
-    }
-    setConfig({ ...config, camera_direction_map: newMap });
-  };
-
   const webhookUrl = integrationOrigin
     ? `${integrationOrigin}/api/integrations/anpr/webhook`
     : '/api/integrations/anpr/webhook';
@@ -1768,86 +1757,11 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
         </div>
 
         {/* Camera Direction Mapping */}
-        <div className="space-y-2">
-          <label className="block text-sm font-medium">Camera Direction Mapping</label>
-          <p className="text-xs text-gray-600 mb-2">
-            Map camera IDs to entry/exit direction. If not mapped, defaults to entry.
-          </p>
-          <div className="space-y-2">
-            {Object.entries(config.camera_direction_map).map(([cameraId, direction]) => (
-              <div key={cameraId} className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={cameraId}
-                  readOnly
-                  className="flex-1 border rounded px-2 py-1 text-sm bg-gray-50"
-                />
-                <select
-                  value={direction}
-                  onChange={(e) => handleCameraMapChange(cameraId, e.target.value)}
-                  className="border rounded px-2 py-1 text-sm"
-                >
-                  <option value="entry">Entry</option>
-                  <option value="exit">Exit</option>
-                </select>
-                <button
-                  onClick={() => handleCameraMapChange(cameraId, '')}
-                  className="px-2 py-1 text-xs border rounded hover:bg-red-50 text-red-600"
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                id="new-camera-id"
-                placeholder="Camera ID"
-                className="flex-1 border rounded px-2 py-1 text-sm"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    const input = e.target as HTMLInputElement;
-                    const cameraId = input.value.trim();
-                    if (cameraId) {
-                      handleCameraMapChange(cameraId, 'entry');
-                      input.value = '';
-                    }
-                  }
-                }}
-              />
-              <select
-                id="new-camera-direction"
-                defaultValue="entry"
-                className="border rounded px-2 py-1 text-sm"
-                onChange={(e) => {
-                  const input = document.getElementById('new-camera-id') as HTMLInputElement;
-                  const cameraId = input.value.trim();
-                  if (cameraId) {
-                    handleCameraMapChange(cameraId, e.target.value);
-                    input.value = '';
-                  }
-                }}
-              >
-                <option value="entry">Entry</option>
-                <option value="exit">Exit</option>
-              </select>
-              <button
-                onClick={() => {
-                  const input = document.getElementById('new-camera-id') as HTMLInputElement;
-                  const select = document.getElementById('new-camera-direction') as HTMLSelectElement;
-                  const cameraId = input.value.trim();
-                  if (cameraId) {
-                    handleCameraMapChange(cameraId, select.value);
-                    input.value = '';
-                  }
-                }}
-                className="px-3 py-1 text-xs border rounded hover:bg-blue-50 text-blue-600"
-              >
-                Add
-              </button>
-            </div>
-          </div>
-        </div>
+        <CameraDirectionMappingSection
+          tenantId={tenantId}
+          config={config}
+          onConfigChange={setConfig}
+        />
       </div>
 
       {/* Videofit SendCapture SOAP Ingest */}
@@ -2029,6 +1943,135 @@ function AnprSettingsPanel({ tenantId }: { tenantId: string }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* --------------------- CAMERA DIRECTION MAPPING SECTION ---------------------- */
+
+function CameraDirectionMappingSection({
+  tenantId,
+  config,
+  onConfigChange,
+}: {
+  tenantId: string;
+  config: AnprConfig;
+  onConfigChange: (config: AnprConfig) => void;
+}) {
+  const [recentCameras, setRecentCameras] = useState<string[]>([]);
+  const [loadingCameras, setLoadingCameras] = useState(false);
+
+  useEffect(() => {
+    const fetchCameras = async () => {
+      try {
+        setLoadingCameras(true);
+        const res = await fetch(`/api/admin/anpr/cameras?${new URLSearchParams({ tenantId, limit: '100' }).toString()}`);
+        if (res.ok) {
+          const data = (await res.json()) as { cameras: string[] };
+          setRecentCameras(data.cameras || []);
+        }
+      } catch (err) {
+        console.error('Failed to fetch cameras:', err);
+      } finally {
+        setLoadingCameras(false);
+      }
+    };
+
+    fetchCameras();
+  }, [tenantId]);
+
+  const handleCameraMapChange = (cameraId: string, direction: string) => {
+    const newMap = { ...config.camera_direction_map };
+    if (direction && direction !== 'ignore') {
+      // Normalize: entry -> in, exit -> out
+      const normalized = direction === 'entry' ? 'in' : direction === 'exit' ? 'out' : direction;
+      newMap[cameraId] = normalized;
+    } else {
+      delete newMap[cameraId];
+    }
+    onConfigChange({ ...config, camera_direction_map: newMap });
+  };
+
+  // Get all unique cameras (from recent events + existing mappings)
+  const allCameras = Array.from(
+    new Set([...recentCameras, ...Object.keys(config.camera_direction_map)])
+  ).sort();
+
+  return (
+    <div className="border border-gray-200 rounded-lg p-4 space-y-4">
+      <div>
+        <h3 className="text-sm font-semibold">Camera Direction Mapping</h3>
+        <p className="text-xs text-gray-600 mt-1">
+          Map camera IDs to direction. Cameras from recent ANPR events are shown below.
+          Unmapped cameras default to "unknown" direction.
+        </p>
+      </div>
+
+      {loadingCameras && (
+        <div className="text-xs text-gray-500">Loading cameras from recent events...</div>
+      )}
+
+      <div className="space-y-2 max-h-96 overflow-y-auto">
+        {allCameras.length === 0 ? (
+          <div className="text-xs text-gray-500">
+            No cameras found. Cameras will appear here after ANPR events are received.
+          </div>
+        ) : (
+          allCameras.map((cameraId) => {
+            const currentDirection = config.camera_direction_map[cameraId] || '';
+            const isFromRecent = recentCameras.includes(cameraId);
+            const isMapped = !!currentDirection;
+
+            return (
+              <div
+                key={cameraId}
+                className={`flex items-center gap-2 p-2 rounded ${
+                  isMapped ? 'bg-blue-50' : isFromRecent ? 'bg-gray-50' : ''
+                }`}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <code className="text-xs font-mono bg-white border rounded px-2 py-1 flex-1">
+                      {cameraId}
+                    </code>
+                    {isFromRecent && !isMapped && (
+                      <span className="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
+                        New
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <select
+                  value={currentDirection || 'unknown'}
+                  onChange={(e) => handleCameraMapChange(cameraId, e.target.value)}
+                  className="border rounded px-2 py-1 text-sm min-w-[100px]"
+                >
+                  <option value="unknown">Unknown</option>
+                  <option value="in">In (Entry)</option>
+                  <option value="out">Out (Exit)</option>
+                  <option value="ignore">Ignore</option>
+                </select>
+                {isMapped && (
+                  <button
+                    onClick={() => handleCameraMapChange(cameraId, '')}
+                    className="px-2 py-1 text-xs border rounded hover:bg-red-50 text-red-600"
+                    title="Remove mapping"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      <div className="bg-blue-50 border border-blue-200 rounded px-3 py-2">
+        <p className="text-xs text-blue-800">
+          <strong>Note:</strong> This mapping is used by both Videofit SOAP ingest and legacy relay ingest.
+          Changes take effect immediately for new events.
+        </p>
+      </div>
     </div>
   );
 }

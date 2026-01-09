@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { assertRelayAuth } from '@/lib/anpr/auth';
+import { getDirectionFromCameraId } from '@/lib/anpr/camera-mapping';
 
 /**
  * Normalize plate: uppercase, remove non-alphanumeric
@@ -78,16 +79,39 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Fetch tenant ANPR config for dedupe_seconds and grace windows
+    // Fetch tenant ANPR config for dedupe_seconds, grace windows, and camera mapping
     const { data: config } = await supabase
       .from('tenant_anpr_config')
-      .select('dedupe_seconds, arrival_grace_minutes, departure_grace_minutes')
+      .select('dedupe_seconds, arrival_grace_minutes, departure_grace_minutes, camera_direction_map')
       .eq('tenant_id', tenantId)
       .maybeSingle();
 
     const dedupeSeconds = config?.dedupe_seconds ?? 60;
     const arrivalGraceMinutes = config?.arrival_grace_minutes ?? 240; // 4 hours default
     const departureGraceMinutes = config?.departure_grace_minutes ?? 480; // 8 hours default
+    const cameraDirectionMap = config?.camera_direction_map ?? {};
+
+    // Determine direction: use camera mapping if cameraId is provided, otherwise use provided direction
+    let normalizedDirection: 'in' | 'out' | 'unknown';
+    if (cameraId && cameraDirectionMap) {
+      // Use camera mapping to determine direction
+      normalizedDirection = getDirectionFromCameraId(cameraId, cameraDirectionMap);
+      // If mapping returns unknown, fall back to provided direction
+      if (normalizedDirection === 'unknown' && direction) {
+        normalizedDirection = direction === 'entry' || direction === 'in' 
+          ? 'in' 
+          : direction === 'exit' || direction === 'out' 
+          ? 'out' 
+          : 'unknown';
+      }
+    } else {
+      // Use provided direction
+      normalizedDirection = direction === 'entry' || direction === 'in' 
+        ? 'in' 
+        : direction === 'exit' || direction === 'out' 
+        ? 'out' 
+        : 'unknown';
+    }
 
     // Dedupe check: same tenant + same plate_normalized + same direction within dedupe_seconds
     const dedupeWindowStart = new Date(eventAtDate.getTime() - dedupeSeconds * 1000);
