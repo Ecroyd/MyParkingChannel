@@ -35,8 +35,24 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    // Build query for gate events
-    let query = adminClient
+    // Build date filters
+    let fromDateFilter: string | null = null;
+    let toDateFilter: string | null = null;
+    
+    if (from) {
+      const fromDate = new Date(from);
+      fromDate.setHours(0, 0, 0, 0);
+      fromDateFilter = fromDate.toISOString();
+    }
+
+    if (to) {
+      const toDate = new Date(to);
+      toDate.setHours(23, 59, 59, 999);
+      toDateFilter = toDate.toISOString();
+    }
+
+    // Fetch gate_events (old system)
+    let gateEventsQuery = adminClient
       .from('gate_events')
       .select(`
         id,
@@ -62,31 +78,55 @@ export async function GET(req: NextRequest) {
       .order('event_at', { ascending: false })
       .limit(limit);
 
-    // Add date filters if provided
-    if (from) {
-      const fromDate = new Date(from);
-      fromDate.setHours(0, 0, 0, 0);
-      query = query.gte('event_at', fromDate.toISOString());
+    if (fromDateFilter) {
+      gateEventsQuery = gateEventsQuery.gte('event_at', fromDateFilter);
+    }
+    if (toDateFilter) {
+      gateEventsQuery = gateEventsQuery.lte('event_at', toDateFilter);
     }
 
-    if (to) {
-      const toDate = new Date(to);
-      toDate.setHours(23, 59, 59, 999);
-      query = query.lte('event_at', toDate.toISOString());
+    const { data: gateEvents, error: gateEventsError } = await gateEventsQuery;
+
+    if (gateEventsError) {
+      console.error('Error fetching gate events:', gateEventsError);
     }
 
-    const { data: events, error: eventsError } = await query;
+    // Fetch anpr_events (new system)
+    let anprEventsQuery = adminClient
+      .from('anpr_events')
+      .select(`
+        id,
+        event_at,
+        direction,
+        plate_raw,
+        camera_id,
+        status,
+        booking_id,
+        bookings(
+          id,
+          reference,
+          status
+        )
+      `)
+      .eq('tenant_id', tenantId)
+      .order('event_at', { ascending: false })
+      .limit(limit);
 
-    if (eventsError) {
-      console.error('Error fetching gate events:', eventsError);
-      return NextResponse.json(
-        { error: 'Failed to fetch gate events' },
-        { status: 500 }
-      );
+    if (fromDateFilter) {
+      anprEventsQuery = anprEventsQuery.gte('event_at', fromDateFilter);
+    }
+    if (toDateFilter) {
+      anprEventsQuery = anprEventsQuery.lte('event_at', toDateFilter);
     }
 
-    // Transform events to match client expectations
-    const transformedEvents = (events || []).map((event: any) => {
+    const { data: anprEvents, error: anprEventsError } = await anprEventsQuery;
+
+    if (anprEventsError) {
+      console.error('Error fetching anpr events:', anprEventsError);
+    }
+
+    // Transform gate_events to match client expectations
+    const transformedGateEvents = (gateEvents || []).map((event: any) => {
       // Handle both array and single object responses from Supabase
       const device = Array.isArray(event.gate_devices) 
         ? event.gate_devices[0] 
@@ -109,7 +149,48 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    return NextResponse.json({ events: transformedEvents });
+    // Transform anpr_events to match gate_events format
+    const transformedAnprEvents = (anprEvents || []).map((event: any) => {
+      const booking = Array.isArray(event.bookings) 
+        ? event.bookings[0] 
+        : event.bookings;
+
+      // Map anpr_events status to gate_events result format
+      let result = 'deny';
+      if (event.status === 'matched' || event.status === 'corrected') {
+        result = 'allow';
+      } else if (event.status === 'unmatched') {
+        result = 'deny';
+      }
+
+      // Map direction to mode
+      let mode = 'anpr';
+      if (event.direction === 'in') {
+        mode = 'entry';
+      } else if (event.direction === 'out') {
+        mode = 'exit';
+      }
+
+      return {
+        id: event.id,
+        event_at: event.event_at,
+        mode: mode,
+        plate: event.plate_raw,
+        qr_code: null,
+        result: result,
+        reason: event.status === 'unmatched' ? 'No booking match' : event.status === 'matched' ? 'Matched to booking' : event.status,
+        device_name: event.camera_id ? `Camera ${event.camera_id}` : 'ANPR Camera',
+        booking_reference: booking?.reference || null,
+        booking_status: booking?.status || null,
+      };
+    });
+
+    // Combine and sort by event_at descending
+    const allEvents = [...transformedGateEvents, ...transformedAnprEvents].sort((a, b) => {
+      return new Date(b.event_at).getTime() - new Date(a.event_at).getTime();
+    }).slice(0, limit);
+
+    return NextResponse.json({ events: allEvents });
   } catch (error: any) {
     console.error('Gate events API error:', error);
     return NextResponse.json(
