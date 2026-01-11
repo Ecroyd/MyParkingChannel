@@ -1,10 +1,10 @@
 // POST /api/anpr/events - Ingest ANPR camera reads
 // Authenticated via relay token (x-relay-token header)
-// Server hashes the provided token and compares to anpr_sites.relay_token_hash
+// Uses same auth pattern as /api/internal/anpr/outbox (requireRelayAuth)
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { assertRelayAuth } from '@/lib/anpr/auth';
+import { requireRelayAuth } from '@/app/api/internal/anpr/_relayAuth';
 import { getDirectionFromCameraId } from '@/lib/anpr/camera-mapping';
 
 /**
@@ -44,17 +44,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Authenticate via relay token (validates against anpr_sites.relay_token_hash)
-    try {
-      await assertRelayAuth(req, tenantId);
-    } catch (authError) {
-      if (authError instanceof Response) {
-        return authError;
-      }
-      return NextResponse.json(
-        { error: 'Authentication failed' },
-        { status: 401 }
-      );
+    // Relay token auth check (same pattern as /api/internal/anpr/outbox)
+    const auth = await requireRelayAuth(req, tenantId);
+    if (!auth.ok) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
     }
 
     const supabase = createAdminClient();
