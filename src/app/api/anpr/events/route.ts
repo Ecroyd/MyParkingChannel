@@ -60,9 +60,20 @@ export async function POST(req: NextRequest) {
     ? (parsed.data as any).events
     : [parsed.data];
 
+  // Validate tenant_id is present on all events
+  for (const e of events) {
+    if (!(e as any).tenant_id && !(e as any).tenantId) {
+      return NextResponse.json(
+        { error: "Missing tenant_id on event", received: e },
+        { status: 400 }
+      );
+    }
+  }
+
   const rows = events.map((e: any) => {
     const plateRaw = (e.plateRaw ?? e.plate ?? "").toString().trim();
     return {
+      tenant_id: e.tenant_id ?? e.tenantId ?? null,
       plate_raw: plateRaw || null,
       plate_normalized: plateRaw ? normalizePlate(plateRaw) : null,
       event_at: pickEventAt(e),
