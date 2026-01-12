@@ -92,6 +92,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Fetch anpr_events (new system)
+    // IMPORTANT: Select event_at (actual event time), NOT received_at (upload time)
     let anprEventsQuery = adminClient
       .from('anpr_events')
       .select(`
@@ -171,9 +172,12 @@ export async function GET(req: NextRequest) {
         mode = 'exit';
       }
 
+      // IMPORTANT: Use event_at (actual event time), NOT received_at (upload time)
+      // event_at is the timestamp when the ANPR event actually occurred
+      // received_at is when the event was uploaded/ingested into the system
       return {
         id: event.id,
-        event_at: event.event_at,
+        event_at: event.event_at, // Actual event time, not upload time
         mode: mode,
         plate: event.plate_raw,
         qr_code: null,
