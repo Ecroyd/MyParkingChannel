@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { syncCavuEventsForTenant } from '@/lib/suppliers/cavuEventsSync';
+import { createSyncAlert, getAlertRoutes } from '@/lib/suppliers/alerting';
+import { deliverAlert } from '@/lib/suppliers/alertDelivery';
 
 /**
  * Calculate hours to sync based on last_synced_at.
@@ -89,6 +91,73 @@ async function runCavuCron(req?: NextRequest) {
     const tenantId = configRow.tenant_id;
     const configData = (configRow.config as any) ?? {};
     const lastSyncedAt = configData.last_synced_at;
+
+    // Check for stale run (no successful run in > 2 hours)
+    const { data: lastSuccessfulRun } = await supabase
+      .from('supplier_sync_runs')
+      .select('started_at')
+      .eq('tenant_id', tenantId)
+      .eq('supplier_code', 'cavu')
+      .eq('ok', true)
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const now = new Date();
+    const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+    const isStale = !lastSuccessfulRun || new Date(lastSuccessfulRun.started_at) < twoHoursAgo;
+
+    if (isStale) {
+      // Create stale run warning alert with special fingerprint: stale|2h
+      const fingerprint = 'stale|2h';
+      const errorMessage = 'No successful sync run in the last 2 hours';
+      
+      // Try to insert directly with the special fingerprint
+      const { data: staleAlert, error: insertError } = await supabase
+        .from('supplier_sync_alerts')
+        .insert({
+          tenant_id: tenantId,
+          supplier_code: 'cavu',
+          run_id: null,
+          fingerprint,
+          severity: 'warning',
+          message: errorMessage,
+          meta: {
+            errors: [errorMessage],
+          },
+        })
+        .select('id, fingerprint')
+        .single();
+
+      // If insert succeeded (not a duplicate), deliver the alert
+      if (staleAlert && !insertError) {
+        const routes = await getAlertRoutes(tenantId);
+        if (routes.length > 0) {
+          await deliverAlert(staleAlert.id, routes, {
+            tenantId,
+            supplierCode: 'cavu',
+            startedAt: now.toISOString(),
+            errors: [errorMessage],
+            runId: null,
+          });
+        }
+      }
+    }
+
+      if (staleAlert) {
+        // Deliver stale alert
+        const routes = await getAlertRoutes(tenantId);
+        if (routes.length > 0) {
+          await deliverAlert(staleAlert.id, routes, {
+            tenantId,
+            supplierCode: 'cavu',
+            startedAt: now.toISOString(),
+            errors: ['No successful sync run in the last 2 hours'],
+            runId: null,
+          });
+        }
+      }
+    }
 
     // Calculate hours to sync
     let hoursToFetch: number;
@@ -266,18 +335,44 @@ async function runCavuCron(req?: NextRequest) {
       }
 
       // Update sync run record
+      const runOk = result.errors.length === 0;
       if (run) {
         await supabase
           .from('supplier_sync_runs')
           .update({
             finished_at: new Date().toISOString(),
-            ok: result.errors.length === 0,
+            ok: runOk,
             events_seen: result.eventsSeen,
             bookings_upserted: result.bookingsUpserted,
             bookings_cancelled: result.bookingsCancelled,
             errors: result.errors,
           })
           .eq('id', run.id);
+      }
+
+      // Create and deliver alerts if run failed or has errors
+      if (!runOk || result.errors.length > 0) {
+        const alert = await createSyncAlert({
+          tenantId,
+          supplierCode: 'cavu',
+          runId: run?.id || null,
+          errors: result.errors,
+          severity: 'error',
+        });
+
+        if (alert) {
+          // Only deliver if alert was created (not a duplicate)
+          const routes = await getAlertRoutes(tenantId);
+          if (routes.length > 0) {
+            await deliverAlert(alert.id, routes, {
+              tenantId,
+              supplierCode: 'cavu',
+              startedAt: run?.started_at || new Date().toISOString(),
+              errors: result.errors,
+              runId: run?.id || null,
+            });
+          }
+        }
       }
 
       logs.push({
@@ -298,6 +393,7 @@ async function runCavuCron(req?: NextRequest) {
       console.error('[CAVU CRON] Error for tenant', tenantId, err);
 
       // Update sync run record with error
+      const errorMessage = err?.message ?? String(err);
       if (run) {
         await supabase
           .from('supplier_sync_runs')
@@ -307,9 +403,31 @@ async function runCavuCron(req?: NextRequest) {
             events_seen: 0,
             bookings_upserted: 0,
             bookings_cancelled: 0,
-            errors: [err?.message ?? String(err)],
+            errors: [errorMessage],
           })
           .eq('id', run.id);
+      }
+
+      // Create and deliver alert for exception
+      const alert = await createSyncAlert({
+        tenantId,
+        supplierCode: 'cavu',
+        runId: run?.id || null,
+        errors: [errorMessage],
+        severity: 'error',
+      });
+
+      if (alert) {
+        const routes = await getAlertRoutes(tenantId);
+        if (routes.length > 0) {
+          await deliverAlert(alert.id, routes, {
+            tenantId,
+            supplierCode: 'cavu',
+            startedAt: run?.started_at || new Date().toISOString(),
+            errors: [errorMessage],
+            runId: run?.id || null,
+          });
+        }
       }
 
       logs.push({
