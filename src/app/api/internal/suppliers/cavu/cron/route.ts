@@ -144,21 +144,6 @@ async function runCavuCron(req?: NextRequest) {
       }
     }
 
-      if (staleAlert) {
-        // Deliver stale alert
-        const routes = await getAlertRoutes(tenantId);
-        if (routes.length > 0) {
-          await deliverAlert(staleAlert.id, routes, {
-            tenantId,
-            supplierCode: 'cavu',
-            startedAt: now.toISOString(),
-            errors: ['No successful sync run in the last 2 hours'],
-            runId: null,
-          });
-        }
-      }
-    }
-
     // Calculate hours to sync
     let hoursToFetch: number;
 
