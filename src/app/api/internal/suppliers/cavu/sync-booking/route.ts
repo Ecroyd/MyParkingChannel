@@ -47,13 +47,18 @@ export async function POST(req: NextRequest) {
 
     // Map status from CAVU Status
     function mapCavuStatus(status?: string): 'reserved' | 'checked_in' | 'checked_out' | 'cancelled' {
-      if (!status) return 'reserved';
-      const upper = status.toUpperCase();
-      if (upper.includes('CANCELLED') || upper.includes('CANCEL')) return 'cancelled';
-      if (upper.includes('CHECKED_OUT') || upper.includes('DEPARTED') || upper.includes('OUT')) return 'checked_out';
-      if (upper.includes('CHECKED_IN') || upper.includes('ARRIVED') || upper.includes('IN')) return 'checked_in';
-      if (upper.includes('CONFIRMED') || upper.includes('RESERVED')) return 'reserved';
-      return 'reserved'; // Default
+      switch ((status || '').toUpperCase()) {
+        case 'CONFIRMED':
+          return 'reserved';
+        case 'COMPLETED':
+          return 'checked_out';
+        case 'CANCELLED':
+          return 'cancelled';
+        case 'NOSHOW':
+          return 'cancelled';
+        default:
+          return 'reserved';
+      }
     }
 
     // Extract flight_date from ArrivalDate (YYYY-MM-DD format)
