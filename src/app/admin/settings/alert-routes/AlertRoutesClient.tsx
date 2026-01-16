@@ -363,7 +363,9 @@ export default function AlertRoutesClient({ initialRoutes, recentAlerts, tenantI
                       </Badge>
                       <Badge variant="outline">{alert.severity}</Badge>
                       {alert.sent_at && (
-                        <CheckCircle2 className="h-4 w-4 text-green-500" title="Sent" />
+                        <span title="Sent">
+                          <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        </span>
                       )}
                     </div>
                     <p className="text-sm mt-1">{alert.message}</p>
