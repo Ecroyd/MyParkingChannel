@@ -381,36 +381,44 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
               />
             </label>
             {file && (
-              <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded">
-                <strong>{file.name}</strong> ({(file.size / 1024).toFixed(1)} KB)
-              </div>
-            )}
-            {file && !fileAnalysed && (
-              <div className="space-y-2">
-                {mappings.length > 0 && (
-                  <select
-                    className="w-full border rounded px-3 py-2 text-sm"
-                    value={selectedMappingId}
-                    onChange={(e)=>{
-                      const id = e.target.value;
-                      setSelectedMappingId(id);
-                      const m = mappings.find(x=>x.id===id);
-                      if (m?.mapping) setMap(prev => ({ ...prev, ...m.mapping }));
-                    }}
-                  >
-                    <option value="">Load saved mapping…</option>
-                    {mappings.map(m => (
-                      <option key={m.id} value={m.id}>{m.name}</option>
-                    ))}
-                  </select>
+              <>
+                <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded">
+                  <strong>{file.name}</strong> ({(file.size / 1024).toFixed(1)} KB)
+                </div>
+                {!fileAnalysed && (
+                  <div className="space-y-3 pt-2">
+                    {mappings.length > 0 && (
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Optional: Load saved mapping</label>
+                        <select
+                          className="w-full border rounded px-3 py-2 text-sm"
+                          value={selectedMappingId}
+                          onChange={(e)=>{
+                            const id = e.target.value;
+                            setSelectedMappingId(id);
+                            const m = mappings.find(x=>x.id===id);
+                            if (m?.mapping) setMap(prev => ({ ...prev, ...m.mapping }));
+                          }}
+                        >
+                          <option value="">None - start fresh</option>
+                          {mappings.map(m => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    <button 
+                      onClick={analyseFile} 
+                      className="w-full px-6 py-3 rounded-lg bg-blue-600 text-white font-semibold text-base hover:bg-blue-700 transition-colors shadow-md hover:shadow-lg"
+                    >
+                      📄 Analyse File & Continue
+                    </button>
+                    <p className="text-xs text-gray-500 text-center">
+                      This will read your file and prepare it for column mapping
+                    </p>
+                  </div>
                 )}
-                <button 
-                  onClick={analyseFile} 
-                  className="w-full px-4 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors"
-                >
-                  Analyse File
-                </button>
-              </div>
+              </>
             )}
           </div>
 
