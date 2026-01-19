@@ -5,17 +5,34 @@ dayjs.extend(utc);
 
 /**
  * Parse flexible date formats including Excel serial numbers
+ * Handles both integer (date only) and decimal (date + time) Excel serial numbers
  */
 export function parseFlexibleDate(value: string | number | null): string | null {
   if (!value) return null;
 
   // Handle Excel serial numbers (typically 30000-60000 range)
-  if (typeof value === 'number' || /^\d+$/.test(String(value))) {
+  // Can be integer (date only) or decimal (date + time, e.g., 46143.125)
+  const strValue = String(value);
+  if (typeof value === 'number' || /^\d+\.?\d*$/.test(strValue)) {
     const serial = Number(value);
     if (serial > 30000 && serial < 60000) {
-      // Excel serial date: 1899-12-30 is day 0, so add the serial number
+      // Excel serial date: 1899-12-30 is day 0
+      // Integer part = days since 1899-12-30
+      // Decimal part = fraction of day (time)
+      const days = Math.floor(serial);
+      const timeFraction = serial - days;
+      
       const baseDate = new Date(1899, 11, 30);
-      baseDate.setDate(baseDate.getDate() + serial);
+      baseDate.setDate(baseDate.getDate() + days);
+      
+      // Add time component if present (fraction of day)
+      if (timeFraction > 0) {
+        const hours = Math.floor(timeFraction * 24);
+        const minutes = Math.floor((timeFraction * 24 - hours) * 60);
+        const seconds = Math.floor(((timeFraction * 24 - hours) * 60 - minutes) * 60);
+        baseDate.setHours(hours, minutes, seconds);
+      }
+      
       return baseDate.toISOString();
     }
   }
@@ -126,13 +143,21 @@ export function composeISO(
   tz: Tz = "Europe/London",
   opts: DateParseOptions = {}
 ) {
+  // Check if dateStr is an Excel serial with time (decimal part indicates time)
+  const isExcelSerialWithTime = dateStr && /^\d+\.\d+$/.test(String(dateStr));
+  
+  // Parse the date (parseDateFlex will use parseFlexibleDate which handles Excel serials)
   const d = parseDateFlex(dateStr, opts);
   if (!d) return "";
+  
+  // If it's an Excel serial with time, the time is already included in the parsed date
+  // Otherwise, apply timeStr if provided
   let hh = 0, mm = 0;
-  if (timeStr && /^([01]\d|2[0-3]):[0-5]\d$/.test(timeStr.trim())) {
+  if (!isExcelSerialWithTime && timeStr && /^([01]\d|2[0-3]):[0-5]\d$/.test(timeStr.trim())) {
     const [h, m] = timeStr.split(":");
     hh = Number(h); mm = Number(m);
   }
+  
   const local = d.hour(hh).minute(mm).second(0).millisecond(0);
   return tz === "UTC" ? local.utc().toISOString() : local.utc(true).toISOString();
 }

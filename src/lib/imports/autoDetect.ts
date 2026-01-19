@@ -115,23 +115,221 @@ function positionAfter(cols: ColScore[], idx: number, key: string, minRatio = 0.
   return (best && (best.counts[key]||0)/Math.max(best.samples.length,1) >= minRatio) ? best : null;
 }
 
+// Header name patterns for common field names
+const HEADER_PATTERNS: Record<string, RegExp[]> = {
+  reference: [
+    /^booking[_\s-]?reference$/i,
+    /^ref$/i,
+    /^reference$/i,
+    /^booking[_\s-]?ref$/i,
+  ],
+  customer_name: [
+    /^customer[_\s-]?name$/i,
+    /^name$/i,
+    /^passenger[_\s-]?name$/i,
+    /^full[_\s-]?name$/i,
+  ],
+  customer_firstname: [
+    /^first[_\s-]?name$/i,
+    /^customer[_\s-]?first[_\s-]?name$/i,
+    /^forename$/i,
+  ],
+  customer_lastname: [
+    /^last[_\s-]?name$/i,
+    /^surname$/i,
+    /^customer[_\s-]?last[_\s-]?name$/i,
+    /^family[_\s-]?name$/i,
+  ],
+  customer_title: [
+    /^title$/i,
+    /^customer[_\s-]?title$/i,
+    /^salutation$/i,
+  ],
+  start_timestamp: [
+    /^entry[_\s-]?datetime$/i,
+    /^start[_\s-]?timestamp$/i,
+    /^arrival[_\s-]?datetime$/i,
+    /^entry[_\s-]?date[_\s-]?time$/i,
+  ],
+  end_timestamp: [
+    /^exit[_\s-]?datetime$/i,
+    /^end[_\s-]?timestamp$/i,
+    /^departure[_\s-]?datetime$/i,
+    /^exit[_\s-]?date[_\s-]?time$/i,
+  ],
+  start_date: [
+    /^start[_\s-]?date$/i,
+    /^arrival[_\s-]?date$/i,
+    /^entry[_\s-]?date$/i,
+  ],
+  start_time: [
+    /^start[_\s-]?time$/i,
+    /^arrival[_\s-]?time$/i,
+    /^entry[_\s-]?time$/i,
+  ],
+  end_date: [
+    /^end[_\s-]?date$/i,
+    /^departure[_\s-]?date$/i,
+    /^exit[_\s-]?date$/i,
+  ],
+  end_time: [
+    /^end[_\s-]?time$/i,
+    /^departure[_\s-]?time$/i,
+    /^exit[_\s-]?time$/i,
+  ],
+  vehicle_reg: [
+    /^license[_\s-]?plate$/i,
+    /^vehicle[_\s-]?reg$/i,
+    /^registration$/i,
+    /^reg$/i,
+    /^plate$/i,
+    /^vrm$/i,
+    /^number[_\s-]?plate$/i,
+  ],
+  vehicle_make: [
+    /^vehicle[_\s-]?make$/i,
+    /^make$/i,
+    /^car[_\s-]?make$/i,
+  ],
+  vehicle_model: [
+    /^vehicle[_\s-]?model$/i,
+    /^model$/i,
+    /^car[_\s-]?model$/i,
+  ],
+  vehicle_colour: [
+    /^vehicle[_\s-]?colour$/i,
+    /^vehicle[_\s-]?color$/i,
+    /^colour$/i,
+    /^color$/i,
+    /^car[_\s-]?colour$/i,
+  ],
+  flight_number: [
+    /^flight[_\s-]?number$/i,
+    /^flight$/i,
+  ],
+  phone: [
+    /^contact[_\s-]?number$/i,
+    /^phone$/i,
+    /^telephone$/i,
+    /^mobile$/i,
+    /^customer[_\s-]?phone$/i,
+  ],
+  status: [
+    /^booking[_\s-]?status$/i,
+    /^status$/i,
+    /^booking[_\s-]?status[_\s-]?name$/i,
+  ],
+  price: [
+    /^price$/i,
+    /^product[_\s-]?native[_\s-]?price$/i,
+    /^amount$/i,
+    /^total[_\s-]?price$/i,
+  ],
+  money_received: [
+    /^money[_\s-]?received$/i,
+    /^deposit[_\s-]?amount$/i,
+    /^paid$/i,
+  ],
+  source: [
+    /^source$/i,
+    /^booking[_\s-]?source$/i,
+  ],
+};
+
+function matchHeader(header: string, field: string): boolean {
+  const patterns = HEADER_PATTERNS[field];
+  if (!patterns) return false;
+  const cleanHeader = header.trim();
+  return patterns.some(pattern => pattern.test(cleanHeader));
+}
+
+function detectHeaders(rows: any[][]): Map<number, string> | null {
+  if (rows.length === 0) return null;
+  
+  const firstRow = rows[0];
+  // Check if first row looks like headers (mostly text, not dates/numbers)
+  const textCount = firstRow.filter(cell => {
+    const s = cellToCleanString(cell).trim();
+    return s && !/^\d+\.?\d*$/.test(s) && !RE.isoDate.test(s) && !RE.dateDmy.test(s);
+  }).length;
+  
+  // If more than 50% of first row is text (not numbers/dates), treat as headers
+  if (textCount / Math.max(firstRow.length, 1) > 0.5) {
+    const headerMap = new Map<number, string>();
+    firstRow.forEach((cell, idx) => {
+      const header = cellToCleanString(cell).trim();
+      if (header) headerMap.set(idx, header);
+    });
+    return headerMap;
+  }
+  
+  return null;
+}
+
 export function autoDetectMap(rows: any[][]): MapState {
   console.log("🔍 autoDetectMap called with rows:", rows.length);
-  const cols = scoreColumns(rows);
+  
+  // First, try to detect headers
+  const headerMap = detectHeaders(rows);
+  const dataRows = headerMap ? rows.slice(1) : rows;
+  
+  const cols = scoreColumns(dataRows);
   const total = Math.max(...cols.map(c => c.samples.length), 1);
   
   console.log("📊 Scored columns:", cols.map(c => ({ i: c.i, counts: c.counts })));
+  if (headerMap) {
+    console.log("📋 Detected headers:", Array.from(headerMap.entries()));
+  }
 
-  const source = bestBy(cols, "source", 0.5);
-  const reference = bestBy(cols, "reference", 0.5);
+  // Match headers to fields
+  const headerMatches: Partial<Record<string, number>> = {};
+  if (headerMap) {
+    for (const [field, patterns] of Object.entries(HEADER_PATTERNS)) {
+      for (const [colIdx, header] of headerMap.entries()) {
+        if (patterns.some(pattern => pattern.test(header))) {
+          headerMatches[field] = colIdx;
+          break;
+        }
+      }
+    }
+  }
 
-  const title = bestBy(cols, "title", 0.5);
-  const lastname = title ? cols.find(c => c.i === title.i - 1) : null;
-  const firstname = title ? cols.find(c => c.i === title.i + 1) : null;
+  const source = headerMatches.source !== undefined 
+    ? cols.find(c => c.i === headerMatches.source)
+    : bestBy(cols, "source", 0.5);
+  const reference = headerMatches.reference !== undefined
+    ? cols.find(c => c.i === headerMatches.reference)
+    : bestBy(cols, "reference", 0.5);
 
-  // Dates/Times
-  const isoTs = bestBy(cols, "isoTs", 0.6);
+  // Customer name fields
+  const customer_name = headerMatches.customer_name !== undefined
+    ? cols.find(c => c.i === headerMatches.customer_name)
+    : null;
+  const customer_firstname = headerMatches.customer_firstname !== undefined
+    ? cols.find(c => c.i === headerMatches.customer_firstname)
+    : null;
+  const customer_lastname = headerMatches.customer_lastname !== undefined
+    ? cols.find(c => c.i === headerMatches.customer_lastname)
+    : null;
+  const title = headerMatches.customer_title !== undefined
+    ? cols.find(c => c.i === headerMatches.customer_title)
+    : bestBy(cols, "title", 0.5);
+  
+  // If we have customer_name but not first/last, try to infer from position
+  const lastname = customer_lastname || (title ? cols.find(c => c.i === title.i - 1) : null);
+  const firstname = customer_firstname || (title ? cols.find(c => c.i === title.i + 1) : null);
+
+  // Dates/Times - prioritize header matches
+  const start_timestamp_header = headerMatches.start_timestamp !== undefined
+    ? cols.find(c => c.i === headerMatches.start_timestamp)
+    : null;
+  const end_timestamp_header = headerMatches.end_timestamp !== undefined
+    ? cols.find(c => c.i === headerMatches.end_timestamp)
+    : null;
+  
+  const isoTs = start_timestamp_header || bestBy(cols, "isoTs", 0.6);
   const time1 = bestBy(cols, "time", 0.5);
+  
   // consider date candidates as those that look like ddmmyy, dd/mm/yy, isoDate, or Excel serial dates but NOT isoTs
   const dateScores = cols.map(c => ({
     c,
@@ -143,46 +341,96 @@ export function autoDetectMap(rows: any[][]): MapState {
   let start_date: ColScore | null = null, end_date: ColScore | null = null;
   let start_timestamp: ColScore | null = null, end_timestamp: ColScore | null = null;
 
-  if (isoTs) {
-    // If a single timestamp column exists, use it for both, and try to find a second date for end if present
-    start_mode = "single"; start_timestamp = isoTs;
+  // Use header-matched timestamps if available
+  if (start_timestamp_header) {
+    start_mode = "single";
+    start_timestamp = start_timestamp_header;
+  }
+  if (end_timestamp_header) {
+    end_mode = "single";
+    end_timestamp = end_timestamp_header;
+  }
+  
+  // Fall back to pattern matching if headers didn't match
+  if (!start_timestamp && isoTs) {
+    start_mode = "single";
+    start_timestamp = isoTs;
+  }
+  if (!end_timestamp && isoTs && !end_timestamp_header) {
     // Try to pick a second date for end; else also use single
     if (dateScores.length >= 2) {
-      end_mode = "split"; // if we can find a distinct end_date + time, use split
+      end_mode = "split";
       end_date = dateScores[1]!.c;
     } else {
-      end_mode = "single"; end_timestamp = isoTs;
+      end_mode = "single";
+      end_timestamp = isoTs;
     }
-  } else if (dateScores.length >= 2) {
+  } else if (!end_timestamp && dateScores.length >= 2) {
     start_date = dateScores[0].c;
     end_date = dateScores[1].c;
-  } else if (dateScores.length === 1) {
+  } else if (!start_timestamp && dateScores.length >= 1) {
     start_date = dateScores[0].c;
   }
 
-  const end_time = end_date ? positionAfter(cols, end_date.i - 1, "time", 0.4) : null;
-  const start_time = start_date ? positionAfter(cols, start_date.i - 1, "time", 0.4) : time1;
+  // Use header matches for date/time if available
+  if (headerMatches.start_date !== undefined) {
+    start_date = cols.find(c => c.i === headerMatches.start_date) || start_date;
+  }
+  if (headerMatches.end_date !== undefined) {
+    end_date = cols.find(c => c.i === headerMatches.end_date) || end_date;
+  }
 
-  const vrm = bestBy(cols, "vrm", 0.5);
-  const colour = bestBy(cols, "colour", 0.5);
-  const make = bestBy(cols, "make", 0.5);
-  // model: usually immediately after make
-  const model = make ? cols.find(c => c.i === make.i + 1) : null;
+  const end_time = headerMatches.end_time !== undefined
+    ? cols.find(c => c.i === headerMatches.end_time)
+    : (end_date ? positionAfter(cols, end_date.i - 1, "time", 0.4) : null);
+  const start_time = headerMatches.start_time !== undefined
+    ? cols.find(c => c.i === headerMatches.start_time)
+    : (start_date ? positionAfter(cols, start_date.i - 1, "time", 0.4) : time1);
 
-  const flight = bestBy(cols, "flight", 0.5);
-  const phone = bestBy(cols, "phone", 0.5);
-  const status = bestBy(cols, "status", 0.4);
+  const vrm = headerMatches.vehicle_reg !== undefined
+    ? cols.find(c => c.i === headerMatches.vehicle_reg)
+    : bestBy(cols, "vrm", 0.5);
+  const colour = headerMatches.vehicle_colour !== undefined
+    ? cols.find(c => c.i === headerMatches.vehicle_colour)
+    : bestBy(cols, "colour", 0.5);
+  const make = headerMatches.vehicle_make !== undefined
+    ? cols.find(c => c.i === headerMatches.vehicle_make)
+    : bestBy(cols, "make", 0.5);
+  // model: usually immediately after make, or use header match
+  const model = headerMatches.vehicle_model !== undefined
+    ? cols.find(c => c.i === headerMatches.vehicle_model)
+    : (make ? cols.find(c => c.i === make.i + 1) : null);
 
-  // price/money: first two decimals after status (or globally if no status)
-  const decimalCols = cols.filter(c => (c.counts.dec||0)/total >= 0.5);
+  const flight = headerMatches.flight_number !== undefined
+    ? cols.find(c => c.i === headerMatches.flight_number)
+    : bestBy(cols, "flight", 0.5);
+  const phone = headerMatches.phone !== undefined
+    ? cols.find(c => c.i === headerMatches.phone)
+    : bestBy(cols, "phone", 0.5);
+  const status = headerMatches.status !== undefined
+    ? cols.find(c => c.i === headerMatches.status)
+    : bestBy(cols, "status", 0.4);
+
+  // price/money: use header matches first, then fall back to pattern matching
   let price: ColScore | null = null, money: ColScore | null = null;
-  if (status) {
-    const afterStatus = decimalCols.filter(c => c.i > status.i).sort((a,b)=>a.i-b.i);
-    price = afterStatus[0] || null;
-    money = afterStatus[1] || null;
-  } else {
-    price = decimalCols[0] || null;
-    money = decimalCols[1] || null;
+  if (headerMatches.price !== undefined) {
+    price = cols.find(c => c.i === headerMatches.price) || null;
+  }
+  if (headerMatches.money_received !== undefined) {
+    money = cols.find(c => c.i === headerMatches.money_received) || null;
+  }
+  
+  // Fall back to pattern matching if headers didn't match
+  if (!price || !money) {
+    const decimalCols = cols.filter(c => (c.counts.dec||0)/total >= 0.5);
+    if (!price && status) {
+      const afterStatus = decimalCols.filter(c => c.i > status.i).sort((a,b)=>a.i-b.i);
+      price = price || afterStatus[0] || null;
+      money = money || afterStatus[1] || null;
+    } else if (!price) {
+      price = decimalCols[0] || null;
+      money = money || decimalCols[1] || null;
+    }
   }
 
   // notes: try short alnum near VRM (often bay) OR skip
@@ -199,6 +447,7 @@ export function autoDetectMap(rows: any[][]): MapState {
     source: source ? idxToLetter(source.i) : undefined,
     reference: reference ? idxToLetter(reference.i) : undefined,
 
+    customer_name: customer_name ? idxToLetter(customer_name.i) : undefined,
     customer_lastname: lastname ? idxToLetter(lastname.i) : undefined,
     customer_title: title ? idxToLetter(title.i) : undefined,
     customer_firstname: firstname ? idxToLetter(firstname.i) : undefined,

@@ -36,9 +36,11 @@ const FIELDS: Array<{key: keyof ImportProfileMap, label: string}> = [
   { key: "customer_title", label: "Title" },
   { key: "customer_firstname", label: "First name" },
 
+  { key: "start_timestamp", label: "Start Timestamp (Excel serial with time, e.g., 46143.125)" },
   { key: "start_date", label: "Start Date (ddmmyy / dd/mm/yy / serial)" },
   { key: "start_time", label: "Start Time (HH:mm)" },
 
+  { key: "end_timestamp", label: "End Timestamp (Excel serial with time, e.g., 46150.625)" },
   { key: "end_date", label: "End Date (ddmmyy / dd/mm/yy / serial)" },
   { key: "end_time", label: "End Time (HH:mm)" },
 
@@ -135,9 +137,17 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
 
-      // timestamps: compose date+time
-      const start_at = composeISO(getCell(r, map.start_date), getCell(r, map.start_time), timezone as any, DATE_OPTS);
-      const end_at = composeISO(getCell(r, map.end_date), getCell(r, map.end_time), timezone as any, DATE_OPTS);
+      // timestamps: use timestamp if provided (for Excel serial dates with time), otherwise compose date+time
+      const startTimestamp = getCell(r, map.start_timestamp);
+      const endTimestamp = getCell(r, map.end_timestamp);
+      
+      const start_at = startTimestamp 
+        ? composeISO(startTimestamp, undefined, timezone as any, DATE_OPTS)
+        : composeISO(getCell(r, map.start_date), getCell(r, map.start_time), timezone as any, DATE_OPTS);
+      
+      const end_at = endTimestamp
+        ? composeISO(endTimestamp, undefined, timezone as any, DATE_OPTS)
+        : composeISO(getCell(r, map.end_date), getCell(r, map.end_time), timezone as any, DATE_OPTS);
 
       // Handle full name or separate first/last name
       let customer_firstname: string;
