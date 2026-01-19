@@ -543,7 +543,7 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
                   saved={(mappings.find(m=>m.id===selectedMappingId)?.mapping)||{}} 
                 />
               )}
-            </>
+            </div>
           )}
         </div>
 
