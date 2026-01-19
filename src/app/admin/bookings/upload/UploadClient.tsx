@@ -28,33 +28,49 @@ const DATE_OPTS: DateParseOptions = {
   validYearMax: 2035 
 } as const;
 
-const FIELDS: Array<{key: keyof ImportProfileMap, label: string}> = [
-  { key: "source", label: "Source" },
-  { key: "reference", label: "Reference" },
-  { key: "customer_name", label: "Full name (optional, for CAVU etc.)" },
-  { key: "customer_lastname", label: "Last name" },
-  { key: "customer_title", label: "Title" },
-  { key: "customer_firstname", label: "First name" },
+const FIELDS: Array<{key: keyof ImportProfileMap, label: string, required?: boolean, group?: string}> = [
+  // Core fields
+  { key: "reference", label: "Reference", required: true, group: "core" },
+  { key: "source", label: "Source", group: "core" },
+  
+  // Customer info
+  { key: "customer_name", label: "Full Name", group: "customer" },
+  { key: "customer_firstname", label: "First Name", group: "customer" },
+  { key: "customer_lastname", label: "Last Name", group: "customer" },
+  { key: "customer_title", label: "Title", group: "customer" },
+  
+  // Dates - Start
+  { key: "start_timestamp", label: "Start Timestamp", group: "dates_start" },
+  { key: "start_date", label: "Start Date", group: "dates_start" },
+  { key: "start_time", label: "Start Time", group: "dates_start" },
+  
+  // Dates - End
+  { key: "end_timestamp", label: "End Timestamp", group: "dates_end" },
+  { key: "end_date", label: "End Date", group: "dates_end" },
+  { key: "end_time", label: "End Time", group: "dates_end" },
+  
+  // Vehicle
+  { key: "vehicle_reg", label: "Vehicle Reg", group: "vehicle" },
+  { key: "vehicle_make", label: "Make", group: "vehicle" },
+  { key: "vehicle_model", label: "Model", group: "vehicle" },
+  { key: "vehicle_colour", label: "Colour", group: "vehicle" },
+  
+  // Other
+  { key: "flight_number", label: "Flight Number", group: "other" },
+  { key: "phone", label: "Phone", group: "other" },
+  { key: "status", label: "Status", group: "other" },
+  { key: "price", label: "Price", group: "other" },
+  { key: "money_received", label: "Money Received", group: "other" },
+  { key: "notes", label: "Notes", group: "other" },
+];
 
-  { key: "start_timestamp", label: "Start Timestamp (Excel serial with time, e.g., 46143.125)" },
-  { key: "start_date", label: "Start Date (ddmmyy / dd/mm/yy / serial)" },
-  { key: "start_time", label: "Start Time (HH:mm)" },
-
-  { key: "end_timestamp", label: "End Timestamp (Excel serial with time, e.g., 46150.625)" },
-  { key: "end_date", label: "End Date (ddmmyy / dd/mm/yy / serial)" },
-  { key: "end_time", label: "End Time (HH:mm)" },
-
-  { key: "vehicle_reg", label: "Vehicle Reg" },
-  { key: "vehicle_colour", label: "Vehicle Colour" },
-  { key: "vehicle_make", label: "Vehicle Make" },
-  { key: "vehicle_model", label: "Vehicle Model" },
-
-  { key: "flight_number", label: "Flight Number" },
-  { key: "phone", label: "Phone" },
-  { key: "status", label: "Status (*CANX*, *FIRM*, *AMND*)" },
-  { key: "price", label: "Price" },
-  { key: "money_received", label: "Money Received" },
-  { key: "notes", label: "Notes" },
+const FIELD_GROUPS = [
+  { id: "core", label: "Core Fields", icon: "📋" },
+  { id: "customer", label: "Customer Information", icon: "👤" },
+  { id: "dates_start", label: "Start Date/Time", icon: "📅" },
+  { id: "dates_end", label: "End Date/Time", icon: "📅" },
+  { id: "vehicle", label: "Vehicle Details", icon: "🚗" },
+  { id: "other", label: "Other Information", icon: "ℹ️" },
 ];
 
 export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
@@ -72,6 +88,7 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
   const [autoMsg, setAutoMsg] = React.useState<string>("");
   const [sourceMapping, setSourceMapping] = React.useState<string>("other");
   const [customSource, setCustomSource] = React.useState<string>("");
+  const [expandedGroups, setExpandedGroups] = React.useState<Set<string>>(new Set(["core", "customer", "dates_start", "dates_end"]));
 
   async function loadMappings(tid: string) {
     if (!tid) return;
@@ -307,44 +324,78 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
   }
 
 
+  const toggleGroup = (groupId: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      return next;
+    });
+  };
+
+  const getFieldsByGroup = (groupId: string) => {
+    return FIELDS.filter(f => f.group === groupId);
+  };
+
   return (
-    <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-semibold">Upload by Column Letters</h1>
+    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold">Import Bookings</h1>
+        {fileAnalysed && (
+          <button 
+            onClick={autoDetect} 
+            className="px-4 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors"
+            disabled={!rows.length}
+          >
+            🔍 Auto-detect Mapping
+          </button>
+        )}
+      </div>
       
       {statusMsg && (
-        <div className="p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
+        <div className="p-4 bg-blue-50 border-l-4 border-blue-500 rounded text-sm text-blue-800">
           {statusMsg}
         </div>
       )}
 
       {autoMsg && (
-        <div className="p-3 bg-green-50 border border-green-200 rounded text-sm text-green-800">
+        <div className="p-4 bg-green-50 border-l-4 border-green-500 rounded text-sm text-green-800">
           {autoMsg}
         </div>
       )}
 
-      <div className="flex gap-6">
-        <div className="w-80 space-y-3">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-1 space-y-4">
           {/* Step 1: File Selection */}
-          <div className="space-y-2">
-            <label className="block text-sm font-medium">Step 1: Select File</label>
-            <input type="file" accept=".csv,.xlsx,.xls,.tsv,.txt" onChange={onFile} />
+          <div className="bg-white border rounded-lg p-4 space-y-3">
+            <h2 className="text-lg font-semibold">1. Select File</h2>
+            <label className="block">
+              <input 
+                type="file" 
+                accept=".csv,.xlsx,.xls,.tsv,.txt" 
+                onChange={onFile}
+                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+              />
+            </label>
             {file && (
-              <div className="text-sm text-gray-600">
-                Selected: {file.name} ({(file.size / 1024).toFixed(1)} KB)
+              <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded">
+                <strong>{file.name}</strong> ({(file.size / 1024).toFixed(1)} KB)
               </div>
             )}
             {file && !fileAnalysed && (
               <div className="space-y-2">
-                <div className="flex gap-3">
+                {mappings.length > 0 && (
                   <select
-                    className="flex-1 border rounded px-3 py-2"
+                    className="w-full border rounded px-3 py-2 text-sm"
                     value={selectedMappingId}
                     onChange={(e)=>{
                       const id = e.target.value;
                       setSelectedMappingId(id);
-        const m = mappings.find(x=>x.id===id);
-        if (m?.mapping) setMap(prev => ({ ...prev, ...m.mapping })); // apply saved mapping
+                      const m = mappings.find(x=>x.id===id);
+                      if (m?.mapping) setMap(prev => ({ ...prev, ...m.mapping }));
                     }}
                   >
                     <option value="">Load saved mapping…</option>
@@ -352,10 +403,10 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
                       <option key={m.id} value={m.id}>{m.name}</option>
                     ))}
                   </select>
-                </div>
+                )}
                 <button 
                   onClick={analyseFile} 
-                  className="w-full px-3 py-2 rounded bg-blue-600 text-white"
+                  className="w-full px-4 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors"
                 >
                   Analyse File
                 </button>
@@ -365,82 +416,125 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
 
           {/* Step 2: Column Mapping */}
           {fileAnalysed && (
-            <>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="font-medium">Step 2: Map columns (letters or 0-based indexes)</p>
-                  <button 
-                    onClick={autoDetect} 
-                    className="px-3 py-1 rounded border text-sm"
-                    disabled={!rows.length}
-                  >
-                    Auto-detect
-                  </button>
-                </div>
-                <div className="text-xs text-gray-600 bg-blue-50 p-2 rounded">
-                  💡 <strong>Date parsing tips:</strong> Excel strips leading zeros from ddmmyy dates (071025 → 71025). 
-                  Our parser handles this and validates years (2015-2035). If dates show as "❌ No date", 
-                  check your column mapping or date format.
-                </div>
-                {FIELDS.map(f => (
-                  <div key={f.key as string} className="flex items-center gap-2">
-                    <label className="w-48 text-sm">{f.label}</label>
-                    <input
-                      className="flex-1 border p-1 rounded"
-                      placeholder="e.g. I or 8"
-                      value={(map[f.key] as string) || ""}
-                      onChange={e => setMap(m => ({ ...m, [f.key]: e.target.value }))}
-                    />
-                  </div>
-                ))}
+            <div className="bg-white border rounded-lg p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold">2. Map Columns</h2>
+                <span className="text-xs text-gray-500">Use letters (A-Z) or numbers (0-9)</span>
               </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <label className="w-48 text-sm font-medium">Source Mapping:</label>
-                  <select 
-                    className="flex-1 border p-2 rounded"
-                    value={sourceMapping}
-                    onChange={e => setSourceMapping(e.target.value)}
-                  >
-                    <option value="manual">Manual</option>
-                    <option value="direct">Direct</option>
-                    <option value="parkvia">Parkvia</option>
-                    <option value="holidayextras">Holiday Extras</option>
-                    <option value="other">Other</option>
-                    <option value="custom">Custom Source</option>
-                  </select>
-                </div>
-                {sourceMapping === "custom" && (
-                  <div className="flex items-center gap-2">
-                    <label className="w-48 text-sm font-medium">Custom Source:</label>
-                    <input 
-                      className="flex-1 border p-2 rounded"
-                      placeholder="e.g. EXT1, MyCompany, etc."
-                      value={customSource}
-                      onChange={e => setCustomSource(e.target.value)}
-                    />
+              
+              {FIELD_GROUPS.map(group => {
+                const groupFields = getFieldsByGroup(group.id);
+                const isExpanded = expandedGroups.has(group.id);
+                
+                return (
+                  <div key={group.id} className="border rounded-lg overflow-hidden">
+                    <button
+                      onClick={() => toggleGroup(group.id)}
+                      className="w-full px-4 py-3 bg-gray-50 hover:bg-gray-100 flex items-center justify-between transition-colors"
+                    >
+                      <span className="font-medium text-sm flex items-center gap-2">
+                        <span>{group.icon}</span>
+                        {group.label}
+                      </span>
+                      <span className="text-gray-400">{isExpanded ? "▼" : "▶"}</span>
+                    </button>
+                    {isExpanded && (
+                      <div className="p-3 space-y-2 bg-white">
+                        {groupFields.map(f => (
+                          <div key={f.key as string} className="flex items-center gap-2">
+                            <label className="w-32 text-sm flex items-center gap-1">
+                              {f.label}
+                              {f.required && <span className="text-red-500">*</span>}
+                            </label>
+                            <input
+                              className="flex-1 border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              placeholder="A or 0"
+                              value={(map[f.key] as string) || ""}
+                              onChange={e => setMap(m => ({ ...m, [f.key]: e.target.value }))}
+                            />
+                          </div>
+                        ))}
+                        {group.id === "dates_start" && (
+                          <div className="text-xs text-gray-500 bg-blue-50 p-2 rounded mt-2">
+                            💡 Use <strong>Start Timestamp</strong> for Excel serial dates (e.g., 46143.125) or ISO timestamps. 
+                            Or use separate <strong>Start Date</strong> + <strong>Start Time</strong> fields.
+                          </div>
+                        )}
+                        {group.id === "dates_end" && (
+                          <div className="text-xs text-gray-500 bg-blue-50 p-2 rounded mt-2">
+                            💡 Use <strong>End Timestamp</strong> for Excel serial dates (e.g., 46150.625) or ISO timestamps. 
+                            Or use separate <strong>End Date</strong> + <strong>End Time</strong> fields.
+                          </div>
+                        )}
+                        {group.id === "customer" && (
+                          <div className="text-xs text-gray-500 bg-blue-50 p-2 rounded mt-2">
+                            💡 Use <strong>Full Name</strong> for CAVU imports, or separate <strong>First Name</strong> + <strong>Last Name</strong>.
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
+                );
+              })}
+
+              <div className="bg-gray-50 border rounded-lg p-4 space-y-3">
+                <h3 className="font-medium text-sm">Source Mapping</h3>
+                <select 
+                  className="w-full border rounded px-3 py-2 text-sm"
+                  value={sourceMapping}
+                  onChange={e => setSourceMapping(e.target.value)}
+                >
+                  <option value="manual">Manual</option>
+                  <option value="direct">Direct</option>
+                  <option value="parkvia">Parkvia</option>
+                  <option value="holidayextras">Holiday Extras</option>
+                  <option value="other">Other</option>
+                  <option value="custom">Custom Source</option>
+                </select>
+                {sourceMapping === "custom" && (
+                  <input 
+                    className="w-full border rounded px-3 py-2 text-sm"
+                    placeholder="e.g. EXT1, MyCompany, etc."
+                    value={customSource}
+                    onChange={e => setCustomSource(e.target.value)}
+                  />
                 )}
-                <p className="text-xs text-gray-600">
-                  💡 This maps all source values in your data to the selected booking source type.
-                  {sourceMapping === "custom" && " Custom sources will be mapped to 'other' in the database."}
-                </p>
               </div>
 
               <div className="flex gap-2">
-                <button onClick={buildPreview} className="px-3 py-2 rounded bg-black text-white">Build preview</button>
-                <button onClick={saveProfile} className="px-3 py-2 rounded border">Save profile</button>
+                <button 
+                  onClick={buildPreview} 
+                  className="flex-1 px-4 py-2 rounded-lg bg-gray-900 text-white font-medium hover:bg-gray-800 transition-colors"
+                >
+                  Build Preview
+                </button>
+                <button 
+                  onClick={saveProfile} 
+                  className="px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
+                >
+                  Save Profile
+                </button>
               </div>
 
-              <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={overwrite} onChange={e=>setOverwrite(e.target.checked)} disabled />
-                  <span className="text-gray-600">Update existing bookings (always enabled for file imports)</span>
-                </label>
-                <button onClick={commitImport} className="px-3 py-2 rounded bg-green-600 text-white">Import to Bookings</button>
-              </div>
+              {preview.length > 0 && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <p className="font-medium text-green-900">Ready to Import</p>
+                      <p className="text-sm text-green-700">{preview.length} booking(s) ready</p>
+                    </div>
+                    <button 
+                      onClick={commitImport} 
+                      className="px-6 py-2 rounded-lg bg-green-600 text-white font-medium hover:bg-green-700 transition-colors"
+                    >
+                      Import {preview.length} Booking{preview.length !== 1 ? 's' : ''}
+                    </button>
+                  </div>
+                  <p className="text-xs text-green-700">
+                    ✓ Existing bookings with the same reference will be updated automatically
+                  </p>
+                </div>
+              )}
 
               {/* Diff with selected saved mapping */}
               {selectedMappingId && (
@@ -453,35 +547,46 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
           )}
         </div>
 
-        <div className="flex-1 space-y-4">
+        <div className="lg:col-span-2 space-y-4">
           {/* Raw File Data */}
           {fileAnalysed && rows.length > 0 && (
-            <div className="p-3 border rounded">
-              <div className="font-medium mb-2">Raw File Data ({rows.length} rows)</div>
-              <div className="overflow-auto max-h-[500px]">
-                <table className="text-sm w-full border">
-                  <thead>
-                    <tr className="bg-gray-50">
-                      <th className="border px-2 py-1 text-left">Row</th>
+            <div className="bg-white border rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold">Raw File Data</h3>
+                <span className="text-sm text-gray-500">{rows.length} row{rows.length !== 1 ? 's' : ''}</span>
+              </div>
+              <div className="overflow-auto max-h-[400px] border rounded">
+                <table className="text-xs w-full">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="border px-2 py-2 text-left font-semibold">Row</th>
                       {rows[0]?.map((_, idx) => (
-                        <th key={idx} className="border px-2 py-1 text-left">
-                          {String.fromCharCode(65 + idx)} ({idx})
+                        <th key={idx} className="border px-2 py-2 text-left font-semibold">
+                          <div>{String.fromCharCode(65 + idx)}</div>
+                          <div className="text-gray-500 font-normal">({idx})</div>
                         </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((row, idx) => (
-                      <tr key={idx}>
-                        <td className="border px-2 py-1 font-mono text-xs">{idx + 1}</td>
+                    {rows.slice(0, 10).map((row, idx) => (
+                      <tr key={idx} className="hover:bg-gray-50">
+                        <td className="border px-2 py-1 font-mono text-gray-600">{idx + 1}</td>
                         {row.map((cell, cellIdx) => (
-                          <td key={cellIdx} className="border px-2 py-1 text-xs">
-                            {String(cell || "").slice(0, 20)}
-                            {String(cell || "").length > 20 && "..."}
+                          <td key={cellIdx} className="border px-2 py-1">
+                            {String(cell || "").slice(0, 15)}
+                            {String(cell || "").length > 15 && "…"}
                           </td>
                         ))}
                       </tr>
                     ))}
+                    {rows.length > 10 && (
+                      <tr>
+                        <td colSpan={rows[0]?.length + 1} className="text-center py-2 text-gray-500 text-xs">
+                          ... and {rows.length - 10} more rows
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -489,74 +594,64 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
           )}
 
           {/* Processed Preview */}
-          <div className="p-3 border rounded">
-            <div className="font-medium mb-2">Processed Preview ({preview.length} rows)</div>
-            <div className="overflow-auto max-h-[600px]">
-              <div className="mb-2 text-sm text-gray-600">
-                📊 Preview: {preview.length} rows ready for import (from {rows.length} total file rows)
+          {preview.length > 0 && (
+            <div className="bg-white border rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold">Preview</h3>
+                <span className="text-sm text-gray-500">{preview.length} booking{preview.length !== 1 ? 's' : ''} ready</span>
               </div>
-              <table className="text-sm w-full border">
-                <thead>
-                  <tr className="bg-gray-50">
-                    {[
-                      "source","reference","customer_name","start_at","end_at",
-                      "vehicle_reg","vehicle_colour","vehicle_make","vehicle_model",
-                      "flight_number","phone","status","price","money_received","notes"
-                    ].map(h => <th key={h} className="border px-2 py-1 text-left">{h}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.map((r, idx) => {
-                    const startDate = r.start_at;
-                    const endDate = r.end_at;
-                    const hasDateIssue = !startDate || !endDate;
-                    const hasOrderIssue = startDate && endDate && dayjs(startDate).isAfter(dayjs(endDate));
-                    
-                    return (
-                      <tr key={idx} className={hasDateIssue || hasOrderIssue ? "bg-yellow-50" : ""}>
-                        <td className="border px-2 py-1">{r.source}</td>
-                        <td className="border px-2 py-1">{r.reference}</td>
-                        <td className="border px-2 py-1">{r.customer_name}</td>
-                        <td className="border px-2 py-1">
-                          {startDate || "❌ No date"}
-                          {hasOrderIssue && " ⚠️"}
+              <div className="overflow-auto max-h-[500px] border rounded">
+                <table className="text-xs w-full">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      {[
+                        "Ref","Customer","Start","End","Vehicle","Status"
+                      ].map(h => <th key={h} className="border px-2 py-2 text-left font-semibold">{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.slice(0, 50).map((r, idx) => {
+                      const startDate = r.start_at;
+                      const endDate = r.end_at;
+                      const hasDateIssue = !startDate || !endDate;
+                      const hasOrderIssue = startDate && endDate && dayjs(startDate).isAfter(dayjs(endDate));
+                      
+                      return (
+                        <tr key={idx} className={`hover:bg-gray-50 ${hasDateIssue || hasOrderIssue ? "bg-yellow-50" : ""}`}>
+                          <td className="border px-2 py-1 font-mono text-xs">{r.reference}</td>
+                          <td className="border px-2 py-1">{r.customer_name}</td>
+                          <td className="border px-2 py-1">
+                            {startDate ? dayjs(startDate).format("DD/MM/YY HH:mm") : <span className="text-red-500">❌</span>}
+                            {hasOrderIssue && <span className="text-orange-500 ml-1">⚠️</span>}
+                          </td>
+                          <td className="border px-2 py-1">
+                            {endDate ? dayjs(endDate).format("DD/MM/YY HH:mm") : <span className="text-red-500">❌</span>}
+                          </td>
+                          <td className="border px-2 py-1">{r.vehicle_reg || "-"}</td>
+                          <td className="border px-2 py-1">
+                            <span className={`px-2 py-0.5 rounded text-xs ${
+                              r.status === 'cancelled' ? 'bg-red-100 text-red-700' :
+                              r.status === 'amended' ? 'bg-yellow-100 text-yellow-700' :
+                              'bg-green-100 text-green-700'
+                            }`}>
+                              {r.status}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {preview.length > 50 && (
+                      <tr>
+                        <td colSpan={6} className="text-center py-2 text-gray-500 text-xs">
+                          ... and {preview.length - 50} more bookings
                         </td>
-                        <td className="border px-2 py-1">
-                          {endDate || "❌ No date"}
-                          {hasOrderIssue && " ⚠️"}
-                        </td>
-                      <td className="border px-2 py-1">{r.vehicle_reg}</td>
-                      <td className="border px-2 py-1">{r.vehicle_colour}</td>
-                      <td className="border px-2 py-1">{r.vehicle_make}</td>
-                      <td className="border px-2 py-1">{r.vehicle_model}</td>
-                      <td className="border px-2 py-1">{r.flight_number}</td>
-                      <td className="border px-2 py-1">{r.phone}</td>
-                      <td className="border px-2 py-1">{r.status}</td>
-                      <td className="border px-2 py-1">{r.price ?? ""}</td>
-                      <td className="border px-2 py-1">{r.money_received ?? ""}</td>
-                      <td className="border px-2 py-1">{r.notes}</td>
                       </tr>
-                    );
-                  })}
-                  {preview.length === 0 && (
-                    <tr><td colSpan={15} className="text-center text-gray-500 p-6">No preview yet</td></tr>
-                  )}
-                </tbody>
-              </table>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-
-          <div className="p-3 border rounded">
-            <div className="font-medium mb-2">Quick tips</div>
-            <ul className="text-sm list-disc pl-5 space-y-1">
-              <li>Use letters (A, B, C …, AA) or 0-based indexes (0,1,2…)</li>
-              <li>Map both "Start Date" and "Start Time" for start timestamp</li>
-              <li>Map both "End Date" and "End Time" for end timestamp</li>
-              <li>Dates: Supports ddmmyy, dd/mm/yyyy, ISO dates, and Excel serial numbers (45306)</li>
-              <li>Phones are normalised to +44 if they start 0 / 44 / 0044</li>
-              <li>Status: <code>*CANX*</code> → cancelled, <code>*AMND*</code> → amended, else reserved</li>
-            </ul>
-          </div>
+          )}
         </div>
       </div>
     </div>

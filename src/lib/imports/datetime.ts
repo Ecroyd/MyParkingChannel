@@ -37,6 +37,14 @@ export function parseFlexibleDate(value: string | number | null): string | null 
     }
   }
 
+  // Handle ISO-like dates with space separator (e.g., "2026-05-01 03:00:00")
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}/.test(value)) {
+    // Replace space with 'T' to make it proper ISO format
+    const isoString = value.replace(/\s+/, 'T');
+    const date = new Date(isoString);
+    if (!isNaN(date.getTime())) return date.toISOString();
+  }
+
   // Handle slash dates (dd/mm/yyyy or mm/dd/yyyy)
   if (typeof value === 'string' && value.includes('/')) {
     const [a, b, c] = value.split('/');
@@ -46,7 +54,7 @@ export function parseFlexibleDate(value: string | number | null): string | null 
     }
   }
 
-  // Handle ISO or RFC-compliant strings
+  // Handle ISO or RFC-compliant strings (with T separator)
   const date = new Date(value);
   if (!isNaN(date.getTime())) return date.toISOString();
 
@@ -143,19 +151,43 @@ export function composeISO(
   tz: Tz = "Europe/London",
   opts: DateParseOptions = {}
 ) {
-  // Check if dateStr is an Excel serial with time (decimal part indicates time)
-  const isExcelSerialWithTime = dateStr && /^\d+\.\d+$/.test(String(dateStr));
+  if (!dateStr) return "";
   
-  // Parse the date (parseDateFlex will use parseFlexibleDate which handles Excel serials)
-  const d = parseDateFlex(dateStr, opts);
+  // Check if dateStr is an Excel serial with time (decimal part indicates time)
+  const isExcelSerialWithTime = /^\d+\.\d+$/.test(String(dateStr));
+  
+  // Check if dateStr contains time information (ISO-like format with space or T)
+  // Formats: "2026-05-01 03:00:00", "2026-05-01T03:00:00", "2026-05-01 03:00"
+  const hasTimeInString = /^\d{4}-\d{2}-\d{2}[T\s]\d{1,2}:\d{2}/.test(String(dateStr));
+  
+  // Try parsing as a full timestamp first (handles ISO with time)
+  let d: dayjs.Dayjs | null = null;
+  if (hasTimeInString || isExcelSerialWithTime) {
+    // Parse as full timestamp - parseFlexibleDate should handle this
+    const flexibleResult = parseFlexibleDate(dateStr);
+    if (flexibleResult) {
+      d = dayjs(flexibleResult);
+      const y = d.year();
+      if (d.isValid() && (opts.validYearMin ?? 2015) <= y && y <= (opts.validYearMax ?? 2035)) {
+        // Time is already included, use it as-is
+        return tz === "UTC" ? d.utc().toISOString() : d.utc(true).toISOString();
+      }
+    }
+  }
+  
+  // Fall back to regular date parsing
+  d = parseDateFlex(dateStr, opts);
   if (!d) return "";
   
-  // If it's an Excel serial with time, the time is already included in the parsed date
-  // Otherwise, apply timeStr if provided
-  let hh = 0, mm = 0;
-  if (!isExcelSerialWithTime && timeStr && /^([01]\d|2[0-3]):[0-5]\d$/.test(timeStr.trim())) {
+  // If we have a separate timeStr, use it (only if dateStr didn't already have time)
+  let hh = d.hour();
+  let mm = d.minute();
+  
+  // Only override time if timeStr is provided and dateStr didn't already have time
+  if (!hasTimeInString && !isExcelSerialWithTime && timeStr && /^([01]\d|2[0-3]):[0-5]\d$/.test(timeStr.trim())) {
     const [h, m] = timeStr.split(":");
-    hh = Number(h); mm = Number(m);
+    hh = Number(h);
+    mm = Number(m);
   }
   
   const local = d.hour(hh).minute(mm).second(0).millisecond(0);
