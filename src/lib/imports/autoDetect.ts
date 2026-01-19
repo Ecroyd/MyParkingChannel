@@ -6,6 +6,7 @@ import { cellToCleanString } from "./utils";
 
 export type MapState = {
   source?: string; reference?: string;
+  customer_name?: string; // Full name (optional, can be used instead of first/last)
   customer_lastname?: string; customer_title?: string; customer_firstname?: string;
 
   start_mode?: "single"|"split";
@@ -236,7 +237,7 @@ export function autoDetectMap(rows: any[][]): MapState {
 export function compareMaps(a: MapState, b: MapState) {
   // Only compare fields that exist in both MapState and ImportProfileMap
   const fields = [
-    "source","reference","customer_lastname","customer_title","customer_firstname",
+    "source","reference","customer_name","customer_lastname","customer_title","customer_firstname",
     "start_timestamp","start_date","start_time",
     "end_timestamp","end_date","end_time",
     "vehicle_reg","vehicle_colour","vehicle_make","vehicle_model",

@@ -2,6 +2,7 @@ export type ImportProfileMap = {
   // column letters or 0-based indexes as strings
   source?: string;
   reference?: string;
+  customer_name?: string; // Full name (optional, can be used instead of first/last)
   customer_lastname?: string;
   customer_title?: string;
   customer_firstname?: string;

@@ -366,12 +366,13 @@ export async function POST(req: Request) {
       }
 
       // 3) Attempt DB insert/upsert for the booking
-      // Check if booking already exists
+      // Check if booking already exists by reference (not dedupe_key)
+      // This allows customers to have multiple bookings with same vehicle/start time but different references
       const { data: existing, error: probeErr } = await supabaseAdmin()
         .from("bookings")
-        .select("id, dedupe_key")
+        .select("id, reference")
         .eq("tenant_id", tenantId)
-        .eq("dedupe_key", mappedRow.dedupe_key)
+        .eq("reference", mappedRow.reference)
         .maybeSingle();
 
       if (probeErr) {
@@ -393,44 +394,36 @@ export async function POST(req: Request) {
       }
 
       if (existing) {
-        // Booking already exists - this is a duplicate
-        console.log(`[IMPORT] Row ${rowIndex} - Duplicate booking found (dedupe_key: ${mappedRow.dedupe_key}, existing_id: ${existing.id})`);
+        // Booking already exists with same reference - update it to handle amended/cancelled bookings
+        console.log(`[IMPORT] Row ${rowIndex} - Booking with same reference found (reference: ${mappedRow.reference}, existing_id: ${existing.id}) - Updating existing booking`);
         
-        if (overwriteDuplicates) {
-          // Update existing booking
-          console.log(`[IMPORT] Row ${rowIndex} - Overwriting duplicate (overwriteDuplicates=true)`);
-          const { error: updateErr } = await supabaseAdmin()
-            .from("bookings")
-            .update(mappedRow)
-            .eq("id", existing.id)
-            .eq("tenant_id", tenantId);
-          
-          if (updateErr) {
-            const reason = `DB update error: ${updateErr.message ?? updateErr.toString()}`;
-            console.log(`[IMPORT] Row ${rowIndex} failed DB update: ${reason}`);
-            errors.push({ rowIndex, reason, rowData: mappedRow });
-            console.log(`[IMPORT] Added error to errors array. Total errors: ${errors.length}`);
+        // Update existing booking when importing from files to handle amendments and cancellations
+        // Only updates if reference matches, allowing multiple bookings with same vehicle/start time
+        const { error: updateErr } = await supabaseAdmin()
+          .from("bookings")
+          .update(mappedRow)
+          .eq("id", existing.id)
+          .eq("tenant_id", tenantId);
+        
+        if (updateErr) {
+          const reason = `DB update error: ${updateErr.message ?? updateErr.toString()}`;
+          console.log(`[IMPORT] Row ${rowIndex} failed DB update: ${reason}`);
+          errors.push({ rowIndex, reason, rowData: mappedRow });
+          console.log(`[IMPORT] Added error to errors array. Total errors: ${errors.length}`);
 
-            await logImportError({
-              tenantId,
-              importFileId,
-              importRunId: run.id,
-              rowIndex,
-              reason,
-              rowData: mappedRow,
-            });
+          await logImportError({
+            tenantId,
+            importFileId,
+            importRunId: run.id,
+            rowIndex,
+            reason,
+            rowData: mappedRow,
+          });
 
-            continue;
-          } else {
-            console.log(`[IMPORT] Row ${rowIndex} successfully updated existing booking (duplicate overwritten)`);
-            successCount++;
-          }
-        } else {
-          // Skip duplicate - this is success, not an error
-          console.log(`[IMPORT] Row ${rowIndex} skipped (duplicate found, overwriteDuplicates=false) - NOT an error`);
-          skippedCount++;
-          console.log(`[IMPORT] Skipped count now: ${skippedCount}, Success count: ${successCount}, Errors: ${errors.length}`);
           continue;
+        } else {
+          console.log(`[IMPORT] Row ${rowIndex} successfully updated existing booking`);
+          successCount++;
         }
       } else {
         // Insert new booking
@@ -478,10 +471,7 @@ export async function POST(req: Request) {
     }
   }
 
-  console.log(`[IMPORT] Processing complete. Total rows: ${rows.length}, Success: ${successCount}, Skipped (duplicates): ${skippedCount}, Errors: ${errors.length}`);
-  if (skippedCount > 0) {
-    console.log(`[IMPORT] ⚠️ ${skippedCount} duplicate(s) were skipped (not overwritten)`);
-  }
+  console.log(`[IMPORT] Processing complete. Total rows: ${rows.length}, Success: ${successCount} (includes new bookings and updates to existing bookings), Errors: ${errors.length}`);
 
   await supabaseAdmin().from("import_runs")
     .update({ inserted_count: successCount, skipped_duplicates: skippedCount, error_count: errors.length })

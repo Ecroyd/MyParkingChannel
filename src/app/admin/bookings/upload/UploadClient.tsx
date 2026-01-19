@@ -31,6 +31,7 @@ const DATE_OPTS: DateParseOptions = {
 const FIELDS: Array<{key: keyof ImportProfileMap, label: string}> = [
   { key: "source", label: "Source" },
   { key: "reference", label: "Reference" },
+  { key: "customer_name", label: "Full name (optional, for CAVU etc.)" },
   { key: "customer_lastname", label: "Last name" },
   { key: "customer_title", label: "Title" },
   { key: "customer_firstname", label: "First name" },
@@ -62,7 +63,7 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
   const [preview, setPreview] = React.useState<CanonicalBooking[]>([]);
   const [profileName, setProfileName] = React.useState("Auto-generated");
   const [fileAnalysed, setFileAnalysed] = React.useState(false);
-  const [overwrite, setOverwrite] = React.useState<boolean>(false);
+  const [overwrite, setOverwrite] = React.useState<boolean>(true);
   const [statusMsg, setStatusMsg] = React.useState<string>("");
   const [mappings, setMappings] = React.useState<{id:string;name:string;mapping:any}[]>([]);
   const [selectedMappingId, setSelectedMappingId] = React.useState<string>("");
@@ -138,8 +139,29 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
       const start_at = composeISO(getCell(r, map.start_date), getCell(r, map.start_time), timezone as any, DATE_OPTS);
       const end_at = composeISO(getCell(r, map.end_date), getCell(r, map.end_time), timezone as any, DATE_OPTS);
 
-      const customer_lastname = getCell(r, map.customer_lastname).toUpperCase();
-      const customer_firstname = getCell(r, map.customer_firstname);
+      // Handle full name or separate first/last name
+      let customer_firstname: string;
+      let customer_lastname: string;
+      const customer_name_full = getCell(r, map.customer_name);
+      
+      if (customer_name_full && customer_name_full.trim()) {
+        // If full name is provided, split it into first and last name
+        const nameParts = customer_name_full.trim().split(/\s+/);
+        if (nameParts.length === 1) {
+          // Only one word, treat as last name
+          customer_firstname = "";
+          customer_lastname = nameParts[0].toUpperCase();
+        } else {
+          // Last word is last name, everything else is first name
+          customer_lastname = nameParts[nameParts.length - 1].toUpperCase();
+          customer_firstname = nameParts.slice(0, -1).join(" ");
+        }
+      } else {
+        // Use separate first/last name fields
+        customer_lastname = getCell(r, map.customer_lastname).toUpperCase();
+        customer_firstname = getCell(r, map.customer_firstname);
+      }
+      
       const customer_title = getCell(r, map.customer_title).toUpperCase();
 
       const phoneRaw = getCell(r, map.phone);
@@ -234,24 +256,16 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
     const errorCount = j.errorCount ?? 0;
     
     let msg = `✅ Import complete!\n\n`;
-    msg += `Successfully imported: ${successCount}\n`;
-    
-    if (skippedCount > 0) {
-      if (overwrite) {
-        msg += `Skipped: ${skippedCount}\n`;
-      } else {
-        msg += `⚠️ Skipped (duplicates found): ${skippedCount}\n`;
-        msg += `   These bookings already exist and were not overwritten.\n`;
-      }
-    }
+    msg += `Successfully processed: ${successCount} booking(s)\n`;
+    msg += `   (includes both new bookings and updates to existing bookings)\n`;
     
     if (errorCount > 0) {
-      msg += `❌ Errors: ${errorCount}\n`;
+      msg += `\n❌ Errors: ${errorCount}\n`;
       msg += `   Check the import errors page for details.`;
     }
     
-    if (skippedCount === 0 && errorCount === 0) {
-      msg += `\nAll rows imported successfully!`;
+    if (errorCount === 0) {
+      msg += `\nAll rows processed successfully!`;
     }
     
     alert(msg);
@@ -263,7 +277,7 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
     setMap({});
     setPreview([]);
     setStatusMsg("");
-    setOverwrite(false);
+    setOverwrite(true);
     setSelectedMappingId("");
     setSourceMapping("other");
     setCustomSource("");
@@ -412,8 +426,8 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
 
               <div className="flex items-center gap-3">
                 <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={overwrite} onChange={e=>setOverwrite(e.target.checked)} />
-                  Overwrite duplicates (upsert)
+                  <input type="checkbox" checked={overwrite} onChange={e=>setOverwrite(e.target.checked)} disabled />
+                  <span className="text-gray-600">Update existing bookings (always enabled for file imports)</span>
                 </label>
                 <button onClick={commitImport} className="px-3 py-2 rounded bg-green-600 text-white">Import to Bookings</button>
               </div>
