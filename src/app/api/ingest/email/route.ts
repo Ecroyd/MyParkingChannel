@@ -12,6 +12,10 @@ type IngestPayload = {
 };
 
 export async function POST(req: Request) {
+  console.log("INGEST HIT");
+
+  return Response.json({ ok: true });
+
   try {
     // 1) Authenticate Cloudflare Worker
     const secret = req.headers.get("x-ingest-secret") || "";
