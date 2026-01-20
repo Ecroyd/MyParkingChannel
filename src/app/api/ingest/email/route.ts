@@ -24,12 +24,14 @@ export async function POST(req: Request) {
       console.error("[INGEST] INGEST_SECRET env var not set");
       return new Response("Server not configured", { status: 500 });
     }
-    if (secret !== expectedSecret) {
+    // TypeScript: expectedSecret is now guaranteed to be defined after the check above
+    const validSecret: string = expectedSecret;
+    if (secret !== validSecret) {
       console.error("[INGEST] Secret mismatch", {
         receivedLength: secret.length,
-        expectedLength: expectedSecret.length,
+        expectedLength: validSecret.length,
         receivedPrefix: secret.substring(0, 10),
-        expectedPrefix: expectedSecret.substring(0, 10),
+        expectedPrefix: validSecret.substring(0, 10),
       });
       return new Response("Unauthorized", { status: 401 });
     }
