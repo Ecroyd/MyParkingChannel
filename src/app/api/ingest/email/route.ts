@@ -19,16 +19,17 @@ export async function POST(req: Request) {
   try {
     // 1) Authenticate Cloudflare Worker
     const secret = req.headers.get("x-ingest-secret") || "";
-    if (!process.env.INGEST_SECRET) {
+    const expectedSecret = process.env.INGEST_SECRET;
+    if (!expectedSecret) {
       console.error("[INGEST] INGEST_SECRET env var not set");
       return new Response("Server not configured", { status: 500 });
     }
-    if (secret !== process.env.INGEST_SECRET) {
+    if (secret !== expectedSecret) {
       console.error("[INGEST] Secret mismatch", {
         receivedLength: secret.length,
-        expectedLength: process.env.INGEST_SECRET.length,
+        expectedLength: expectedSecret.length,
         receivedPrefix: secret.substring(0, 10),
-        expectedPrefix: process.env.INGEST_SECRET.substring(0, 10),
+        expectedPrefix: expectedSecret.substring(0, 10),
       });
       return new Response("Unauthorized", { status: 401 });
     }
