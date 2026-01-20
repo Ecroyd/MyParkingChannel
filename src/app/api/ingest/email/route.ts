@@ -25,7 +25,7 @@ export async function POST(req: Request) {
       return new Response("Server not configured", { status: 500 });
     }
     // TypeScript: expectedSecret is now guaranteed to be defined after the check above
-    const validSecret: string = expectedSecret;
+    const validSecret = expectedSecret as string;
     if (secret !== validSecret) {
       console.error("[INGEST] Secret mismatch", {
         receivedLength: secret.length,
