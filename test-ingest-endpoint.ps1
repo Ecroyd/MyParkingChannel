@@ -23,12 +23,24 @@ $headers = @{
     "x-ingest-secret" = $ingestSecret
 }
 
+# Create a minimal but valid RFC822 email in base64
+# This is a simple test email that's long enough to pass validation
+$testEmail = @"
+From: supplier@example.com
+To: bookings@myparkingchannel.app
+Subject: TEST Email
+Date: Mon, 20 Jan 2026 12:00:00 +0000
+
+This is a test email for the ingest endpoint.
+"@
+$testEmailBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($testEmail))
+
 $body = @{
     to = "bookings@myparkingchannel.app"
     from = "supplier@example.com"
     subject = "TEST"
     received_at = "2026-01-20T12:00:00Z"
-    raw_rfc822_base64 = "VEVTVA=="
+    raw_rfc822_base64 = $testEmailBase64
 } | ConvertTo-Json
 
 Write-Host "Testing endpoint: $url" -ForegroundColor Cyan
