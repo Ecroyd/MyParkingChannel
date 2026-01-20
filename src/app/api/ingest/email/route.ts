@@ -7,6 +7,7 @@ type IngestPayload = {
   to?: string;
   from?: string;
   subject?: string;
+  message_id?: string;
   received_at?: string;
   raw_rfc822_base64?: string;
 };
@@ -43,6 +44,7 @@ export async function POST(req: Request) {
       to: body.to,
       from: body.from,
       subject: body.subject,
+      messageId: body.message_id,
       sha256,
       rawLen: raw.length,
       supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ? "set" : "missing",
@@ -57,18 +59,24 @@ export async function POST(req: Request) {
         to_address: body.to || null,
         from_address: body.from || null,
         subject: body.subject || null,
+        message_id: body.message_id || null,
         raw_rfc822_base64: raw,
         sha256,
         status: "received",
       })
-      .select("id, sha256")
+      .select("id, sha256, message_id")
       .single();
 
     if (error) {
       const msg = (error as any).message || String(error);
 
       // Detect duplicate and report it clearly
-      const isDup = msg.includes("duplicate key") || msg.includes("23505");
+      // Check for both message_id and sha256 unique constraint violations
+      const isDup = 
+        msg.includes("duplicate key") || 
+        msg.includes("23505") ||
+        msg.includes("ingest_emails_message_id_uidx") ||
+        msg.includes("ingest_emails_sha256_uidx");
 
       return Response.json(
         {
@@ -77,6 +85,7 @@ export async function POST(req: Request) {
           inserted: false,
           deduped: isDup,
           sha256,
+          messageId: body.message_id || null,
           insertError: msg,
         },
         { status: 200 }
