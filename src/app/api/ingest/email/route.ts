@@ -39,7 +39,7 @@ export async function POST(req: Request) {
     // 2) Parse payload
     const body = (await req.json()) as IngestPayload;
 
-    const receivedAt = body.received_at ? new Date(body.received_at) : new Date();
+    const receivedAt = body.received_at ? new Date(body.received_at as string) : new Date();
     const raw = body.raw_rfc822_base64 || "";
 
     if (!raw || raw.length < 20) {
