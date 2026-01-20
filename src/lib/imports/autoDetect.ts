@@ -233,6 +233,20 @@ const HEADER_PATTERNS: Record<string, RegExp[]> = {
   source: [
     /^source$/i,
     /^booking[_\s-]?source$/i,
+    /^product[_\s-]?name$/i, // Some systems use product_name as source
+  ],
+  notes: [
+    /^notes$/i,
+    /^note$/i,
+    /^remarks$/i,
+    /^comments$/i,
+    /^third[_\s-]?party[_\s-]?reference$/i,
+    /^booking[_\s-]?item[_\s-]?reference$/i,
+    /^departure[_\s-]?terminal$/i,
+    /^return[_\s-]?terminal$/i,
+    /^return[_\s-]?flight[_\s-]?number$/i,
+    /^passenger[_\s-]?count$/i,
+    /^number[_\s-]?of[_\s-]?people[_\s-]?in[_\s-]?vehicle$/i,
   ],
 };
 
@@ -247,7 +261,40 @@ function detectHeaders(rows: any[][]): Map<number, string> | null {
   if (rows.length === 0) return null;
   
   const firstRow = rows[0];
-  // Check if first row looks like headers (mostly text, not dates/numbers)
+  
+  // Check if first row contains known header patterns (more reliable)
+  const knownHeaderPatterns = [
+    /^booking[_\s-]?reference$/i,
+    /^entry[_\s-]?datetime$/i,
+    /^exit[_\s-]?datetime$/i,
+    /^license[_\s-]?plate$/i,
+    /^customer[_\s-]?name$/i,
+    /^booking[_\s-]?status/i,
+    /^vehicle[_\s-]?(make|model|colour|color|reg)$/i,
+    /^contact[_\s-]?number$/i,
+    /^flight[_\s-]?number$/i,
+    /^product[_\s-]?native[_\s-]?price$/i,
+  ];
+  
+  let headerPatternMatches = 0;
+  for (const cell of firstRow) {
+    const s = cellToCleanString(cell).trim();
+    if (knownHeaderPatterns.some(pattern => pattern.test(s))) {
+      headerPatternMatches++;
+    }
+  }
+  
+  // If 3+ cells match known header patterns, definitely headers
+  if (headerPatternMatches >= 3) {
+    const headerMap = new Map<number, string>();
+    firstRow.forEach((cell, idx) => {
+      const header = cellToCleanString(cell).trim();
+      if (header) headerMap.set(idx, header);
+    });
+    return headerMap;
+  }
+  
+  // Fallback: Check if first row looks like headers (mostly text, not dates/numbers)
   const textCount = firstRow.filter(cell => {
     const s = cellToCleanString(cell).trim();
     return s && !/^\d+\.?\d*$/.test(s) && !RE.isoDate.test(s) && !RE.dateDmy.test(s);

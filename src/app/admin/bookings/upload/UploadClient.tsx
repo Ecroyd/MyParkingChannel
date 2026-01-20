@@ -3,7 +3,7 @@
 import * as XLSX from "xlsx";
 import React from "react";
 import dayjs from "dayjs";
-import { getCell, normalisePhoneUK } from "@/lib/imports/utils";
+import { getCell, normalisePhoneUK, cellToCleanString } from "@/lib/imports/utils";
 import { composeISO, DateParseOptions } from "@/lib/imports/datetime";
 import { mapStatus } from "@/lib/imports/normalise";
 import { autoDetectMap, compareMaps, bestMatchAgainstSaved, MapState as AutoMapState } from "@/lib/imports/autoDetect";
@@ -117,9 +117,29 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
       const data = new Uint8Array(reader.result as ArrayBuffer);
       const wb = XLSX.read(data, { type: "array" });
       const ws = wb.Sheets[wb.SheetNames[0]];
+      // Parse with header: 1 to get array of arrays, preserve empty cells
       const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
-      setRows(aoa.filter(r => r.some(Boolean)));
+      
+      // Find the maximum column count to normalize all rows
+      const maxCols = Math.max(...aoa.map(r => r?.length || 0), 0);
+      
+      // Normalize rows: ensure all rows have the same length, padding with empty strings
+      // Filter out completely empty rows, but keep rows with at least one non-empty cell
+      const filteredRows = aoa
+        .map(r => {
+          if (!r || r.length === 0) return null;
+          // Pad row to maxCols length with empty strings
+          const normalized = [...r];
+          while (normalized.length < maxCols) {
+            normalized.push("");
+          }
+          return normalized;
+        })
+        .filter(r => r && r.some(cell => cell !== null && cell !== undefined && String(cell).trim() !== ""));
+      
+      setRows(filteredRows as any[][]);
       setFileAnalysed(true);
+      console.log(`📄 File analysed: ${filteredRows.length} rows loaded, ${maxCols} columns detected`);
     };
     reader.readAsArrayBuffer(file);
   }
@@ -147,12 +167,85 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
     }
   }
 
+  // Check if a row looks like a header row (contains header-like text)
+  function isHeaderRow(row: any[]): boolean {
+    if (!row || row.length === 0) return false;
+    
+    // Check if row contains common header patterns (expanded list for CAVU/APH)
+    const headerPatterns = [
+      /^booking[_\s-]?reference$/i,
+      /^entry[_\s-]?datetime$/i,
+      /^exit[_\s-]?datetime$/i,
+      /^license[_\s-]?plate$/i,
+      /^customer[_\s-]?name$/i,
+      /^vehicle[_\s-]?reg$/i,
+      /^reference$/i,
+      /^source$/i,
+      /^booking[_\s-]?status[_\s-]?name$/i,
+      /^booking[_\s-]?datetime$/i,
+      /^flight[_\s-]?number$/i,
+      /^departure[_\s-]?terminal$/i,
+      /^return[_\s-]?flight[_\s-]?number$/i,
+      /^return[_\s-]?terminal$/i,
+      /^vehicle[_\s-]?make$/i,
+      /^vehicle[_\s-]?model$/i,
+      /^vehicle[_\s-]?colour$/i,
+      /^contact[_\s-]?number$/i,
+      /^passenger[_\s-]?count$/i,
+      /^number[_\s-]?of[_\s-]?people[_\s-]?in[_\s-]?vehicle$/i,
+      /^third[_\s-]?party[_\s-]?reference$/i,
+      /^transaction[_\s-]?currency$/i,
+      /^product[_\s-]?native[_\s-]?currency$/i,
+      /^product[_\s-]?native[_\s-]?price$/i,
+      /^purchase[_\s-]?model$/i,
+      /^deposit[_\s-]?amount$/i,
+      /^car[_\s-]?park[_\s-]?balance$/i,
+      /^product[_\s-]?name$/i,
+      /^booking[_\s-]?item[_\s-]?reference$/i,
+    ];
+    
+    // Count how many cells match header patterns
+    let headerMatches = 0;
+    for (const cell of row) {
+      const cellStr = cellToCleanString(cell).trim();
+      if (headerPatterns.some(pattern => pattern.test(cellStr))) {
+        headerMatches++;
+      }
+    }
+    
+    // If 2+ cells match header patterns, it's likely a header row
+    if (headerMatches >= 2) return true;
+    
+    // Also check if row is mostly text (not numbers/dates) - typical of headers
+    const textCount = row.filter(cell => {
+      const s = cellToCleanString(cell).trim();
+      return s && !/^\d+\.?\d*$/.test(s) && !/^\d{4}-\d{2}-\d{2}/.test(s) && !/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s);
+    }).length;
+    
+    // If more than 70% of cells are text (not numbers/dates), likely a header
+    return textCount / Math.max(row.length, 1) > 0.7;
+  }
+
   function buildPreview() {
     const out: CanonicalBooking[] = [];
     console.log(`🔍 Building preview for ${rows.length} rows`);
-    // Process all rows, not just a sample
-    for (let i = 0; i < rows.length; i++) {
+    
+    // Detect and skip header rows
+    let startIndex = 0;
+    if (rows.length > 0 && isHeaderRow(rows[0])) {
+      console.log("📋 Detected header row, skipping first row");
+      startIndex = 1;
+    }
+    
+    // Process all rows except headers
+    for (let i = startIndex; i < rows.length; i++) {
       const r = rows[i];
+      
+      // Skip any other rows that look like headers
+      if (isHeaderRow(r)) {
+        console.log(`📋 Skipping row ${i + 1} (looks like header)`);
+        continue;
+      }
 
       // timestamps: use timestamp if provided (for Excel serial dates with time), otherwise compose date+time
       const startTimestamp = getCell(r, map.start_timestamp);
