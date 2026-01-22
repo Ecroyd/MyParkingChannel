@@ -1,86 +1,71 @@
 import { getServiceSupabase } from "@/lib/supabase/service";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { makeImportDedupeKey } from "@/lib/bookings/dedupe";
+import { parse } from "csv-parse/sync";
+import { parseAphRow } from "@/lib/importers/aph/parseAphRow";
 
-// Parse APH .txt file (same logic as parseExtTxtFile but works with Buffer)
-function parseAphTxtFile(buffer: Buffer) {
+/**
+ * Parse APH CSV file (33-column, quoted, positional CSV with no headers)
+ */
+function parseAphCsvFile(buffer: Buffer) {
   const text = buffer.toString("utf-8");
-  const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
-  const rows: any[] = [];
+  
+  // Parse CSV rows (no headers, quoted fields, relax column count)
+  const rows: string[][] = parse(text, {
+    relax_quotes: true,
+    relax_column_count: true,
+    trim: false,
+    skip_empty_lines: true,
+    bom: true, // Handle BOM if present
+  });
 
-  for (const line of lines) {
-    // Split by tab or >=2 spaces
-    const cols = line.split(/\t+|\s{2,}/).map(v => v.replace(/"/g, "").trim());
+  const parsedRows: any[] = [];
 
-    // Skip if it doesn't look like a valid row (needs ref + surname)
-    if (!cols[2] || !cols[3]) continue;
+  for (const row of rows) {
+    try {
+      const parsed = parseAphRow(row);
+      
+      // Skip if missing essential fields
+      if (!parsed.external_reference || !parsed.customer_last_name) {
+        console.log(`[parseAphCsvFile] Skipping row: missing reference or last name`);
+        continue;
+      }
 
-    const arrivalDateRaw = safeGet(cols, 8);
-    const arrivalTimeRaw = safeGet(cols, 7);
-    const departDateRaw = safeGet(cols, 13);
-    const departTimeRaw = safeGet(cols, 14);
-
-    const customerFirstname = safeGet(cols, 5);
-    const customerLastname = safeGet(cols, 3);
-    const customerName = `${customerFirstname} ${customerLastname}`.trim();
-
-    rows.push({
-      source: safeGet(cols, 1),
-      reference: safeGet(cols, 2),
-      customer_name: customerName,
-      customer_lastname: customerLastname,
-      customer_title: safeGet(cols, 4),
-      customer_firstname: customerFirstname,
-      start_at: parseDate(arrivalDateRaw, arrivalTimeRaw),
-      end_at: parseDate(departDateRaw, departTimeRaw),
-      vehicle_reg: safeGet(cols, 15),
-      vehicle_colour: safeGet(cols, 17),
-      vehicle_make: safeGet(cols, 18),
-      vehicle_model: safeGet(cols, 19),
-      flight_number: safeGet(cols, 20),
-      phone: normalizePhone(safeGet(cols, 21)),
-      status: normalizeStatus(safeGet(cols, 10) || safeGet(cols, 11)),
-      price: parseFloat(safeGet(cols, 12)) || 0,
-      money_received: parseFloat(safeGet(cols, 13)) || 0,
-      notes: buildNotes(cols),
-    });
+      parsedRows.push({
+        source: "aph",
+        reference: parsed.external_reference,
+        customer_name: parsed.customer_name,
+        customer_lastname: parsed.customer_last_name,
+        customer_title: parsed.customer_title,
+        customer_firstname: parsed.customer_first_name,
+        start_at: parsed.start_at,
+        end_at: parsed.end_at,
+        vehicle_reg: parsed.vehicle_reg,
+        vehicle_colour: parsed.vehicle_colour,
+        vehicle_make: parsed.vehicle_make,
+        vehicle_model: null, // APH doesn't provide model
+        flight_number: parsed.return_flight_no,
+        phone: parsed.customer_phone,
+        status: parsed.external_status || "reserved",
+        price: parsed.total_price || 0,
+        money_received: 0, // APH doesn't provide this in the CSV
+        notes: null,
+        // APH-specific fields for staging
+        external_reference: parsed.external_reference,
+        external_status: parsed.external_status,
+        return_flight_no: parsed.return_flight_no,
+        product_code: parsed.product_code,
+        currency: parsed.currency,
+        total_price: parsed.total_price,
+        raw_fields: parsed.raw_fields,
+      });
+    } catch (err: any) {
+      console.error(`[parseAphCsvFile] Error parsing row:`, err);
+      continue;
+    }
   }
 
-  const headers = Object.keys(rows[0] ?? {});
-  return { headers, rows };
-}
-
-function safeGet(arr: string[], i: number) {
-  return (arr[i] ?? "").trim();
-}
-
-function parseDate(dateStr?: string, timeStr?: string) {
-  if (!dateStr || !/^\d{6}$/.test(dateStr)) return null;
-  const [d, m, y] = [dateStr.slice(0, 2), dateStr.slice(2, 4), "20" + dateStr.slice(4, 6)];
-  const [h, min] = (timeStr || "00:00").split(":").map(Number);
-  if (isNaN(h) || isNaN(min)) return null;
-  return new Date(Date.UTC(+y, +m - 1, +d, h, min)).toISOString();
-}
-
-function normalizeStatus(raw: string) {
-  const t = (raw || "").toLowerCase();
-  if (t.includes("canx")) return "cancelled";
-  if (t.includes("firm")) return "reserved";
-  if (t.includes("amnd")) return "reserved";
-  if (t.includes("dep") || t.includes("out")) return "checked_out";
-  if (t.includes("arr") || t.includes("in")) return "checked_in";
-  return "reserved";
-}
-
-function normalizePhone(p: string) {
-  return p.replace(/\s+/g, "").replace(/^0+/, "").replace(/^44?/, "0");
-}
-
-function buildNotes(cols: string[]) {
-  const bits = [safeGet(cols, 9), safeGet(cols, 16), safeGet(cols, 17)]
-    .filter(Boolean)
-    .join(" / ");
-  return bits || null;
+  return { headers: [], rows: parsedRows };
 }
 
 export async function parseEmailFile(fileId: string, tenantId: string) {
@@ -132,9 +117,9 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   let parsedData;
   try {
     if (file.filename.toLowerCase().endsWith('.txt') || file.filename.toLowerCase().includes('aph')) {
-      console.log(`[parseEmailFile] Parsing APH file...`);
-      parsedData = parseAphTxtFile(buffer);
-      console.log(`[parseEmailFile] Parsed ${parsedData.rows.length} rows`);
+      console.log(`[parseEmailFile] Parsing APH CSV file...`);
+      parsedData = parseAphCsvFile(buffer);
+      console.log(`[parseEmailFile] Parsed ${parsedData.rows.length} rows from APH CSV`);
     } else {
       throw new Error(`Unsupported file type: ${file.filename}`);
     }
@@ -162,10 +147,74 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     throw new Error("No valid rows found in file");
   }
 
-  // 5. Import bookings
-  console.log(`[parseEmailFile] Starting import for ${parsedData.rows.length} rows, tenant ${tenantId}`);
+  // 5. Insert into staging table (APH-specific format)
+  console.log(`[parseEmailFile] Inserting ${parsedData.rows.length} rows into staging, tenant ${tenantId}`);
   const adminSupabase = supabaseAdmin();
   
+  const email = (file as any).ingest_emails;
+  const emailId = email?.id || null;
+
+  // Prepare staging inserts
+  const stagingInserts = parsedData.rows.map((raw) => {
+    return {
+      tenant_id: tenantId,
+      source: "aph_email",
+      source_email_id: emailId,
+      source_filename: file.filename,
+      // Map to existing staging columns
+      reference: raw.external_reference || raw.reference,
+      external_reference: raw.external_reference,
+      external_status: raw.external_status,
+      start_at: raw.start_at,
+      end_at: raw.end_at,
+      vehicle_reg: raw.vehicle_reg,
+      vehicle_make: raw.vehicle_make,
+      vehicle_colour: raw.vehicle_colour,
+      vehicle_model: raw.vehicle_model,
+      customer_title: raw.customer_title,
+      customer_first_name: raw.customer_firstname,
+      customer_last_name: raw.customer_lastname,
+      customer_name: raw.customer_name,
+      phone: raw.phone,
+      flight_number: raw.flight_number,
+      return_flight_no: raw.return_flight_no,
+      product_code: raw.product_code,
+      currency: raw.currency || "GBP",
+      total_price: raw.total_price,
+      price: raw.price || raw.total_price || 0, // For compatibility
+      status: raw.status || raw.external_status || "reserved",
+      money_received: raw.money_received || 0,
+      notes: null,
+      // Store raw data for debugging
+      raw_json: {
+        mapping: "aphV1",
+        raw_fields: raw.raw_fields || [],
+        external_reference: raw.external_reference,
+        external_status: raw.external_status,
+      },
+    };
+  });
+
+  // Insert into staging
+  const { data: stagedData, error: stagingError } = await adminSupabase
+    .from("booking_import_staging")
+    .insert(stagingInserts)
+    .select("id, external_reference");
+
+  if (stagingError) {
+    console.error(`[parseEmailFile] Staging insert failed:`, stagingError);
+    throw new Error(`Staging insert failed: ${stagingError.message}`);
+  }
+
+  console.log(`[parseEmailFile] ✅ Inserted ${stagedData?.length || 0} rows into staging`);
+
+  // 6. Auto-promote from staging to bookings (optional - you can remove this to require manual finalize)
+  // For now, we'll auto-promote to match existing behavior
+  let successCount = 0;
+  let errorCount = 0;
+  const errors: any[] = [];
+  const tz = 'Europe/London';
+
   // Create import run
   const { data: run, error: runErr } = await adminSupabase
     .from("import_runs")
@@ -178,39 +227,38 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   
   if (runErr || !run) {
     console.error(`[parseEmailFile] Failed to create import run:`, runErr);
-    throw new Error(`Failed to create import run: ${runErr?.message}`);
+    // Don't fail - staging is done, import run is optional
+  } else {
+    console.log(`[parseEmailFile] Created import run: ${run.id}`);
   }
-  
-  console.log(`[parseEmailFile] Created import run: ${run.id}`);
 
-  // Process rows
-  let successCount = 0;
-  let errorCount = 0;
-  const errors: any[] = [];
-  const tz = 'Europe/London';
-
+  // Process staging rows and promote to bookings
   for (let i = 0; i < parsedData.rows.length; i++) {
     const raw = parsedData.rows[i];
     try {
       const startAtRaw = raw.start_at;
       const endAtRaw = raw.end_at;
       
+      if (!startAtRaw || !endAtRaw) {
+        errors.push({ rowIndex: i + 1, reason: "Missing dates", rowData: raw });
+        errorCount++;
+        continue;
+      }
+
       // Parse dates using Postgres RPC
       let startAtParsed: string | null = null;
       let endAtParsed: string | null = null;
       
-      if (startAtRaw && endAtRaw) {
-        const { data: parsed, error: parseErr } = await adminSupabase
-          .rpc('normalise_booking_times', {
-            p_start: startAtRaw,
-            p_end: endAtRaw,
-            p_tz: tz
-          });
-        
-        if (!parseErr && parsed && parsed.length > 0) {
-          startAtParsed = parsed[0].start_utc || null;
-          endAtParsed = parsed[0].end_utc || null;
-        }
+      const { data: parsed, error: parseErr } = await adminSupabase
+        .rpc('normalise_booking_times', {
+          p_start: startAtRaw,
+          p_end: endAtRaw,
+          p_tz: tz
+        });
+      
+      if (!parseErr && parsed && parsed.length > 0) {
+        startAtParsed = parsed[0].start_utc || null;
+        endAtParsed = parsed[0].end_utc || null;
       }
 
       if (!startAtParsed || !endAtParsed) {
@@ -220,7 +268,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       }
 
       const dedupe_key = makeImportDedupeKey({
-        source: raw.source,
+        source: raw.source || "aph",
         reference: raw.reference,
         vehicle_reg: raw.vehicle_reg,
         start_utc: startAtParsed
@@ -246,7 +294,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
             car_color: raw.vehicle_colour || null,
             car_make: raw.vehicle_make || null,
             car_model: raw.vehicle_model || null,
-            money_charged: raw.price || 0,
+            money_charged: raw.price || raw.total_price || 0,
             money_received: raw.money_received || 0,
             notes: raw.notes || null,
           })
@@ -273,7 +321,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
             car_color: raw.vehicle_colour || null,
             car_make: raw.vehicle_make || null,
             car_model: raw.vehicle_model || null,
-            money_charged: raw.price || 0,
+            money_charged: raw.price || raw.total_price || 0,
             money_received: raw.money_received || 0,
             notes: raw.notes || null,
             dedupe_key,
@@ -294,13 +342,15 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   }
 
   // Update import run with results
-  await adminSupabase
-    .from("import_runs")
-    .update({ 
-      inserted_count: successCount, 
-      error_count: errorCount 
-    })
-    .eq("id", run.id);
+  if (run) {
+    await adminSupabase
+      .from("import_runs")
+      .update({ 
+        inserted_count: successCount, 
+        error_count: errorCount 
+      })
+      .eq("id", run.id);
+  }
 
   // Update file status to parsed
   console.log(`[parseEmailFile] Updating file status to parsed: ${fileId}`);
@@ -323,8 +373,9 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     fileId: file.id,
     filename: file.filename,
     rowsParsed: parsedData.rows.length,
+    stagedCount: stagedData?.length || 0,
     importResult: {
-      runId: run.id,
+      runId: run?.id || null,
       successCount,
       errorCount,
       errors: errors.slice(0, 10),

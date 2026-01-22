@@ -123,38 +123,55 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
         const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
         
         for (const line of lines) {
-          // Parse CSV with quoted fields - handle escaped quotes
+          // Parse CSV with quoted fields - format: "value1","value2","value3"
+          // Each field is quoted and separated by commas
           const row: any[] = [];
           let current = '';
           let inQuotes = false;
           
-          for (let i = 0; i < line.length; i++) {
+          let i = 0;
+          while (i < line.length) {
             const char = line[i];
             const nextChar = i < line.length - 1 ? line[i + 1] : '';
             
             if (char === '"') {
               if (inQuotes && nextChar === '"') {
-                // Escaped quote inside quoted field
+                // Escaped quote inside quoted field (double quote = literal quote)
                 current += '"';
-                i++; // Skip next quote
-              } else if (inQuotes && nextChar === ',') {
-                // End of quoted field
+                i += 2; // Skip both quotes
+                continue;
+              } else if (inQuotes) {
+                // Closing quote - end of field
                 inQuotes = false;
-                i++; // Skip the comma
+                i++;
+                // If next is comma, skip it; otherwise we'll process it next iteration
+                if (nextChar === ',') {
+                  row.push(current.trim());
+                  current = '';
+                  i++; // Skip the comma
+                }
+                continue;
               } else {
-                // Start or end of quoted field
-                inQuotes = !inQuotes;
+                // Opening quote - start of new field
+                inQuotes = true;
+                i++;
+                continue;
               }
             } else if (char === ',' && !inQuotes) {
-              // Field separator
+              // Field separator (outside quotes)
               row.push(current.trim());
               current = '';
+              i++;
+              continue;
             } else {
+              // Regular character - add to current field
               current += char;
+              i++;
             }
           }
-          // Add the last field
-          if (current.length > 0 || line.trim().endsWith(',')) {
+          
+          // Add the last field if there's any content
+          if (current.length > 0) {
             row.push(current.trim());
           }
           
