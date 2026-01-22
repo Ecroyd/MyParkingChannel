@@ -24,10 +24,8 @@ export async function POST(req: Request) {
     // Use the shared parse function
     const result = await parseEmailFile(fileId, tenantId);
     
-    return NextResponse.json({
-      ok: true,
-      ...result,
-    });
+    // result already has 'ok' property, so just return it
+    return NextResponse.json(result);
   } catch (err: any) {
     console.error(`[parse-file-manual] Error:`, err);
     return NextResponse.json(
