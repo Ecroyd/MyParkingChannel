@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { getServiceSupabase } from "@/lib/supabase/service";
+import { simpleParser } from "mailparser";
 
 export const runtime = "nodejs";
 
@@ -46,6 +47,42 @@ export async function POST(req: Request) {
 
     const sha256 = crypto.createHash("sha256").update(raw).digest("hex");
 
+    // Parse attachments from raw email if not provided by Worker
+    let extractedAttachments: Attachment[] = [];
+    if (!body.attachments || body.attachments.length === 0) {
+      // Worker didn't extract attachments, parse them server-side
+      try {
+        const rawEmailBuffer = Buffer.from(raw, "base64");
+        const parsed = await simpleParser(rawEmailBuffer);
+        
+        if (parsed.attachments && parsed.attachments.length > 0) {
+          console.log(`[ingest-email] Extracting ${parsed.attachments.length} attachments from raw email`);
+          
+          for (const att of parsed.attachments) {
+            try {
+              const content = att.content as Buffer;
+              extractedAttachments.push({
+                filename: att.filename || att.contentId || "unnamed",
+                content_type: att.contentType || "application/octet-stream",
+                size: content.length,
+                data_base64: content.toString("base64"),
+              });
+            } catch (err: any) {
+              console.error(`[ingest-email] Failed to extract attachment:`, err);
+            }
+          }
+        }
+      } catch (parseErr: any) {
+        console.error(`[ingest-email] Failed to parse raw email:`, parseErr.message);
+        // Continue without attachments
+      }
+    }
+
+    // Use Worker-provided attachments or server-extracted ones
+    const allAttachments = body.attachments && body.attachments.length > 0 
+      ? body.attachments 
+      : extractedAttachments;
+
     // Log to Vercel (Functions logs)
     console.log("[ingest-email]", {
       requestId,
@@ -55,6 +92,10 @@ export async function POST(req: Request) {
       messageId: body.message_id,
       sha256,
       rawLen: raw.length,
+      attachmentsFromWorker: body.attachments?.length || 0,
+      attachmentsExtracted: extractedAttachments.length,
+      attachmentsTotal: allAttachments.length,
+      attachments: allAttachments.map(a => ({ filename: a.filename, size: a.size })) || [],
       supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ? "set" : "missing",
       supabaseServiceKey: process.env.SUPABASE_SERVICE_ROLE_KEY ? "set" : "missing",
     });
@@ -102,8 +143,9 @@ export async function POST(req: Request) {
 
     // Process attachments if any
     const fileIds: string[] = [];
-    if (body.attachments && body.attachments.length > 0 && data) {
-      for (const attachment of body.attachments) {
+    if (allAttachments && allAttachments.length > 0 && data) {
+      console.log(`[ingest-email] Processing ${allAttachments.length} attachments for email ${data.id}`);
+      for (const attachment of allAttachments) {
         try {
           // Generate storage path
           const timestamp = Date.now();
@@ -131,7 +173,9 @@ export async function POST(req: Request) {
             // Store file in Supabase Storage
             try {
               const fileBuffer = Buffer.from(attachment.data_base64, "base64");
-              const { error: storageError } = await supabase.storage
+              console.log(`[ingest-email] Uploading ${attachment.filename} (${fileBuffer.length} bytes) to bucket email-imports`);
+              
+              const { data: uploadData, error: storageError } = await supabase.storage
                 .from("email-imports")
                 .upload(storagePath, fileBuffer, {
                   contentType: attachment.content_type || "application/octet-stream",
@@ -139,15 +183,24 @@ export async function POST(req: Request) {
                 });
 
               if (storageError) {
-                console.error(`[ingest-email] Storage upload failed for ${attachment.filename}:`, storageError);
+                console.error(`[ingest-email] Storage upload failed for ${attachment.filename}:`, {
+                  error: storageError.message,
+                  statusCode: storageError.statusCode,
+                  errorCode: storageError.error,
+                });
                 // Update file status to failed
                 await supabase
                   .from("ingest_email_files")
                   .update({ parse_status: "failed", parse_error: `Storage upload failed: ${storageError.message}` })
                   .eq("id", fileData.id);
+              } else {
+                console.log(`[ingest-email] Successfully uploaded ${attachment.filename} to ${storagePath}`);
               }
             } catch (storageErr: any) {
-              console.error(`[ingest-email] Storage error for ${attachment.filename}:`, storageErr);
+              console.error(`[ingest-email] Storage exception for ${attachment.filename}:`, {
+                message: storageErr.message,
+                stack: storageErr.stack,
+              });
             }
           } else {
             console.error(`[ingest-email] Failed to insert file record:`, fileError);
@@ -158,6 +211,13 @@ export async function POST(req: Request) {
       }
     }
 
+    // Log final status
+    if (allAttachments && allAttachments.length > 0) {
+      console.log(`[ingest-email] Final status: ${allAttachments.length} attachments processed, ${fileIds.length} files stored`);
+    } else {
+      console.log(`[ingest-email] No attachments in email from ${body.from}`);
+    }
+
     return Response.json({ 
       ok: true, 
       requestId, 
@@ -165,7 +225,7 @@ export async function POST(req: Request) {
       deduped: false, 
       sha256, 
       row: data,
-      attachments_received: body.attachments?.length || 0,
+      attachments_received: allAttachments.length,
       attachments_stored: fileIds.length,
       file_ids: fileIds,
     }, { status: 200 });
