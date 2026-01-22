@@ -277,7 +277,14 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       const endAtRaw = raw.end_at;
       
       if (!startAtRaw || !endAtRaw) {
-        errors.push({ rowIndex: i + 1, reason: "Missing dates", rowData: raw });
+        console.log(`[parseEmailFile] ⚠️ Skipping row ${i + 1}: Missing dates`, {
+          start_at: startAtRaw,
+          end_at: endAtRaw,
+          reference: raw.reference,
+          channel: (raw as any).channel,
+          raw_data: raw,
+        });
+        errors.push({ rowIndex: i + 1, reason: `Missing dates (start: ${startAtRaw}, end: ${endAtRaw})`, rowData: raw });
         errorCount++;
         continue;
       }

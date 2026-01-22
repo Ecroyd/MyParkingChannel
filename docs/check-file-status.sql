@@ -45,8 +45,9 @@ ORDER BY
   END;
 
 -- ============================================
--- 3. FILES WITH BOOKING COUNTS (Detailed)
+-- 3. FILES WITH BOOKING COUNTS (Detailed - FIXED)
 -- ============================================
+-- Links bookings to specific file via source_filename
 SELECT 
   f.id AS file_id,
   f.filename,
@@ -59,9 +60,11 @@ SELECT
 FROM ingest_email_files f
 JOIN ingest_emails e ON e.id = f.email_id
 LEFT JOIN booking_import_staging s ON s.source_email_id = e.id
+  AND s.source_filename = f.filename  -- Match by filename to link to specific file
 LEFT JOIN bookings b ON b.tenant_id = s.tenant_id
   AND b.reference = s.reference
   AND b.plate = s.vehicle_reg
+  AND ABS(EXTRACT(EPOCH FROM (b.start_at - s.start_at))) < 60
 WHERE f.created_at > NOW() - INTERVAL '24 hours'
 GROUP BY f.id, f.filename, f.parse_status, f.parsed_at, e.from_address, e.subject
 ORDER BY f.created_at DESC;

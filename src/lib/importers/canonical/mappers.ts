@@ -111,11 +111,42 @@ export function mapAphCsvLike(csvText: string): CanonicalBooking[] {
  * Map Flyparks email text format
  */
 export function mapFlyparksEmailText(emailText: string): CanonicalBooking[] {
-  // Pull out the "label: value" lines
+  // Normalize text: remove HTML tags, normalize whitespace
+  const cleanText = emailText
+    .replace(/<[^>]+>/g, " ") // Remove HTML tags
+    .replace(/\s+/g, " ") // Normalize whitespace
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+  
+  // Pull out the "label: value" lines - more flexible matching
   const get = (label: string) => {
-    const re = new RegExp(`${label}:\\s*([^\\n\\r]+)`, "i");
-    const m = emailText.match(re);
-    return m ? m[1].trim() : null;
+    // Escape special regex characters in label
+    const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    
+    // Try various patterns
+    const patterns = [
+      // Standard: "Label: value"
+      new RegExp(`${escapedLabel}:\\s*([^\\n\\r]+)`, "i"),
+      // With tabs: "Label:\tvalue"
+      new RegExp(`${escapedLabel}:\\s+([^\\n\\r]+)`, "i"),
+      // Without colon: "Label value"
+      new RegExp(`${escapedLabel}\\s+([^\\n\\r:]+)`, "i"),
+      // HTML format: "Label:</strong> value"
+      new RegExp(`${escapedLabel}[^>]*>\\s*([^<\\n\\r]+)`, "i"),
+    ];
+    
+    for (const pattern of patterns) {
+      const m = cleanText.match(pattern);
+      if (m && m[1]) {
+        const value = m[1].trim();
+        // Remove any trailing colons or extra punctuation
+        return value.replace(/[:;,\\.]+$/, "").trim();
+      }
+    }
+    
+    return null;
   };
 
   const depDate = get("Departure date");
@@ -129,14 +160,54 @@ export function mapFlyparksEmailText(emailText: string): CanonicalBooking[] {
   const colour = get("Vehicle colour");
   const total = get("Total Cost");
 
+  // Extract customer name if available (look for patterns like "Your details:" or name before email)
+  let customer_firstname: string | null = null;
+  let customer_lastname: string | null = null;
+  const nameMatch = cleanText.match(/(?:Your details?:|Customer name:)\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/i);
+  if (nameMatch) {
+    const nameParts = nameMatch[1].trim().split(/\s+/);
+    if (nameParts.length >= 2) {
+      customer_firstname = nameParts[0];
+      customer_lastname = nameParts.slice(1).join(" ");
+    } else if (nameParts.length === 1) {
+      customer_lastname = nameParts[0];
+    }
+  }
+
+  // Extract email if available
+  const emailMatch = cleanText.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+  const customer_email = emailMatch ? emailMatch[1] : null;
+
+  // Extract phone if available
+  const phoneMatch = cleanText.match(/(?:Phone|Contact|Tel)[:\s]*([0-9\s+\-()]+)/i) || 
+                     cleanText.match(/(0[0-9]{10,11})/);
+  const customer_phone = phoneMatch ? phoneMatch[1].replace(/\s+/g, "") : null;
+
   // Sometimes "Vehicle model" contains make+model in one string
   let vehicle_make: string | null = null;
   let vehicle_model: string | null = null;
   if (makeModel) {
-    const bits = makeModel.split(/\s+/);
+    const bits = makeModel.trim().split(/\s+/);
     vehicle_make = bits[0] ?? null;
     vehicle_model = bits.length > 1 ? bits.slice(1).join(" ") : null;
   }
+
+  // Log extracted values for debugging
+  console.log("[mapFlyparksEmailText] Extracted:", {
+    bookingRef,
+    depDate,
+    arrTime,
+    retDate,
+    retTime,
+    reg,
+    makeModel,
+    colour,
+    total,
+    customer_firstname,
+    customer_lastname,
+    customer_email,
+    customer_phone,
+  });
 
   return [
     {
@@ -149,15 +220,15 @@ export function mapFlyparksEmailText(emailText: string): CanonicalBooking[] {
       vehicle_make,
       vehicle_model,
       vehicle_colour: colour,
-      customer_firstname: null,
-      customer_lastname: null,
-      customer_email: null,
-      customer_phone: null,
+      customer_firstname,
+      customer_lastname,
+      customer_email,
+      customer_phone,
       outbound_flight_number: get("Departure flight number"),
       return_flight_number: get("Return flight number"),
       total_price: total ? parseMoney(total) : null,
       currency: "GBP",
-      raw: { emailText },
+      raw: { emailText: cleanText, original: emailText },
     },
   ];
 }

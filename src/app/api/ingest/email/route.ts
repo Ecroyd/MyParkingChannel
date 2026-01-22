@@ -136,7 +136,12 @@ export async function POST(req: Request) {
         const parsed = await simpleParser(rawEmailBuffer);
         
         // Extract email body text for Flyparks parsing
-        emailBodyText = parsed.text || parsed.html || null;
+        // Prefer plain text, fall back to HTML (we'll strip tags in the mapper)
+        emailBodyText = parsed.textAsHtml ? null : (parsed.text || parsed.html || null);
+        // If we only have HTML, we'll parse it in the mapper
+        if (!emailBodyText && parsed.html) {
+          emailBodyText = parsed.html;
+        }
         
         if (parsed.attachments && parsed.attachments.length > 0) {
           console.log(`[ingest-email] Extracting ${parsed.attachments.length} attachments from raw email`);

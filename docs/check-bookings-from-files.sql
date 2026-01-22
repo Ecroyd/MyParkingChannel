@@ -2,9 +2,10 @@
 -- Run this in Supabase SQL Editor
 
 -- ============================================
--- 1. BOOKINGS FROM RECENT PARSED FILES (Detailed)
+-- 1. BOOKINGS FROM RECENT PARSED FILES (Detailed - FIXED)
 -- ============================================
 -- Shows all bookings created from files parsed in the last 24 hours
+-- Links bookings to specific file via source_filename
 SELECT 
   f.id AS file_id,
   f.filename,
@@ -25,6 +26,7 @@ SELECT
 FROM ingest_email_files f
 JOIN ingest_emails e ON e.id = f.email_id
 LEFT JOIN booking_import_staging s ON s.source_email_id = e.id
+  AND s.source_filename = f.filename  -- Match by filename to link to specific file
 LEFT JOIN bookings b ON b.tenant_id = s.tenant_id
   AND b.reference = s.reference
   AND b.plate = s.vehicle_reg
@@ -35,9 +37,10 @@ WHERE f.parse_status = 'parsed'
 ORDER BY f.parsed_at DESC, b.created_at DESC;
 
 -- ============================================
--- 2. SUMMARY: BOOKINGS PER FILE
+-- 2. SUMMARY: BOOKINGS PER FILE (FIXED)
 -- ============================================
 -- Quick overview of how many bookings each file created
+-- Links bookings to specific file via source_filename
 SELECT 
   f.id AS file_id,
   f.filename,
@@ -51,9 +54,11 @@ SELECT
 FROM ingest_email_files f
 JOIN ingest_emails e ON e.id = f.email_id
 LEFT JOIN booking_import_staging s ON s.source_email_id = e.id
+  AND s.source_filename = f.filename  -- Match by filename to link to specific file
 LEFT JOIN bookings b ON b.tenant_id = s.tenant_id
   AND b.reference = s.reference
   AND b.plate = s.vehicle_reg
+  AND ABS(EXTRACT(EPOCH FROM (b.start_at - s.start_at))) < 60
 WHERE f.parse_status = 'parsed'
   AND f.parsed_at > NOW() - INTERVAL '24 hours'
 GROUP BY f.id, f.filename, f.parse_status, f.parsed_at, e.from_address, e.subject
@@ -107,7 +112,7 @@ GROUP BY b.source, b.external_source
 ORDER BY booking_count DESC;
 
 -- ============================================
--- 5. SPECIFIC FILE: See all bookings from one file
+-- 5. SPECIFIC FILE: See all bookings from one file (FIXED)
 -- ============================================
 -- Replace 'YOUR_FILE_ID' with the file_id from the status query
 SELECT 
@@ -128,8 +133,10 @@ SELECT
 FROM ingest_email_files f
 JOIN ingest_emails e ON e.id = f.email_id
 LEFT JOIN booking_import_staging s ON s.source_email_id = e.id
+  AND s.source_filename = f.filename  -- Match by filename to link to specific file
 LEFT JOIN bookings b ON b.tenant_id = s.tenant_id
   AND b.reference = s.reference
   AND b.plate = s.vehicle_reg
+  AND ABS(EXTRACT(EPOCH FROM (b.start_at - s.start_at))) < 60
 WHERE f.id = 'f5fb1d5f-213d-421f-9990-3e91d6e88fe9'  -- Replace with your file_id
 ORDER BY b.created_at DESC;
