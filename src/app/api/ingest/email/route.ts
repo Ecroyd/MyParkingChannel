@@ -49,21 +49,12 @@ function detectTenantFromEmail(email: { from_address?: string | null; subject?: 
 
 // Async function to parse files (fire-and-forget)
 async function parseFilesAsync(fileIds: string[], tenantId: string, emailId: string) {
-  const baseUrl = process.env.NEXT_PUBLIC_ROOT_URL || "http://localhost:3002";
+  const { parseEmailFile } = await import("@/lib/ingest/parseEmailFile");
   
   for (const fileId of fileIds) {
     try {
-      const response = await fetch(`${baseUrl}/api/admin/ingest/parse-file`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ fileId, tenantId }),
-      });
-      
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: "Unknown error" }));
-        console.error(`[ingest-email] Auto-parse failed for file ${fileId}:`, error);
-      } else {
-        const result = await response.json();
+      const result = await parseEmailFile(fileId, tenantId);
+      if (result.ok) {
         console.log(`[ingest-email] Auto-parsed file ${fileId}: ${result.importResult?.successCount || 0} bookings`);
       }
     } catch (err: any) {
@@ -287,6 +278,14 @@ export async function POST(req: Request) {
 
     // Auto-parse files if tenant mapping exists (fire-and-forget, don't wait)
     const tenantId = fileIds.length > 0 ? detectTenantFromEmail({ from_address: body.from, subject: body.subject }) : null;
+    
+    console.log(`[ingest-email] Auto-parse check:`, {
+      fileIdsCount: fileIds.length,
+      fromAddress: body.from,
+      tenantIdFound: !!tenantId,
+      tenantId: tenantId,
+    });
+    
     if (fileIds.length > 0 && tenantId) {
       console.log(`[ingest-email] Auto-parsing ${fileIds.length} files for tenant ${tenantId}`);
       // Fire-and-forget: don't await, let it run in background
