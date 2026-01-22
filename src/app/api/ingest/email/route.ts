@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { getServiceSupabase } from "@/lib/supabase/service";
+// @ts-ignore - mailparser types may not be fully compatible
 import { simpleParser } from "mailparser";
 
 export const runtime = "nodejs";
