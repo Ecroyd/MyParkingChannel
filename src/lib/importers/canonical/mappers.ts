@@ -168,12 +168,49 @@ export function mapFlyparksEmailText(emailText: string): CanonicalBooking[] {
 export function detectAndMapFromAttachment(filename: string, text: string): CanonicalBooking[] | null {
   const name = filename.toLowerCase();
 
-  // CAVU hourly
-  if (name.includes("hourly") && text.includes("booking_reference,entry_datetime")) {
-    return mapCavuHourlyCsv(text);
+  // Holiday Extras - check first (tab-delimited, specific format)
+  try {
+    const { isHolidayExtrasFile, parseHolidayExtrasText } = require("@/lib/importers/holidayExtras/parseHolidayExtras");
+    if (isHolidayExtrasFile(filename, text)) {
+      return parseHolidayExtrasText(text);
+    }
+  } catch (err) {
+    console.error("[detectAndMap] Holiday Extras check failed:", err);
   }
 
-  // APH csv-like
+  // Flyparks email body text - check before CAVU/APH which might match CSV patterns
+  if (name === "email-body.txt" || name.includes("email-body") || 
+      (text.includes("Departure date") && text.includes("Reference:"))) {
+    try {
+      const flyparks = mapFlyparksEmailText(text);
+      if (flyparks && flyparks.length > 0 && flyparks[0].booking_reference) {
+        return flyparks;
+      }
+    } catch (err) {
+      console.error("[detectAndMap] Flyparks parse failed:", err);
+    }
+  }
+
+  // CAVU hourly - check filename pattern OR content structure
+  // Filename pattern: *_HOURLY_*.csv or contains "hourly" (e.g., "27_HOURLY_20260118_200042.csv")
+  // Content check: has CSV headers like booking_reference, entry_datetime, OR has typical CAVU structure
+  const isCavuFilename = name.includes("hourly") || 
+                        /^\d+_hourly_\d+_\d+\.csv$/i.test(filename) ||
+                        /_\d+_hourly_\d+\.csv/i.test(filename);
+  const isCavuContent = text.includes("booking_reference") && 
+                       (text.includes("entry_datetime") || text.includes("exit_datetime") || 
+                        text.includes("license_plate") || text.includes("product_native_price"));
+  
+  if (isCavuFilename || isCavuContent) {
+    try {
+      return mapCavuHourlyCsv(text);
+    } catch (err) {
+      console.error("[detectAndMap] CAVU parse failed:", err);
+      // Fall through to try other formats
+    }
+  }
+
+  // APH csv-like - check filename OR content signature
   if (name.includes("aph") || text.startsWith('"0') || text.includes('"NEW')) {
     return mapAphCsvLike(text);
   }

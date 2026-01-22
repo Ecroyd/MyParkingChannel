@@ -18,8 +18,11 @@ function parseFileWithCanonicalMappers(buffer: Buffer, filename: string) {
 
   // Convert canonical format to internal row format
   const parsedRows = canonicalBookings.map((canonical) => {
+    // Extract external_status from raw data if available (Holiday Extras stores it there)
+    const external_status = canonical.raw?.external_status || null;
+    
     return {
-      channel: canonical.channel, // Keep original channel (CAVU, APH, FLYPARKS_EMAIL) for source mapping
+      channel: canonical.channel, // Keep original channel (CAVU, APH, FLYPARKS_EMAIL, HOLIDAY_EXTRAS) for source mapping
       source: canonical.channel.toLowerCase(), // For dedupe key
       reference: canonical.booking_reference,
       customer_name: canonical.customer_firstname && canonical.customer_lastname
@@ -42,7 +45,7 @@ function parseFileWithCanonicalMappers(buffer: Buffer, filename: string) {
       notes: null,
       // Additional fields
       external_reference: canonical.third_party_reference || canonical.booking_reference,
-      external_status: null,
+      external_status: external_status,
       return_flight_no: canonical.return_flight_number,
       product_code: null,
       currency: canonical.currency || "GBP",
@@ -146,6 +149,9 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     if (channel === "CAVU") {
       sourceValue = "cavu"; // Valid enum value
       externalSourceLabel = "CAVU Email Import";
+    } else if (channel === "HOLIDAY_EXTRAS") {
+      sourceValue = "holidayextras"; // Valid enum value (no underscore)
+      externalSourceLabel = "Holiday Extras Email Import";
     } else if (channel === "FLYPARKS_EMAIL") {
       sourceValue = "other"; // Valid enum value
       externalSourceLabel = "Flyparks Email Import";
@@ -358,12 +364,15 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       } else {
         // Determine source and external_source based on channel
         const channel = (raw as any).channel || "APH";
-        let bookingSource: "cavu" | "other";
+        let bookingSource: "cavu" | "holidayextras" | "other";
         let externalSource: string;
         
         if (channel === "CAVU") {
           bookingSource = "cavu";
           externalSource = "CAVU Email Import";
+        } else if (channel === "HOLIDAY_EXTRAS") {
+          bookingSource = "holidayextras"; // Valid enum value (no underscore)
+          externalSource = "Holiday Extras Email Import";
         } else if (channel === "FLYPARKS_EMAIL") {
           bookingSource = "other";
           externalSource = "Flyparks Email Import";

@@ -128,11 +128,15 @@ export async function POST(req: Request) {
 
     // Parse attachments from raw email if not provided by Worker
     let extractedAttachments: Attachment[] = [];
+    let emailBodyText: string | null = null;
     if (!body.attachments || body.attachments.length === 0) {
       // Worker didn't extract attachments, parse them server-side
       try {
         const rawEmailBuffer = Buffer.from(raw, "base64");
         const parsed = await simpleParser(rawEmailBuffer);
+        
+        // Extract email body text for Flyparks parsing
+        emailBodyText = parsed.text || parsed.html || null;
         
         if (parsed.attachments && parsed.attachments.length > 0) {
           console.log(`[ingest-email] Extracting ${parsed.attachments.length} attachments from raw email`);
@@ -289,11 +293,67 @@ export async function POST(req: Request) {
       }
     }
 
+    // If no attachments, check email body text for Flyparks bookings
+    if (fileIds.length === 0 && emailBodyText && data) {
+      const { mapFlyparksEmailText } = await import("@/lib/importers/canonical/mappers");
+      
+      // Check if email body looks like a Flyparks booking confirmation
+      if (emailBodyText.includes("Departure date") || 
+          emailBodyText.includes("Booking Confirmation") ||
+          emailBodyText.includes("Reference:") && emailBodyText.includes("Vehicle registration")) {
+        console.log(`[ingest-email] Detected Flyparks booking in email body, creating virtual file`);
+        
+        try {
+          // Create a "virtual file" entry for the email body text
+          const timestamp = Date.now();
+          const storagePath = `${data.id}/${timestamp}-email-body.txt`;
+          const bodyBuffer = Buffer.from(emailBodyText, "utf-8");
+          
+          // Store file metadata
+          const { data: fileData, error: fileError } = await supabase
+            .from("ingest_email_files")
+            .insert({
+              email_id: data.id,
+              filename: "email-body.txt",
+              content_type: "text/plain",
+              file_size: bodyBuffer.length,
+              storage_bucket: "email-imports",
+              storage_path: storagePath,
+              parse_status: "pending",
+            })
+            .select("id")
+            .single();
+          
+          if (!fileError && fileData) {
+            fileIds.push(fileData.id);
+            
+            // Store email body text in Supabase Storage
+            const { error: storageError } = await supabase.storage
+              .from("email-imports")
+              .upload(storagePath, bodyBuffer, {
+                contentType: "text/plain",
+                upsert: false,
+              });
+            
+            if (storageError) {
+              console.error(`[ingest-email] Failed to store email body:`, storageError);
+            } else {
+              console.log(`[ingest-email] Stored email body as virtual file for Flyparks parsing`);
+            }
+          }
+        } catch (bodyErr: any) {
+          console.error(`[ingest-email] Error processing email body:`, bodyErr);
+        }
+      }
+    }
+
     // Log final status
     if (allAttachments && allAttachments.length > 0) {
       console.log(`[ingest-email] Final status: ${allAttachments.length} attachments processed, ${fileIds.length} files stored`);
+    } else if (fileIds.length > 0) {
+      console.log(`[ingest-email] Final status: ${fileIds.length} file(s) created from email body`);
     } else {
-      console.log(`[ingest-email] No attachments in email from ${body.from}`);
+      console.log(`[ingest-email] No attachments or parseable content in email from ${body.from}`);
     }
 
     // Auto-parse files if tenant mapping exists

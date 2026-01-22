@@ -2,7 +2,7 @@
  * Canonical booking format - unified shape for all import sources
  */
 export type CanonicalBooking = {
-  channel: "CAVU" | "APH" | "FLYPARKS_EMAIL";
+  channel: "CAVU" | "APH" | "FLYPARKS_EMAIL" | "HOLIDAY_EXTRAS";
   booking_reference: string | null;
   third_party_reference: string | null;
 

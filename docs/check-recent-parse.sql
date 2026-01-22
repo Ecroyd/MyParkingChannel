@@ -38,7 +38,7 @@ WHERE s.created_at > NOW() - INTERVAL '1 hour'
 ORDER BY s.created_at DESC
 LIMIT 20;
 
--- 3. Check bookings created in the last hour
+-- 3. Check bookings created in the last hour WITH SOURCE TRACING
 SELECT 
   b.id,
   b.reference,
@@ -50,8 +50,19 @@ SELECT
   b.source,
   b.external_source,
   b.created_at,
-  b.tenant_id
+  b.tenant_id,
+  -- Source file/email info
+  f.filename AS source_filename,
+  e.from_address AS source_email,
+  e.subject AS source_subject,
+  e.created_at AS email_received
 FROM bookings b
+LEFT JOIN booking_import_staging s ON s.tenant_id = b.tenant_id
+  AND s.reference = b.reference
+  AND s.vehicle_reg = b.plate
+  AND ABS(EXTRACT(EPOCH FROM (s.start_at - b.start_at))) < 60
+LEFT JOIN ingest_emails e ON e.id = s.source_email_id
+LEFT JOIN ingest_email_files f ON f.email_id = e.id
 WHERE b.created_at > NOW() - INTERVAL '1 hour'
   AND b.tenant_id = 'bab45dab-19e8-4230-b18e-ee1f663608e5'
 ORDER BY b.created_at DESC
