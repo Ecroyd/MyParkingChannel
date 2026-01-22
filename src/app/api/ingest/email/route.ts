@@ -3,6 +3,13 @@ import { getServiceSupabase } from "@/lib/supabase/service";
 
 export const runtime = "nodejs";
 
+type Attachment = {
+  filename: string;
+  content_type?: string;
+  size?: number;
+  data_base64: string;
+};
+
 type IngestPayload = {
   to?: string;
   from?: string;
@@ -10,6 +17,7 @@ type IngestPayload = {
   message_id?: string;
   received_at?: string;
   raw_rfc822_base64?: string;
+  attachments?: Attachment[];
 };
 
 export async function POST(req: Request) {
@@ -92,7 +100,75 @@ export async function POST(req: Request) {
       );
     }
 
-    return Response.json({ ok: true, requestId, inserted: true, deduped: false, sha256, row: data }, { status: 200 });
+    // Process attachments if any
+    const fileIds: string[] = [];
+    if (body.attachments && body.attachments.length > 0 && data) {
+      for (const attachment of body.attachments) {
+        try {
+          // Generate storage path
+          const timestamp = Date.now();
+          const sanitizedFilename = attachment.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+          const storagePath = `${data.id}/${timestamp}-${sanitizedFilename}`;
+
+          // Store file metadata in database
+          const { data: fileData, error: fileError } = await supabase
+            .from("ingest_email_files")
+            .insert({
+              email_id: data.id,
+              filename: attachment.filename,
+              content_type: attachment.content_type || null,
+              file_size: attachment.size || null,
+              storage_bucket: "email-imports",
+              storage_path: storagePath,
+              parse_status: "pending",
+            })
+            .select("id")
+            .single();
+
+          if (!fileError && fileData) {
+            fileIds.push(fileData.id);
+
+            // Store file in Supabase Storage
+            try {
+              const fileBuffer = Buffer.from(attachment.data_base64, "base64");
+              const { error: storageError } = await supabase.storage
+                .from("email-imports")
+                .upload(storagePath, fileBuffer, {
+                  contentType: attachment.content_type || "application/octet-stream",
+                  upsert: false,
+                });
+
+              if (storageError) {
+                console.error(`[ingest-email] Storage upload failed for ${attachment.filename}:`, storageError);
+                // Update file status to failed
+                await supabase
+                  .from("ingest_email_files")
+                  .update({ parse_status: "failed", parse_error: `Storage upload failed: ${storageError.message}` })
+                  .eq("id", fileData.id);
+              }
+            } catch (storageErr: any) {
+              console.error(`[ingest-email] Storage error for ${attachment.filename}:`, storageErr);
+            }
+          } else {
+            console.error(`[ingest-email] Failed to insert file record:`, fileError);
+          }
+        } catch (attErr: any) {
+          console.error(`[ingest-email] Error processing attachment ${attachment.filename}:`, attErr);
+        }
+      }
+    }
+
+    return Response.json({ 
+      ok: true, 
+      requestId, 
+      inserted: true, 
+      deduped: false, 
+      sha256, 
+      row: data,
+      attachments_received: body.attachments?.length || 0,
+      attachments_stored: fileIds.length,
+      file_ids: fileIds,
+    }, { status: 200 });
   } catch (err: any) {
     return Response.json(
       { ok: false, requestId, error: err?.message || "unknown error" },
