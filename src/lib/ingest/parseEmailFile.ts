@@ -139,10 +139,11 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   const stagingInserts = parsedData.rows.map((raw) => {
     // Generate dedupe_key (required by staging table)
     // Use the start_at as-is for now, it will be normalized later when promoting to bookings
+    // Provide fallbacks for required fields
     const dedupe_key = makeImportDedupeKey({
       source: raw.source || "aph",
-      reference: raw.reference,
-      vehicle_reg: raw.vehicle_reg,
+      reference: raw.reference || raw.external_reference || "UNKNOWN",
+      vehicle_reg: raw.vehicle_reg || "UNKNOWN",
       start_utc: raw.start_at || new Date().toISOString(), // Fallback to now if missing
     });
 
