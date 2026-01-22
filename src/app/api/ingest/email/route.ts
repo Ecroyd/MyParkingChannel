@@ -186,8 +186,7 @@ export async function POST(req: Request) {
               if (storageError) {
                 console.error(`[ingest-email] Storage upload failed for ${attachment.filename}:`, {
                   error: storageError.message,
-                  statusCode: storageError.statusCode,
-                  errorCode: storageError.error,
+                  errorCode: (storageError as any).error,
                 });
                 // Update file status to failed
                 await supabase
