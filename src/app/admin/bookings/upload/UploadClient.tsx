@@ -114,11 +114,94 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      const data = new Uint8Array(reader.result as ArrayBuffer);
-      const wb = XLSX.read(data, { type: "array" });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      // Parse with header: 1 to get array of arrays, preserve empty cells
-      const aoa: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
+      let aoa: any[][] = [];
+      
+      // Check if it's a text file (txt) that might need special parsing
+      if (file.name.toLowerCase().endsWith('.txt') || file.name.toLowerCase().includes('aph')) {
+        // Parse as text file (handles APH format with quoted CSV)
+        const text = reader.result as string;
+        const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+        
+        for (const line of lines) {
+          // Parse CSV with quoted fields - handle escaped quotes
+          const row: any[] = [];
+          let current = '';
+          let inQuotes = false;
+          
+          for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            const nextChar = i < line.length - 1 ? line[i + 1] : '';
+            
+            if (char === '"') {
+              if (inQuotes && nextChar === '"') {
+                // Escaped quote inside quoted field
+                current += '"';
+                i++; // Skip next quote
+              } else if (inQuotes && nextChar === ',') {
+                // End of quoted field
+                inQuotes = false;
+                i++; // Skip the comma
+              } else {
+                // Start or end of quoted field
+                inQuotes = !inQuotes;
+              }
+            } else if (char === ',' && !inQuotes) {
+              // Field separator
+              row.push(current.trim());
+              current = '';
+            } else {
+              current += char;
+            }
+          }
+          // Add the last field
+          if (current.length > 0 || line.trim().endsWith(',')) {
+            row.push(current.trim());
+          }
+          
+          if (row.length > 0) {
+            aoa.push(row);
+          }
+        }
+      } else {
+        // Parse as Excel/CSV using XLSX (handles both .xlsx and .csv files)
+        try {
+          const data = new Uint8Array(reader.result as ArrayBuffer);
+          const wb = XLSX.read(data, { type: "array" });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          // Parse with header: 1 to get array of arrays, preserve empty cells
+          aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
+        } catch (err) {
+          // If XLSX fails, try parsing as CSV text
+          console.warn("XLSX parsing failed, trying text CSV parsing:", err);
+          const text = new TextDecoder().decode(reader.result as ArrayBuffer);
+          const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+          
+          for (const line of lines) {
+            // Simple CSV parsing (handles quoted fields)
+            const row: any[] = [];
+            let current = '';
+            let inQuotes = false;
+            
+            for (let i = 0; i < line.length; i++) {
+              const char = line[i];
+              if (char === '"') {
+                inQuotes = !inQuotes;
+              } else if (char === ',' && !inQuotes) {
+                row.push(current.trim());
+                current = '';
+              } else {
+                current += char;
+              }
+            }
+            if (current.length > 0 || line.endsWith(',')) {
+              row.push(current.trim());
+            }
+            if (row.length > 0) {
+              aoa.push(row);
+            }
+          }
+        }
+      }
       
       // Find the maximum column count to normalize all rows
       const maxCols = Math.max(...aoa.map(r => r?.length || 0), 0);
@@ -141,7 +224,13 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
       setFileAnalysed(true);
       console.log(`📄 File analysed: ${filteredRows.length} rows loaded, ${maxCols} columns detected`);
     };
-    reader.readAsArrayBuffer(file);
+    
+    // Read as text for .txt files, as array buffer for Excel files
+    if (file.name.toLowerCase().endsWith('.txt') || file.name.toLowerCase().includes('aph')) {
+      reader.readAsText(file);
+    } else {
+      reader.readAsArrayBuffer(file);
+    }
   }
 
   async function autoDetect() {
@@ -701,13 +790,13 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
                 <h3 className="font-semibold">Preview</h3>
                 <span className="text-sm text-gray-500">{preview.length} booking{preview.length !== 1 ? 's' : ''} ready</span>
               </div>
-              <div className="overflow-auto max-h-[500px] border rounded">
+              <div className="overflow-auto max-h-[600px] border rounded">
                 <table className="text-xs w-full">
                   <thead className="bg-gray-50 sticky top-0">
                     <tr>
                       {[
-                        "Ref","Customer","Start","End","Vehicle","Status"
-                      ].map(h => <th key={h} className="border px-2 py-2 text-left font-semibold">{h}</th>)}
+                        "Ref","Source","Customer","Title","Start","End","Vehicle","Make","Model","Colour","Flight","Phone","Status","Price","Paid","Notes"
+                      ].map(h => <th key={h} className="border px-2 py-2 text-left font-semibold whitespace-nowrap">{h}</th>)}
                     </tr>
                   </thead>
                   <tbody>
@@ -719,8 +808,10 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
                       
                       return (
                         <tr key={idx} className={`hover:bg-gray-50 ${hasDateIssue || hasOrderIssue ? "bg-yellow-50" : ""}`}>
-                          <td className="border px-2 py-1 font-mono text-xs">{r.reference}</td>
-                          <td className="border px-2 py-1">{r.customer_name}</td>
+                          <td className="border px-2 py-1 font-mono text-xs">{r.reference || "-"}</td>
+                          <td className="border px-2 py-1">{r.source || "-"}</td>
+                          <td className="border px-2 py-1">{r.customer_name || "-"}</td>
+                          <td className="border px-2 py-1">{r.customer_title || "-"}</td>
                           <td className="border px-2 py-1">
                             {startDate ? dayjs(startDate).format("DD/MM/YY HH:mm") : <span className="text-red-500">❌</span>}
                             {hasOrderIssue && <span className="text-orange-500 ml-1">⚠️</span>}
@@ -728,9 +819,14 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
                           <td className="border px-2 py-1">
                             {endDate ? dayjs(endDate).format("DD/MM/YY HH:mm") : <span className="text-red-500">❌</span>}
                           </td>
-                          <td className="border px-2 py-1">{r.vehicle_reg || "-"}</td>
+                          <td className="border px-2 py-1 font-mono">{r.vehicle_reg || "-"}</td>
+                          <td className="border px-2 py-1">{r.vehicle_make || "-"}</td>
+                          <td className="border px-2 py-1">{r.vehicle_model || "-"}</td>
+                          <td className="border px-2 py-1">{r.vehicle_colour || "-"}</td>
+                          <td className="border px-2 py-1">{r.flight_number || "-"}</td>
+                          <td className="border px-2 py-1">{r.phone || "-"}</td>
                           <td className="border px-2 py-1">
-                            <span className={`px-2 py-0.5 rounded text-xs ${
+                            <span className={`px-2 py-0.5 rounded text-xs whitespace-nowrap ${
                               r.status === 'cancelled' ? 'bg-red-100 text-red-700' :
                               r.status === 'amended' ? 'bg-yellow-100 text-yellow-700' :
                               'bg-green-100 text-green-700'
@@ -738,12 +834,15 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
                               {r.status}
                             </span>
                           </td>
+                          <td className="border px-2 py-1">{r.price ? `£${r.price.toFixed(2)}` : "-"}</td>
+                          <td className="border px-2 py-1">{r.money_received ? `£${r.money_received.toFixed(2)}` : "-"}</td>
+                          <td className="border px-2 py-1 max-w-[200px] truncate" title={r.notes || ""}>{r.notes || "-"}</td>
                         </tr>
                       );
                     })}
                     {preview.length > 50 && (
                       <tr>
-                        <td colSpan={6} className="text-center py-2 text-gray-500 text-xs">
+                        <td colSpan={16} className="text-center py-2 text-gray-500 text-xs">
                           ... and {preview.length - 50} more bookings
                         </td>
                       </tr>
