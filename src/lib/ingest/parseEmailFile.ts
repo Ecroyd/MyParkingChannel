@@ -84,6 +84,7 @@ function buildNotes(cols: string[]) {
 }
 
 export async function parseEmailFile(fileId: string, tenantId: string) {
+  console.log(`[parseEmailFile] Starting parse for file ${fileId}, tenant ${tenantId}`);
   const supabase = getServiceSupabase();
 
   // 1. Get file record
@@ -94,12 +95,16 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     .single();
 
   if (fileError || !file) {
+    console.error(`[parseEmailFile] File not found:`, fileError);
     throw new Error("File not found");
   }
 
   if (file.parse_status === "parsed") {
+    console.log(`[parseEmailFile] File already parsed: ${fileId}`);
     return { ok: true, message: "File already parsed", fileId: file.id };
   }
+  
+  console.log(`[parseEmailFile] File status: ${file.parse_status}, filename: ${file.filename}`);
 
   // 2. Download file from Storage
   const { data: fileData, error: downloadError } = await supabase.storage
@@ -120,16 +125,21 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   // 3. Convert to Buffer
   const arrayBuffer = await fileData.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
+  
+  console.log(`[parseEmailFile] File downloaded: ${buffer.length} bytes`);
 
   // 4. Parse file
   let parsedData;
   try {
     if (file.filename.toLowerCase().endsWith('.txt') || file.filename.toLowerCase().includes('aph')) {
+      console.log(`[parseEmailFile] Parsing APH file...`);
       parsedData = parseAphTxtFile(buffer);
+      console.log(`[parseEmailFile] Parsed ${parsedData.rows.length} rows`);
     } else {
       throw new Error(`Unsupported file type: ${file.filename}`);
     }
   } catch (parseErr: any) {
+    console.error(`[parseEmailFile] Parse error:`, parseErr);
     await supabase
       .from("ingest_email_files")
       .update({ 
@@ -141,6 +151,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   }
 
   if (!parsedData.rows || parsedData.rows.length === 0) {
+    console.error(`[parseEmailFile] No valid rows found`);
     await supabase
       .from("ingest_email_files")
       .update({ 
@@ -152,6 +163,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   }
 
   // 5. Import bookings
+  console.log(`[parseEmailFile] Starting import for ${parsedData.rows.length} rows, tenant ${tenantId}`);
   const adminSupabase = supabaseAdmin();
   
   // Create import run
@@ -165,8 +177,11 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     .single();
   
   if (runErr || !run) {
+    console.error(`[parseEmailFile] Failed to create import run:`, runErr);
     throw new Error(`Failed to create import run: ${runErr?.message}`);
   }
+  
+  console.log(`[parseEmailFile] Created import run: ${run.id}`);
 
   // Process rows
   let successCount = 0;
@@ -288,13 +303,20 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     .eq("id", run.id);
 
   // Update file status to parsed
-  await supabase
+  console.log(`[parseEmailFile] Updating file status to parsed: ${fileId}`);
+  const { error: updateError } = await supabase
     .from("ingest_email_files")
     .update({ 
       parse_status: "parsed",
       parsed_at: new Date().toISOString(),
     })
     .eq("id", fileId);
+  
+  if (updateError) {
+    console.error(`[parseEmailFile] Failed to update file status:`, updateError);
+  } else {
+    console.log(`[parseEmailFile] ✅ File status updated to parsed`);
+  }
 
   return {
     ok: true,

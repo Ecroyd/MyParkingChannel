@@ -47,19 +47,39 @@ function detectTenantFromEmail(email: { from_address?: string | null; subject?: 
   return null;
 }
 
-// Async function to parse files (fire-and-forget)
+// Async function to parse files
 async function parseFilesAsync(fileIds: string[], tenantId: string, emailId: string) {
-  const { parseEmailFile } = await import("@/lib/ingest/parseEmailFile");
+  console.log(`[ingest-email] 🔄 Starting async parse for ${fileIds.length} files, tenant ${tenantId}`);
   
-  for (const fileId of fileIds) {
-    try {
-      const result = await parseEmailFile(fileId, tenantId);
-      if (result.ok) {
-        console.log(`[ingest-email] Auto-parsed file ${fileId}: ${result.importResult?.successCount || 0} bookings`);
+  try {
+    console.log(`[ingest-email] 📦 Importing parseEmailFile module...`);
+    const { parseEmailFile } = await import("@/lib/ingest/parseEmailFile");
+    console.log(`[ingest-email] ✅ Module imported successfully`);
+    
+    for (const fileId of fileIds) {
+      try {
+        console.log(`[ingest-email] 🔍 Parsing file ${fileId}...`);
+        const result = await parseEmailFile(fileId, tenantId);
+        if (result.ok) {
+          console.log(`[ingest-email] ✅ Auto-parsed file ${fileId}: ${result.importResult?.successCount || 0} bookings, ${result.importResult?.errorCount || 0} errors`);
+        } else {
+          console.error(`[ingest-email] ❌ Parse returned not ok for file ${fileId}:`, result);
+        }
+      } catch (err: any) {
+        console.error(`[ingest-email] ❌ Auto-parse error for file ${fileId}:`, {
+          message: err.message,
+          stack: err.stack,
+          name: err.name,
+        });
       }
-    } catch (err: any) {
-      console.error(`[ingest-email] Auto-parse error for file ${fileId}:`, err.message);
     }
+    
+    console.log(`[ingest-email] ✅ Completed async parse for ${fileIds.length} files`);
+  } catch (err: any) {
+    console.error(`[ingest-email] ❌ Failed to import parseEmailFile:`, {
+      message: err.message,
+      stack: err.stack,
+    });
   }
 }
 
@@ -288,10 +308,21 @@ export async function POST(req: Request) {
     
     if (fileIds.length > 0 && tenantId) {
       console.log(`[ingest-email] Auto-parsing ${fileIds.length} files for tenant ${tenantId}`);
-      // Fire-and-forget: don't await, let it run in background
-      parseFilesAsync(fileIds, tenantId, data.id).catch((err) => {
-        console.error(`[ingest-email] Auto-parse failed:`, err);
+      
+      // In serverless, we need to wait for parsing to at least start
+      // Use Promise.race to wait up to 2 seconds, then return
+      const parsePromise = parseFilesAsync(fileIds, tenantId, data.id);
+      const timeoutPromise = new Promise(resolve => setTimeout(resolve, 2000));
+      
+      Promise.race([parsePromise, timeoutPromise]).catch((err) => {
+        console.error(`[ingest-email] Auto-parse error:`, {
+          message: err.message,
+          stack: err.stack,
+        });
       });
+      
+      // Wait a bit to let it start (but don't block too long)
+      await new Promise(resolve => setTimeout(resolve, 500));
     } else if (fileIds.length > 0) {
       console.log(`[ingest-email] No tenant mapping for ${body.from}, files will remain pending`);
     }
