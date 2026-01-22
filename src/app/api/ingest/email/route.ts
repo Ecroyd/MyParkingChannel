@@ -5,6 +5,73 @@ import { simpleParser } from "mailparser";
 
 export const runtime = "nodejs";
 
+// Map email addresses/domains to tenant IDs
+// Set via environment variable: EMAIL_TENANT_MAP='{"from@example.com":"tenant-uuid","domain.com":"tenant-uuid"}'
+// Or configure in code below
+function getEmailTenantMap(): Record<string, string> {
+  // Try environment variable first
+  if (process.env.EMAIL_TENANT_MAP) {
+    try {
+      return JSON.parse(process.env.EMAIL_TENANT_MAP);
+    } catch (e) {
+      console.error("[ingest-email] Invalid EMAIL_TENANT_MAP JSON:", e);
+    }
+  }
+  
+  // Fallback to hardcoded map (you can configure this)
+  return {
+    // Multiple emails can map to the same tenant
+    "jcecroyd@gmail.com": "bab45dab-19e8-4230-b18e-ee1f663608e5",
+    "info@flyparksexeter.co.uk": "bab45dab-19e8-4230-b18e-ee1f663608e5",
+    // Add more email addresses here as needed
+    // "another@email.com": "bab45dab-19e8-4230-b18e-ee1f663608e5",
+  };
+}
+
+function detectTenantFromEmail(email: { from_address?: string | null; subject?: string | null }): string | null {
+  const map = getEmailTenantMap();
+  
+  // Try explicit email address mapping
+  if (email.from_address && map[email.from_address]) {
+    return map[email.from_address];
+  }
+
+  // Try domain mapping
+  if (email.from_address) {
+    const domain = email.from_address.split("@")[1];
+    if (domain && map[domain]) {
+      return map[domain];
+    }
+  }
+
+  return null;
+}
+
+// Async function to parse files (fire-and-forget)
+async function parseFilesAsync(fileIds: string[], tenantId: string, emailId: string) {
+  const baseUrl = process.env.NEXT_PUBLIC_ROOT_URL || "http://localhost:3002";
+  
+  for (const fileId of fileIds) {
+    try {
+      const response = await fetch(`${baseUrl}/api/admin/ingest/parse-file`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fileId, tenantId }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: "Unknown error" }));
+        console.error(`[ingest-email] Auto-parse failed for file ${fileId}:`, error);
+      } else {
+        const result = await response.json();
+        console.log(`[ingest-email] Auto-parsed file ${fileId}: ${result.importResult?.successCount || 0} bookings`);
+      }
+    } catch (err: any) {
+      console.error(`[ingest-email] Auto-parse error for file ${fileId}:`, err.message);
+    }
+  }
+}
+
 type Attachment = {
   filename: string;
   content_type?: string;
@@ -218,6 +285,18 @@ export async function POST(req: Request) {
       console.log(`[ingest-email] No attachments in email from ${body.from}`);
     }
 
+    // Auto-parse files if tenant mapping exists (fire-and-forget, don't wait)
+    const tenantId = fileIds.length > 0 ? detectTenantFromEmail({ from_address: body.from, subject: body.subject }) : null;
+    if (fileIds.length > 0 && tenantId) {
+      console.log(`[ingest-email] Auto-parsing ${fileIds.length} files for tenant ${tenantId}`);
+      // Fire-and-forget: don't await, let it run in background
+      parseFilesAsync(fileIds, tenantId, data.id).catch((err) => {
+        console.error(`[ingest-email] Auto-parse failed:`, err);
+      });
+    } else if (fileIds.length > 0) {
+      console.log(`[ingest-email] No tenant mapping for ${body.from}, files will remain pending`);
+    }
+
     return Response.json({ 
       ok: true, 
       requestId, 
@@ -228,6 +307,7 @@ export async function POST(req: Request) {
       attachments_received: allAttachments.length,
       attachments_stored: fileIds.length,
       file_ids: fileIds,
+      auto_parse_triggered: !!tenantId,
     }, { status: 200 });
   } catch (err: any) {
     return Response.json(
