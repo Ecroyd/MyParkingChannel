@@ -312,7 +312,8 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
           .from("bookings")
           .insert({
             tenant_id: tenantId,
-            source: "aph",
+            source: "other", // Valid enum: 'direct', 'parkvia', 'holidayextras', 'manual', 'other', 'cavu', 'supplier_api'
+            external_source: "APH Email Import", // Store APH identifier here
             reference: raw.reference,
             customer_name: raw.customer_name,
             start_at: startAtParsed,

@@ -309,20 +309,18 @@ export async function POST(req: Request) {
     if (fileIds.length > 0 && tenantId) {
       console.log(`[ingest-email] Auto-parsing ${fileIds.length} files for tenant ${tenantId}`);
       
-      // In serverless, we need to wait for parsing to at least start
-      // Use Promise.race to wait up to 2 seconds, then return
-      const parsePromise = parseFilesAsync(fileIds, tenantId, data.id);
-      const timeoutPromise = new Promise(resolve => setTimeout(resolve, 2000));
-      
-      Promise.race([parsePromise, timeoutPromise]).catch((err) => {
-        console.error(`[ingest-email] Auto-parse error:`, {
-          message: err.message,
-          stack: err.stack,
+      // Wait for parsing to complete (synchronous approach for serverless)
+      // This ensures parsing finishes before the response is sent
+      try {
+        await parseFilesAsync(fileIds, tenantId, data.id);
+        console.log(`[ingest-email] ✅ Auto-parse completed for all files`);
+      } catch (parseErr: any) {
+        console.error(`[ingest-email] ❌ Auto-parse failed:`, {
+          message: parseErr?.message,
+          stack: parseErr?.stack,
         });
-      });
-      
-      // Wait a bit to let it start (but don't block too long)
-      await new Promise(resolve => setTimeout(resolve, 500));
+        // Don't fail the request - files are stored, parsing can be retried manually
+      }
     } else if (fileIds.length > 0) {
       console.log(`[ingest-email] No tenant mapping for ${body.from}, files will remain pending`);
     }
