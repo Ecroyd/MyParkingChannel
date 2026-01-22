@@ -1,69 +1,54 @@
 import { getServiceSupabase } from "@/lib/supabase/service";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { makeImportDedupeKey } from "@/lib/bookings/dedupe";
-import { parse } from "csv-parse/sync";
-import { parseAphRow } from "@/lib/importers/aph/parseAphRow";
+import { mapAphCsvLike, detectAndMapFromAttachment } from "@/lib/importers/canonical/mappers";
 
 /**
- * Parse APH CSV file (33-column, quoted, positional CSV with no headers)
+ * Parse file using canonical mappers (supports APH, CAVU, etc.)
  */
-function parseAphCsvFile(buffer: Buffer) {
+function parseFileWithCanonicalMappers(buffer: Buffer, filename: string) {
   const text = buffer.toString("utf-8");
   
-  // Parse CSV rows (no headers, quoted fields, relax column count)
-  const rows: string[][] = parse(text, {
-    relax_quotes: true,
-    relax_column_count: true,
-    trim: false,
-    skip_empty_lines: true,
-    bom: true, // Handle BOM if present
-  });
-
-  const parsedRows: any[] = [];
-
-  for (const row of rows) {
-    try {
-      const parsed = parseAphRow(row);
-      
-      // Skip if missing essential fields
-      if (!parsed.external_reference || !parsed.customer_last_name) {
-        console.log(`[parseAphCsvFile] Skipping row: missing reference or last name`);
-        continue;
-      }
-
-      parsedRows.push({
-        source: "aph",
-        reference: parsed.external_reference,
-        customer_name: parsed.customer_name,
-        customer_lastname: parsed.customer_last_name,
-        customer_title: parsed.customer_title,
-        customer_firstname: parsed.customer_first_name,
-        start_at: parsed.start_at,
-        end_at: parsed.end_at,
-        vehicle_reg: parsed.vehicle_reg,
-        vehicle_colour: parsed.vehicle_colour,
-        vehicle_make: parsed.vehicle_make,
-        vehicle_model: null, // APH doesn't provide model
-        flight_number: parsed.return_flight_no,
-        phone: parsed.customer_phone,
-        status: parsed.external_status || "reserved",
-        price: parsed.total_price || 0,
-        money_received: 0, // APH doesn't provide this in the CSV
-        notes: null,
-        // APH-specific fields for staging
-        external_reference: parsed.external_reference,
-        external_status: parsed.external_status,
-        return_flight_no: parsed.return_flight_no,
-        product_code: parsed.product_code,
-        currency: parsed.currency,
-        total_price: parsed.total_price,
-        raw_fields: parsed.raw_fields,
-      });
-    } catch (err: any) {
-      console.error(`[parseAphCsvFile] Error parsing row:`, err);
-      continue;
-    }
+  // Use canonical mapper to detect and parse
+  const canonicalBookings = detectAndMapFromAttachment(filename, text);
+  
+  if (!canonicalBookings || canonicalBookings.length === 0) {
+    throw new Error(`Could not detect format for file: ${filename}`);
   }
+
+  // Convert canonical format to internal row format
+  const parsedRows = canonicalBookings.map((canonical) => {
+    return {
+      source: canonical.channel.toLowerCase(),
+      reference: canonical.booking_reference,
+      customer_name: canonical.customer_firstname && canonical.customer_lastname
+        ? `${canonical.customer_firstname} ${canonical.customer_lastname}`.trim()
+        : canonical.customer_lastname || canonical.customer_firstname || null,
+      customer_lastname: canonical.customer_lastname,
+      customer_title: null,
+      customer_firstname: canonical.customer_firstname,
+      start_at: canonical.start_at,
+      end_at: canonical.end_at,
+      vehicle_reg: canonical.vehicle_registration,
+      vehicle_colour: canonical.vehicle_colour,
+      vehicle_make: canonical.vehicle_make,
+      vehicle_model: canonical.vehicle_model,
+      flight_number: canonical.return_flight_number || canonical.outbound_flight_number,
+      phone: canonical.customer_phone,
+      status: "reserved",
+      price: canonical.total_price || 0,
+      money_received: 0,
+      notes: null,
+      // Additional fields
+      external_reference: canonical.third_party_reference || canonical.booking_reference,
+      external_status: null,
+      return_flight_no: canonical.return_flight_number,
+      product_code: null,
+      currency: canonical.currency || "GBP",
+      total_price: canonical.total_price,
+      raw_fields: canonical.raw,
+    };
+  });
 
   return { headers: [], rows: parsedRows };
 }
@@ -113,16 +98,12 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   
   console.log(`[parseEmailFile] File downloaded: ${buffer.length} bytes`);
 
-  // 4. Parse file
+  // 4. Parse file using canonical mappers
   let parsedData;
   try {
-    if (file.filename.toLowerCase().endsWith('.txt') || file.filename.toLowerCase().includes('aph')) {
-      console.log(`[parseEmailFile] Parsing APH CSV file...`);
-      parsedData = parseAphCsvFile(buffer);
-      console.log(`[parseEmailFile] Parsed ${parsedData.rows.length} rows from APH CSV`);
-    } else {
-      throw new Error(`Unsupported file type: ${file.filename}`);
-    }
+    console.log(`[parseEmailFile] Parsing file with canonical mappers: ${file.filename}`);
+    parsedData = parseFileWithCanonicalMappers(buffer, file.filename);
+    console.log(`[parseEmailFile] Parsed ${parsedData.rows.length} rows from ${file.filename}`);
   } catch (parseErr: any) {
     console.error(`[parseEmailFile] Parse error:`, parseErr);
     await supabase
@@ -156,6 +137,15 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
 
   // Prepare staging inserts
   const stagingInserts = parsedData.rows.map((raw) => {
+    // Generate dedupe_key (required by staging table)
+    // Use the start_at as-is for now, it will be normalized later when promoting to bookings
+    const dedupe_key = makeImportDedupeKey({
+      source: raw.source || "aph",
+      reference: raw.reference,
+      vehicle_reg: raw.vehicle_reg,
+      start_utc: raw.start_at || new Date().toISOString(), // Fallback to now if missing
+    });
+
     return {
       tenant_id: tenantId,
       source: "aph_email",
@@ -185,6 +175,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       status: raw.status || raw.external_status || "reserved",
       money_received: raw.money_received || 0,
       notes: null,
+      dedupe_key: dedupe_key, // Required field
       // Store raw data for debugging
       raw_json: {
         mapping: "aphV1",
@@ -195,18 +186,38 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     };
   });
 
-  // Insert into staging
-  const { data: stagedData, error: stagingError } = await adminSupabase
+  // Insert into staging (handle duplicates gracefully)
+  let stagedData: any[] = [];
+  const { data: insertedData, error: stagingError } = await adminSupabase
     .from("booking_import_staging")
     .insert(stagingInserts)
     .select("id, external_reference");
 
   if (stagingError) {
-    console.error(`[parseEmailFile] Staging insert failed:`, stagingError);
-    throw new Error(`Staging insert failed: ${stagingError.message}`);
+    // Check if it's a duplicate key error
+    const isDuplicate = stagingError.code === '23505' || 
+                       stagingError.message?.includes('duplicate key') ||
+                       stagingError.message?.includes('unique constraint');
+    
+    if (isDuplicate) {
+      console.log(`[parseEmailFile] ⚠️ Duplicate detected - booking already in staging, fetching existing records...`);
+      // Fetch existing records by dedupe_key to continue processing
+      const dedupeKeys = stagingInserts.map(s => s.dedupe_key);
+      const { data: existing } = await adminSupabase
+        .from("booking_import_staging")
+        .select("id, external_reference, dedupe_key")
+        .in("dedupe_key", dedupeKeys);
+      
+      stagedData = existing || [];
+      console.log(`[parseEmailFile] Found ${stagedData.length} existing staging records, continuing with booking promotion...`);
+    } else {
+      console.error(`[parseEmailFile] Staging insert failed:`, stagingError);
+      throw new Error(`Staging insert failed: ${stagingError.message}`);
+    }
+  } else {
+    stagedData = insertedData || [];
+    console.log(`[parseEmailFile] ✅ Inserted ${stagedData.length} rows into staging`);
   }
-
-  console.log(`[parseEmailFile] ✅ Inserted ${stagedData?.length || 0} rows into staging`);
 
   // 6. Auto-promote from staging to bookings (optional - you can remove this to require manual finalize)
   // For now, we'll auto-promote to match existing behavior
@@ -274,20 +285,38 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
         start_utc: startAtParsed
       });
 
-      // Check for existing booking
+      // Check for existing booking (by dedupe_key)
       const { data: existing } = await adminSupabase
         .from("bookings")
         .select("id")
         .eq("tenant_id", tenantId)
         .eq("dedupe_key", dedupe_key)
         .maybeSingle();
+      
+      // Also check by reference + vehicle + dates as fallback
+      let existingByRef = null;
+      if (!existing && raw.reference && raw.vehicle_reg && startAtParsed) {
+        const { data: refMatch } = await adminSupabase
+          .from("bookings")
+          .select("id")
+          .eq("tenant_id", tenantId)
+          .eq("reference", raw.reference)
+          .eq("plate", raw.vehicle_reg)
+          .eq("start_at", startAtParsed)
+          .maybeSingle();
+        existingByRef = refMatch;
+      }
+      
+      const existingBooking = existing || existingByRef;
 
-      if (existing) {
-        // Update existing
+      if (existingBooking) {
+        // Update existing booking
+        console.log(`[parseEmailFile] Updating existing booking: ${existingBooking.id}`);
         const { error: updateErr } = await adminSupabase
           .from("bookings")
           .update({
             customer_name: raw.customer_name,
+            customer_phone: raw.phone || null,
             start_at: startAtParsed,
             end_at: endAtParsed,
             plate: raw.vehicle_reg || null,
@@ -298,7 +327,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
             money_received: raw.money_received || 0,
             notes: raw.notes || null,
           })
-          .eq("id", existing.id);
+          .eq("id", existingBooking.id);
         
         if (updateErr) {
           errors.push({ rowIndex: i + 1, reason: updateErr.message, rowData: raw });
@@ -316,6 +345,8 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
             external_source: "APH Email Import", // Store APH identifier here
             reference: raw.reference,
             customer_name: raw.customer_name,
+            customer_email: "", // APH CSV doesn't provide email, use empty string (required field)
+            customer_phone: raw.phone || null,
             start_at: startAtParsed,
             end_at: endAtParsed,
             plate: raw.vehicle_reg || null,
