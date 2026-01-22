@@ -281,8 +281,8 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
 
       const dedupe_key = makeImportDedupeKey({
         source: raw.source || "aph",
-        reference: raw.reference,
-        vehicle_reg: raw.vehicle_reg,
+        reference: raw.reference || raw.external_reference || "UNKNOWN",
+        vehicle_reg: raw.vehicle_reg || "UNKNOWN",
         start_utc: startAtParsed
       });
 
