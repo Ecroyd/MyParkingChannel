@@ -19,7 +19,8 @@ function parseFileWithCanonicalMappers(buffer: Buffer, filename: string) {
   // Convert canonical format to internal row format
   const parsedRows = canonicalBookings.map((canonical) => {
     return {
-      source: canonical.channel.toLowerCase(),
+      channel: canonical.channel, // Keep original channel (CAVU, APH, FLYPARKS_EMAIL) for source mapping
+      source: canonical.channel.toLowerCase(), // For dedupe key
       reference: canonical.booking_reference,
       customer_name: canonical.customer_firstname && canonical.customer_lastname
         ? `${canonical.customer_firstname} ${canonical.customer_lastname}`.trim()
@@ -137,11 +138,28 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
 
   // Prepare staging inserts
   const stagingInserts = parsedData.rows.map((raw) => {
+    // Determine source based on detected channel
+    const channel = (raw as any).channel || "APH";
+    let sourceValue: string;
+    let externalSourceLabel: string;
+    
+    if (channel === "CAVU") {
+      sourceValue = "cavu"; // Valid enum value
+      externalSourceLabel = "CAVU Email Import";
+    } else if (channel === "FLYPARKS_EMAIL") {
+      sourceValue = "other"; // Valid enum value
+      externalSourceLabel = "Flyparks Email Import";
+    } else {
+      // Default to APH
+      sourceValue = "other"; // Valid enum value
+      externalSourceLabel = "APH Email Import";
+    }
+
     // Generate dedupe_key (required by staging table)
     // Use the start_at as-is for now, it will be normalized later when promoting to bookings
     // Provide fallbacks for required fields
     const dedupe_key = makeImportDedupeKey({
-      source: raw.source || "aph",
+      source: raw.source || channel.toLowerCase(),
       reference: raw.reference || raw.external_reference || "UNKNOWN",
       vehicle_reg: raw.vehicle_reg || "UNKNOWN",
       start_utc: raw.start_at || new Date().toISOString(), // Fallback to now if missing
@@ -149,7 +167,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
 
     return {
       tenant_id: tenantId,
-      source: "aph_email",
+      source: sourceValue,
       source_email_id: emailId,
       source_filename: file.filename,
       // Map to existing staging columns
@@ -179,7 +197,8 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       dedupe_key: dedupe_key, // Required field
       // Store raw data for debugging
       raw_json: {
-        mapping: "aphV1",
+        mapping: channel === "CAVU" ? "cavuV1" : channel === "FLYPARKS_EMAIL" ? "flyparksV1" : "aphV1",
+        channel: channel,
         raw_fields: raw.raw_fields || [],
         external_reference: raw.external_reference,
         external_status: raw.external_status,
@@ -337,13 +356,29 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
           successCount++;
         }
       } else {
+        // Determine source and external_source based on channel
+        const channel = (raw as any).channel || "APH";
+        let bookingSource: "cavu" | "other";
+        let externalSource: string;
+        
+        if (channel === "CAVU") {
+          bookingSource = "cavu";
+          externalSource = "CAVU Email Import";
+        } else if (channel === "FLYPARKS_EMAIL") {
+          bookingSource = "other";
+          externalSource = "Flyparks Email Import";
+        } else {
+          bookingSource = "other";
+          externalSource = "APH Email Import";
+        }
+
         // Insert new
         const { error: insertErr } = await adminSupabase
           .from("bookings")
           .insert({
             tenant_id: tenantId,
-            source: "other", // Valid enum: 'direct', 'parkvia', 'holidayextras', 'manual', 'other', 'cavu', 'supplier_api'
-            external_source: "APH Email Import", // Store APH identifier here
+            source: bookingSource, // Valid enum: 'direct', 'parkvia', 'holidayextras', 'manual', 'other', 'cavu', 'supplier_api'
+            external_source: externalSource, // Store channel identifier here
             reference: raw.reference,
             customer_name: raw.customer_name,
             customer_email: "", // APH CSV doesn't provide email, use empty string (required field)
