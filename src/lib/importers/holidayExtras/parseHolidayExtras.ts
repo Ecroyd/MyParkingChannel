@@ -108,7 +108,7 @@ export function parseHolidayExtrasText(text: string): CanonicalBooking[] {
     }
 
     return {
-      channel: "HOLIDAY_EXTRAS",
+      channel: "HOLIDAY_EXTRAS" as const,
       booking_reference: bookingRef,
       third_party_reference: null,
       start_at: startAt,

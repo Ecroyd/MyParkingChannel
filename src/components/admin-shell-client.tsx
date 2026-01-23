@@ -7,6 +7,7 @@ import { createBrowserClient } from '@supabase/ssr';
 import { Menu, X } from 'lucide-react';
 import { DynamicPricingBadge } from './admin/DynamicPricingBadge';
 import { CavuSyncHealthBanner } from './admin/CavuSyncHealthBanner';
+import { EmailParseFailureBanner } from './admin/EmailParseFailureBanner';
 import Sidebar from '@/components/admin/Sidebar';
 import MobileSidebar from '@/components/admin/MobileSidebar';
 import InstallPWAButton from '@/components/InstallPWAButton';
@@ -141,8 +142,9 @@ export default function AdminShellClient({
 
         {/* Main Content */}
         <main className="flex-1 overflow-y-auto">
-          {/* CAVU Sync Health Banner */}
-          <div className="px-4 md:px-6 pt-4">
+          {/* Health Banners */}
+          <div className="px-4 md:px-6 pt-4 space-y-4">
+            <EmailParseFailureBanner />
             <CavuSyncHealthBanner />
           </div>
           <div className="p-4 md:p-6">
