@@ -76,7 +76,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   // If already parsed, reset status to allow re-parsing (for retry scenarios)
   if (file.parse_status === "parsed") {
     console.log(`[parseEmailFile] File already parsed, resetting status for retry: ${fileId}`);
-    await supabase
+    const { error: resetError } = await supabase
       .from("ingest_email_files")
       .update({ 
         parse_status: "pending",
@@ -84,6 +84,12 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
         parse_error: null,
       })
       .eq("id", fileId);
+    
+    if (resetError) {
+      console.error(`[parseEmailFile] Failed to reset status:`, resetError);
+    } else {
+      console.log(`[parseEmailFile] ✅ Status reset to pending for retry`);
+    }
   }
   
   console.log(`[parseEmailFile] File status: ${file.parse_status}, filename: ${file.filename}`);

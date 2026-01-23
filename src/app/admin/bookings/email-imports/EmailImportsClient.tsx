@@ -179,11 +179,21 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
     );
   }
 
-  const allFiles = [
+      const allFiles = [
     ...status.failedFiles.map(f => ({ ...f, category: 'failed' as const })),
     ...status.pendingFiles.map(f => ({ ...f, category: 'pending' as const })),
     ...status.emptyParsedFiles.map(f => ({ ...f, category: 'empty' as const })),
   ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  console.log('[EMAIL IMPORTS] All files to display:', {
+    total: allFiles.length,
+    byCategory: {
+      failed: status.failedFiles.length,
+      pending: status.pendingFiles.length,
+      empty: status.emptyParsedFiles.length,
+    },
+    fileIds: allFiles.map(f => ({ id: f.id, filename: f.filename, category: f.category })),
+  });
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">

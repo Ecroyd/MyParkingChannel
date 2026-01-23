@@ -77,7 +77,11 @@ export async function GET() {
     const failedFiles = (allFailedFiles || []).filter((file: any) => {
       const email = file.ingest_emails;
       const fileTenantId = detectTenantFromEmail(email);
-      return fileTenantId === ctx.tenantId;
+      const matches = fileTenantId === ctx.tenantId;
+      if (matches) {
+        console.log(`[EMAIL PARSE HEALTH] Failed file ${file.filename} (${file.id}) matches tenant ${ctx.tenantId}`);
+      }
+      return matches;
     }).slice(0, 50);
 
     if (failedError) {
@@ -86,12 +90,14 @@ export async function GET() {
     }
 
     // Get files that are still pending (may indicate a stuck parse)
+    // Exclude files that were recently parsed (within last 5 minutes) - they might be in transition
     const { data: allPendingFiles, error: pendingError } = await adminClient
       .from("ingest_email_files")
       .select(`
         id,
         filename,
         parse_status,
+        parsed_at,
         created_at,
         ingest_emails!inner(
           id,
@@ -105,11 +111,27 @@ export async function GET() {
       .order("created_at", { ascending: false })
       .limit(50);
 
-    // Filter by tenant
+    // Filter by tenant and exclude files that were recently parsed (might be in transition)
     const pendingFiles = (allPendingFiles || []).filter((file: any) => {
       const email = file.ingest_emails;
       const fileTenantId = detectTenantFromEmail(email);
-      return fileTenantId === ctx.tenantId;
+      const matches = fileTenantId === ctx.tenantId;
+      
+      // Exclude if file was recently parsed (within last 5 minutes) - it might be updating
+      if (matches && file.parsed_at) {
+        const parsedTime = new Date(file.parsed_at);
+        const now = new Date();
+        const minutesSinceParse = (now.getTime() - parsedTime.getTime()) / (1000 * 60);
+        if (minutesSinceParse < 5) {
+          console.log(`[EMAIL PARSE HEALTH] Pending file ${file.filename} (${file.id}) was recently parsed (${minutesSinceParse.toFixed(1)} min ago) - excluding from stuck pending`);
+          return false;
+        }
+      }
+      
+      if (matches) {
+        console.log(`[EMAIL PARSE HEALTH] Pending file ${file.filename} (${file.id}) matches tenant ${ctx.tenantId} and is truly stuck`);
+      }
+      return matches;
     }).slice(0, 20);
 
     if (pendingError) {
@@ -141,7 +163,11 @@ export async function GET() {
     const parsedFiles = (allParsedFiles || []).filter((file: any) => {
       const email = file.ingest_emails;
       const fileTenantId = detectTenantFromEmail(email);
-      return fileTenantId === ctx.tenantId;
+      const matches = fileTenantId === ctx.tenantId;
+      if (matches) {
+        console.log(`[EMAIL PARSE HEALTH] Parsed file ${file.filename} (${file.id}) matches tenant ${ctx.tenantId}, will check for empty results`);
+      }
+      return matches;
     }).slice(0, 50);
 
     if (parsedError) {
@@ -246,14 +272,14 @@ export async function GET() {
         // If parsed but no staging rows AND no bookings, it's a potential issue
         // Note: We check both because staging might have been cleared but bookings exist
         if ((stagingCount || 0) === 0 && bookingCount === 0) {
-          console.log(`[EMAIL PARSE HEALTH] ⚠️ File ${file.filename} parsed but empty - adding to issues`);
+          console.log(`[EMAIL PARSE HEALTH] ⚠️ File ${file.filename} (${file.id}) parsed but empty - adding to issues`);
           parsedWithIssues.push({
             ...file,
             staging_count: stagingCount || 0,
             booking_count: bookingCount,
           });
         } else {
-          console.log(`[EMAIL PARSE HEALTH] ✅ File ${file.filename} has data - NOT adding to issues`);
+          console.log(`[EMAIL PARSE HEALTH] ✅ File ${file.filename} (${file.id}) has data (staging: ${stagingCount || 0}, bookings: ${bookingCount}) - NOT adding to issues`);
         }
       }
       console.log(`[EMAIL PARSE HEALTH] Found ${parsedWithIssues.length} empty parsed files out of ${parsedFiles.length} total`);
