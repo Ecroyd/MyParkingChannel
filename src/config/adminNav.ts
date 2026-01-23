@@ -23,6 +23,7 @@ export const ADMIN_NAV: NavNode[] = [
     section: "Core",
     children: [
       { key: "bookings-upload", label: "Import Data", href: "/admin/bookings/upload" },
+      { key: "bookings-email-imports", label: "Email Imports", href: "/admin/bookings/email-imports" },
     ],
   },
   { key: "booking-rules", label: "Booking Rules", href: "/admin/booking-rules", section: "Core", minRole: "admin" },

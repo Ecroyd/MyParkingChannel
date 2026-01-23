@@ -177,10 +177,10 @@ export function EmailParseFailureBanner() {
 
             <div className="mt-3 flex items-center gap-3">
               <Link
-                href="/admin/bookings/upload"
+                href="/admin/bookings/email-imports"
                 className="text-sm font-medium text-red-700 underline hover:text-red-900"
               >
-                View Import Status →
+                View & Manage Issues →
               </Link>
               <Button
                 variant="outline"
