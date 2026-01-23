@@ -248,6 +248,83 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
           </CardContent>
         </Card>
       ) : (
+        <>
+          {/* Bulk Actions */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Bulk Actions</CardTitle>
+              <CardDescription>
+                Clean up old empty files (older than 7 days with no bookings)
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-4">
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    const oldEmptyFiles = allFiles.filter(f => {
+                      const fileDate = new Date(f.created_at);
+                      const daysOld = (Date.now() - fileDate.getTime()) / (1000 * 60 * 60 * 24);
+                      return daysOld > 7 && (f.category === 'empty' || f.category === 'pending');
+                    });
+                    
+                    if (oldEmptyFiles.length === 0) {
+                      alert('No old empty files found (older than 7 days)');
+                      return;
+                    }
+                    
+                    if (!confirm(`Delete ${oldEmptyFiles.length} old empty file(s)?\n\nThis will permanently remove these file records.`)) {
+                      return;
+                    }
+                    
+                    setProcessing(prev => {
+                      const next = new Set(prev);
+                      oldEmptyFiles.forEach(f => next.add(f.id));
+                      return next;
+                    });
+                    
+                    let deleted = 0;
+                    let failed = 0;
+                    
+                    for (const file of oldEmptyFiles) {
+                      try {
+                        const res = await fetch(`/api/admin/ingest/delete-file`, {
+                          method: 'DELETE',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ fileId: file.id }),
+                        });
+                        if (res.ok) {
+                          deleted++;
+                        } else {
+                          failed++;
+                        }
+                      } catch (err) {
+                        failed++;
+                      }
+                    }
+                    
+                    alert(`✅ Deleted ${deleted} file(s)\n${failed > 0 ? `❌ Failed to delete ${failed} file(s)` : ''}`);
+                    await fetchStatus();
+                  }}
+                  disabled={processing.size > 0}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Old Empty Files (7+ days)
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  {allFiles.filter(f => {
+                    const fileDate = new Date(f.created_at);
+                    const daysOld = (Date.now() - fileDate.getTime()) / (1000 * 60 * 60 * 24);
+                    return daysOld > 7 && (f.category === 'empty' || f.category === 'pending');
+                  }).length} old files found
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+      
+      {allFiles.length > 0 && (
         <div className="space-y-4">
           {allFiles.map((file) => {
             const isProcessing = processing.has(file.id);
@@ -281,6 +358,14 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
                           </div>
                           <div>
                             <span className="font-medium">Created:</span> {formatDate(file.created_at)}
+                            {(() => {
+                              const fileDate = new Date(file.created_at);
+                              const daysOld = (Date.now() - fileDate.getTime()) / (1000 * 60 * 60 * 24);
+                              if (daysOld > 1) {
+                                return <span className="text-muted-foreground ml-2">({Math.floor(daysOld)} days ago)</span>;
+                              }
+                              return null;
+                            })()}
                           </div>
                           {file.parsed_at && (
                             <div>
@@ -294,7 +379,30 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
                           )}
                           {file.category === 'empty' && (
                             <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded text-orange-800 text-xs">
-                              File was parsed but created 0 bookings. This may indicate a format issue or empty file.
+                              <div className="font-medium mb-1">File was parsed but created 0 bookings.</div>
+                              <div>This usually means the file is empty, has no valid data rows, or all rows were skipped (e.g., missing vehicle registration).</div>
+                              {(() => {
+                                const fileDate = new Date(file.created_at);
+                                const daysOld = (Date.now() - fileDate.getTime()) / (1000 * 60 * 60 * 24);
+                                if (daysOld > 7) {
+                                  return <div className="mt-1 text-orange-600 font-medium">⚠️ This file is {Math.floor(daysOld)} days old - consider deleting it.</div>;
+                                }
+                                return null;
+                              })()}
+                            </div>
+                          )}
+                          {file.category === 'pending' && (
+                            <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-amber-800 text-xs">
+                              <div className="font-medium mb-1">File is stuck in pending status.</div>
+                              <div>This usually means parsing was never triggered or failed silently. Try retrying or delete if it's an old test file.</div>
+                              {(() => {
+                                const fileDate = new Date(file.created_at);
+                                const daysOld = (Date.now() - fileDate.getTime()) / (1000 * 60 * 60 * 24);
+                                if (daysOld > 7) {
+                                  return <div className="mt-1 text-amber-600 font-medium">⚠️ This file is {Math.floor(daysOld)} days old - consider deleting it.</div>;
+                                }
+                                return null;
+                              })()}
                             </div>
                           )}
                         </div>
