@@ -58,7 +58,7 @@ export function parseHolidayExtrasText(text: string): CanonicalBooking[] {
     // 12: gross? (125 / 63.99 etc)
     // 13: return date (280126)
     // 14: return time (17:30)
-    // 15: vehicle reg (MF18UFU)
+    // 15: vehicle reg (MF18UFU) - CAN BE EMPTY!
     // 16: two-letter code (QI/CK/etc)
     // 17: vehicle colour
     // 18: vehicle make
@@ -88,10 +88,24 @@ export function parseHolidayExtrasText(text: string): CanonicalBooking[] {
     const outboundFlight = trim(f[20]) || null;
     const returnFlight = trim(f[25]) || null;
 
-    const vehicleReg = trim(f[15]) || null;
+    const vehicleRegRaw = trim(f[15]) || "";
+    // Filter out empty strings, "-", and whitespace-only values
+    const vehicleReg = vehicleRegRaw && vehicleRegRaw !== "-" && vehicleRegRaw.trim() !== "" 
+      ? vehicleRegRaw.trim() 
+      : null;
     const vehicleColour = trim(f[17]) || null;
     const vehicleMake = trim(f[18]) || null;
     const vehicleModel = trim(f[19]) || null;
+
+    // Skip rows without vehicle registration (required for bookings table)
+    if (!vehicleReg) {
+      console.warn(`[parseHolidayExtras] Skipping row with missing vehicle_reg:`, {
+        bookingRef,
+        field15: f[15],
+        fields: f.slice(0, 20),
+      });
+      return null;
+    }
 
     return {
       channel: "HOLIDAY_EXTRAS",
@@ -113,5 +127,5 @@ export function parseHolidayExtrasText(text: string): CanonicalBooking[] {
       currency: "GBP",
       raw: { fields: f, external_status: status },
     };
-  });
+  }).filter((r): r is NonNullable<typeof r> => r !== null); // Filter out nulls (rows without vehicle_reg)
 }

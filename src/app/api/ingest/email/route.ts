@@ -23,6 +23,7 @@ function getEmailTenantMap(): Record<string, string> {
     // Multiple emails can map to the same tenant
     "jcecroyd@gmail.com": "bab45dab-19e8-4230-b18e-ee1f663608e5",
     "info@flyparksexeter.co.uk": "bab45dab-19e8-4230-b18e-ee1f663608e5",
+    "eek_me@hotmail.com": "bab45dab-19e8-4230-b18e-ee1f663608e5", // Added for Flyparks email forwarding
     // Add more email addresses here as needed
     // "another@email.com": "bab45dab-19e8-4230-b18e-ee1f663608e5",
   };

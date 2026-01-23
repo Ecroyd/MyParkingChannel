@@ -108,6 +108,16 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     console.log(`[parseEmailFile] Parsing file with canonical mappers: ${file.filename}`);
     parsedData = parseFileWithCanonicalMappers(buffer, file.filename);
     console.log(`[parseEmailFile] Parsed ${parsedData.rows.length} rows from ${file.filename}`);
+    
+    // Log first few rows for debugging
+    if (parsedData.rows.length > 0) {
+      console.log(`[parseEmailFile] Sample row:`, {
+        reference: parsedData.rows[0].reference,
+        channel: (parsedData.rows[0] as any).channel,
+        start_at: parsedData.rows[0].start_at,
+        vehicle_reg: parsedData.rows[0].vehicle_reg,
+      });
+    }
   } catch (parseErr: any) {
     console.error(`[parseEmailFile] Parse error:`, parseErr);
     await supabase
@@ -121,12 +131,12 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   }
 
   if (!parsedData.rows || parsedData.rows.length === 0) {
-    console.error(`[parseEmailFile] No valid rows found`);
+    console.error(`[parseEmailFile] No valid rows found - file format detected but extracted 0 rows`);
     await supabase
       .from("ingest_email_files")
       .update({ 
         parse_status: "failed", 
-        parse_error: "No valid rows found in file" 
+        parse_error: "File format detected but no valid rows extracted. File may be empty or have no data rows." 
       })
       .eq("id", fileId);
     throw new Error("No valid rows found in file");
@@ -214,6 +224,34 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
 
   // Insert into staging (handle duplicates gracefully)
   let stagedData: any[] = [];
+  
+  if (stagingInserts.length === 0) {
+    console.warn(`[parseEmailFile] ⚠️ No staging inserts to process - parsedData.rows was empty`);
+    // Still mark as parsed if format was detected, but log the issue
+    await supabase
+      .from("ingest_email_files")
+      .update({ 
+        parse_status: "parsed",
+        parsed_at: new Date().toISOString(),
+        parse_error: "File format detected but no valid rows extracted"
+      })
+      .eq("id", fileId);
+    return {
+      ok: true,
+      fileId: file.id,
+      filename: file.filename,
+      rowsParsed: 0,
+      stagedCount: 0,
+      importResult: {
+        runId: null,
+        successCount: 0,
+        errorCount: 0,
+        errors: [{ rowIndex: 0, reason: "No valid rows extracted from file", rowData: null }],
+      },
+    };
+  }
+  
+  console.log(`[parseEmailFile] Preparing to insert ${stagingInserts.length} rows into staging`);
   const { data: insertedData, error: stagingError } = await adminSupabase
     .from("booking_import_staging")
     .insert(stagingInserts)
@@ -238,6 +276,14 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       console.log(`[parseEmailFile] Found ${stagedData.length} existing staging records, continuing with booking promotion...`);
     } else {
       console.error(`[parseEmailFile] Staging insert failed:`, stagingError);
+      // Update file status with error
+      await supabase
+        .from("ingest_email_files")
+        .update({ 
+          parse_status: "failed", 
+          parse_error: `Staging insert failed: ${stagingError.message}` 
+        })
+        .eq("id", fileId);
       throw new Error(`Staging insert failed: ${stagingError.message}`);
     }
   } else {
@@ -388,6 +434,17 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
           externalSource = "APH Email Import";
         }
 
+        // Skip if vehicle_reg is missing (required for bookings table)
+        if (!raw.vehicle_reg || raw.vehicle_reg.trim() === "" || raw.vehicle_reg === "-") {
+          console.log(`[parseEmailFile] ⚠️ Skipping row ${i + 1}: Missing vehicle registration`, {
+            reference: raw.reference,
+            channel: (raw as any).channel,
+          });
+          errors.push({ rowIndex: i + 1, reason: "Missing vehicle registration (required field)", rowData: raw });
+          errorCount++;
+          continue;
+        }
+
         // Insert new
         const { error: insertErr } = await adminSupabase
           .from("bookings")
@@ -401,7 +458,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
             customer_phone: raw.phone || null,
             start_at: startAtParsed,
             end_at: endAtParsed,
-            plate: raw.vehicle_reg || null,
+            plate: raw.vehicle_reg, // Already validated as non-null above
             car_color: raw.vehicle_colour || null,
             car_make: raw.vehicle_make || null,
             car_model: raw.vehicle_model || null,

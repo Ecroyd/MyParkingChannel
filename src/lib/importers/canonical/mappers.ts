@@ -125,24 +125,89 @@ export function mapFlyparksEmailText(emailText: string): CanonicalBooking[] {
     // Escape special regex characters in label
     const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     
-    // Try various patterns
+    // List of known field labels to stop at (prevents capturing too much)
+    const stopLabels = [
+      'Departure date', 'Arrival time', 'Return date', 'Return time',
+      'Reference', 'Vehicle registration', 'Vehicle model', 'Vehicle colour',
+      'Total Cost', 'Days', 'Parking Cost', 'Product', 'Product Base Cost',
+      'Departure flight number', 'Return flight number'
+    ];
+    const stopPattern = stopLabels.map(l => l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+    
+    // Try various patterns - but stop at next field label, newline, or reasonable length
     const patterns = [
-      // Standard: "Label: value"
-      new RegExp(`${escapedLabel}:\\s*([^\\n\\r]+)`, "i"),
+      // Standard: "Label: value" (stop at next label, newline, or 50 chars max for date/time fields)
+      new RegExp(`${escapedLabel}:\\s*([^\\n\\r]{1,50}?)(?=\\s*(?:${stopPattern}):|\\n|\\r|$)`, "i"),
       // With tabs: "Label:\tvalue"
-      new RegExp(`${escapedLabel}:\\s+([^\\n\\r]+)`, "i"),
+      new RegExp(`${escapedLabel}:\\s+([^\\n\\r]{1,50}?)(?=\\s*(?:${stopPattern}):|\\n|\\r|$)`, "i"),
       // Without colon: "Label value"
-      new RegExp(`${escapedLabel}\\s+([^\\n\\r:]+)`, "i"),
+      new RegExp(`${escapedLabel}\\s+([^\\n\\r:]{1,50}?)(?=\\s*(?:${stopPattern}):|\\n|\\r|$)`, "i"),
       // HTML format: "Label:</strong> value"
-      new RegExp(`${escapedLabel}[^>]*>\\s*([^<\\n\\r]+)`, "i"),
+      new RegExp(`${escapedLabel}[^>]*>\\s*([^<\\n\\r]{1,50}?)(?=<|\\s*(?:${stopPattern}):|\\n|\\r|$)`, "i"),
     ];
     
     for (const pattern of patterns) {
       const m = cleanText.match(pattern);
       if (m && m[1]) {
-        const value = m[1].trim();
+        let value = m[1].trim();
+        
+        // Stop if we hit another field label
+        const nextFieldMatch = value.match(new RegExp(`^(.+?)(?:\\s+(?:${stopPattern}):)`, "i"));
+        if (nextFieldMatch) {
+          value = nextFieldMatch[1].trim();
+        }
+        
         // Remove any trailing colons or extra punctuation
-        return value.replace(/[:;,\\.]+$/, "").trim();
+        value = value.replace(/[:;,\\.]+$/, "").trim();
+        
+        // For date/time fields, ensure they're reasonable length (dates are ~10 chars, times are ~5)
+        if (label.includes('date') && value.length > 15) {
+          // Try to extract just the date part (format: DD/MM/YYYY or DD/MM/YY)
+          const dateMatch = value.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})/);
+          if (dateMatch) {
+            value = dateMatch[1];
+          } else {
+            value = value.substring(0, 15).trim();
+          }
+        }
+        if (label.includes('time') && value.length > 8) {
+          // Try to extract just the time part (format: HH:MM)
+          const timeMatch = value.match(/(\d{1,2}:\d{2})/);
+          if (timeMatch) {
+            value = timeMatch[1];
+          } else {
+            value = value.substring(0, 8).trim();
+          }
+        }
+        
+        return value || null;
+      }
+    }
+    
+    // Fallback: if standard extraction failed, try line-by-line parsing for forwarded emails
+    // Split by common delimiters and look for the label
+    const lines = cleanText.split(/\n|\r|\\t/);
+    for (const line of lines) {
+      const lineLower = line.toLowerCase();
+      const labelLower = label.toLowerCase();
+      if (lineLower.includes(labelLower)) {
+        // Try to extract value after label
+        const match = line.match(new RegExp(`${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:?\\s*([^\\s]+)`, "i"));
+        if (match && match[1]) {
+          let value = match[1].trim();
+          // Clean up value
+          value = value.replace(/[:;,\\.]+$/, "").trim();
+          // For dates/times, extract just the pattern
+          if (label.includes('date')) {
+            const dateMatch = value.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})/);
+            if (dateMatch) return dateMatch[1];
+          }
+          if (label.includes('time')) {
+            const timeMatch = value.match(/(\d{1,2}:\d{2})/);
+            if (timeMatch) return timeMatch[1];
+          }
+          return value.length <= 50 ? value : null;
+        }
       }
     }
     
@@ -209,13 +274,41 @@ export function mapFlyparksEmailText(emailText: string): CanonicalBooking[] {
     customer_phone,
   });
 
+  // Validate dates before converting - they should be short date strings, not long text
+  const isValidDateString = (str: string | null) => {
+    if (!str) return false;
+    // Should be a date format like "26/01/2026" or "02/02/2026", not long text
+    return /^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(str.trim());
+  };
+
+  const isValidTimeString = (str: string | null) => {
+    if (!str) return false;
+    // Should be a time format like "07:30" or "19:30", not long text
+    return /^\d{1,2}:\d{2}$/.test(str.trim());
+  };
+
+  const startAt = (depDate && arrTime && isValidDateString(depDate) && isValidTimeString(arrTime))
+    ? toIsoFromDMY_HM(depDate, arrTime)
+    : null;
+  const endAt = (retDate && retTime && isValidDateString(retDate) && isValidTimeString(retTime))
+    ? toIsoFromDMY_HM(retDate, retTime)
+    : null;
+
+  // Log if dates are invalid
+  if (!startAt && depDate) {
+    console.warn("[mapFlyparksEmailText] Invalid start date format:", { depDate, arrTime, depDateLength: depDate?.length });
+  }
+  if (!endAt && retDate) {
+    console.warn("[mapFlyparksEmailText] Invalid end date format:", { retDate, retTime, retDateLength: retDate?.length });
+  }
+
   return [
     {
       channel: "FLYPARKS_EMAIL",
       booking_reference: bookingRef,
       third_party_reference: null,
-      start_at: depDate && arrTime ? toIsoFromDMY_HM(depDate, arrTime) : null,
-      end_at: retDate && retTime ? toIsoFromDMY_HM(retDate, retTime) : null,
+      start_at: startAt,
+      end_at: endAt,
       vehicle_registration: reg,
       vehicle_make,
       vehicle_model,
