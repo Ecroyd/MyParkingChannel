@@ -43,13 +43,23 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
   const fetchStatus = async () => {
     setLoading(true);
     try {
+      console.log('[EMAIL IMPORTS] Fetching status from health endpoint...');
       const res = await fetch('/api/admin/email-parse/health');
       const data = await res.json();
+      console.log('[EMAIL IMPORTS] Health endpoint response:', {
+        ok: data.ok,
+        hasIssues: data.hasIssues,
+        summary: data.summary,
+        failedCount: data.failedFiles?.length || 0,
+        pendingCount: data.pendingFiles?.length || 0,
+        emptyCount: data.emptyParsedFiles?.length || 0,
+      });
       if (data.ok) {
         setStatus(data);
+        console.log('[EMAIL IMPORTS] Status updated in state');
       }
     } catch (err) {
-      console.error('[EMAIL IMPORTS] Failed to fetch', err);
+      console.error('[EMAIL IMPORTS] Failed to fetch:', err);
     } finally {
       setLoading(false);
     }
@@ -63,21 +73,40 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
   }, []);
 
   const handleRetry = async (fileId: string) => {
+    console.log('[EMAIL IMPORTS] Starting retry for file:', fileId);
     setProcessing(prev => new Set(prev).add(fileId));
     try {
+      console.log('[EMAIL IMPORTS] Calling parse-file API...');
       const res = await fetch('/api/admin/ingest/parse-file', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fileId, tenantId }),
       });
       const result = await res.json();
+      console.log('[EMAIL IMPORTS] Parse result:', {
+        ok: res.ok,
+        result,
+        statusCode: res.status,
+      });
+      
       if (res.ok) {
-        alert(`✅ Retry successful!\n\nRows parsed: ${result.rowsParsed || 0}\nBookings imported: ${result.importResult?.successCount || 0}\nErrors: ${result.importResult?.errorCount || 0}`);
-        await fetchStatus(); // Refresh
+        const message = `✅ Retry successful!\n\nRows parsed: ${result.rowsParsed || 0}\nBookings imported: ${result.importResult?.successCount || 0}\nErrors: ${result.importResult?.errorCount || 0}`;
+        console.log('[EMAIL IMPORTS] Success message:', message);
+        alert(message);
+        
+        // Wait a moment for database to update
+        console.log('[EMAIL IMPORTS] Waiting 1 second before refresh...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        console.log('[EMAIL IMPORTS] Refreshing status...');
+        await fetchStatus();
+        console.log('[EMAIL IMPORTS] Status refreshed');
       } else {
+        console.error('[EMAIL IMPORTS] Retry failed:', result);
         alert(`❌ Retry failed: ${result.error || 'Unknown error'}`);
       }
     } catch (err: any) {
+      console.error('[EMAIL IMPORTS] Error during retry:', err);
       alert(`❌ Error: ${err.message}`);
     } finally {
       setProcessing(prev => {
@@ -85,6 +114,7 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
         next.delete(fileId);
         return next;
       });
+      console.log('[EMAIL IMPORTS] Retry handler finished');
     }
   };
 

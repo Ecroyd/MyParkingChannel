@@ -151,6 +151,7 @@ export async function GET() {
     // For parsed files, check if they have staging rows or bookings
     const parsedWithIssues: any[] = [];
     if (parsedFiles) {
+      console.log(`[EMAIL PARSE HEALTH] Checking ${parsedFiles.length} parsed files for empty results...`);
       for (const file of parsedFiles) {
         const emailId = (file.ingest_emails as any).id;
         
@@ -161,27 +162,68 @@ export async function GET() {
           .eq("source_email_id", emailId)
           .eq("source_filename", file.filename);
 
-        // Check bookings
-        const { count: bookingCount } = await adminClient
-          .from("bookings")
-          .select("*", { count: "exact", head: true })
-          .eq("tenant_id", ctx.tenantId)
-          .gte("created_at", new Date(file.parsed_at || file.created_at).toISOString());
+        // Check bookings - need to match by source_email_id and source_filename via staging
+        // More accurate: check bookings created around the same time from staging rows
+        const { data: stagingRows } = await adminClient
+          .from("booking_import_staging")
+          .select("id, reference, vehicle_reg")
+          .eq("source_email_id", emailId)
+          .eq("source_filename", file.filename)
+          .limit(10);
+
+        let bookingCount = 0;
+        if (stagingRows && stagingRows.length > 0) {
+          // Check if any bookings match these staging rows
+          const refs = stagingRows.map(s => s.reference).filter(Boolean);
+          const plates = stagingRows.map(s => s.vehicle_reg).filter(Boolean);
+          
+          if (refs.length > 0 || plates.length > 0) {
+            let bookingQuery = adminClient
+              .from("bookings")
+              .select("*", { count: "exact", head: true })
+              .eq("tenant_id", ctx.tenantId);
+            
+            if (refs.length > 0) {
+              bookingQuery = bookingQuery.in("reference", refs);
+            }
+            if (plates.length > 0) {
+              bookingQuery = bookingQuery.in("plate", plates);
+            }
+            
+            const { count } = await bookingQuery;
+            bookingCount = count || 0;
+          }
+        }
+
+        console.log(`[EMAIL PARSE HEALTH] File ${file.filename}:`, {
+          stagingCount: stagingCount || 0,
+          bookingCount,
+          parsedAt: file.parsed_at,
+        });
 
         // If parsed but no bookings created, it's a potential issue
-        if ((stagingCount || 0) === 0 && (bookingCount || 0) === 0) {
+        if ((stagingCount || 0) === 0 && bookingCount === 0) {
+          console.log(`[EMAIL PARSE HEALTH] ⚠️ File ${file.filename} parsed but empty - adding to issues`);
           parsedWithIssues.push({
             ...file,
             staging_count: stagingCount || 0,
-            booking_count: bookingCount || 0,
+            booking_count: bookingCount,
           });
         }
       }
+      console.log(`[EMAIL PARSE HEALTH] Found ${parsedWithIssues.length} empty parsed files`);
     }
 
     const hasFailures = (failedFiles?.length || 0) > 0;
     const hasStuckPending = (pendingFiles?.length || 0) > 0;
     const hasEmptyParses = parsedWithIssues.length > 0;
+
+    console.log(`[EMAIL PARSE HEALTH] Summary:`, {
+      failedCount: failedFiles?.length || 0,
+      stuckPendingCount: pendingFiles?.length || 0,
+      emptyParsedCount: parsedWithIssues.length,
+      hasIssues: hasFailures || hasStuckPending || hasEmptyParses,
+    });
 
     return NextResponse.json({
       ok: true,

@@ -503,18 +503,32 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
 
   // Update file status to parsed
   console.log(`[parseEmailFile] Updating file status to parsed: ${fileId}`);
-  const { error: updateError } = await supabase
+  console.log(`[parseEmailFile] Results summary:`, {
+    rowsParsed: parsedData.rows.length,
+    stagedCount: stagedData?.length || 0,
+    successCount,
+    errorCount,
+  });
+  
+  const { error: updateError, data: updatedFile } = await supabase
     .from("ingest_email_files")
     .update({ 
       parse_status: "parsed",
       parsed_at: new Date().toISOString(),
+      parse_error: null, // Clear any previous errors
     })
-    .eq("id", fileId);
+    .eq("id", fileId)
+    .select("id, parse_status, parsed_at")
+    .single();
   
   if (updateError) {
-    console.error(`[parseEmailFile] Failed to update file status:`, updateError);
+    console.error(`[parseEmailFile] ❌ Failed to update file status:`, updateError);
   } else {
-    console.log(`[parseEmailFile] ✅ File status updated to parsed`);
+    console.log(`[parseEmailFile] ✅ File status updated to parsed:`, {
+      fileId: updatedFile?.id,
+      parse_status: updatedFile?.parse_status,
+      parsed_at: updatedFile?.parsed_at,
+    });
   }
 
   return {
