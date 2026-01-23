@@ -181,12 +181,35 @@ export async function GET() {
       for (const file of parsedFiles) {
         const emailId = (file.ingest_emails as any).id;
         
+        // Special logging for the file that keeps appearing
+        const isProblemFile = file.id === '61710715-0082-4652-a79e-9825cbddf4be';
+        if (isProblemFile) {
+          console.log(`[EMAIL PARSE HEALTH] 🔍 DEBUGGING PROBLEM FILE:`, {
+            fileId: file.id,
+            filename: file.filename,
+            emailId,
+            parsedAt: file.parsed_at,
+            createdAt: file.created_at,
+          });
+        }
+        
         // Check staging rows for this specific file
-        const { data: stagingRows, count: stagingCount } = await adminClient
+        const { data: stagingRows, count: stagingCount, error: stagingError } = await adminClient
           .from("booking_import_staging")
           .select("id, reference, vehicle_reg, start_at", { count: "exact" })
           .eq("source_email_id", emailId)
           .eq("source_filename", file.filename);
+        
+        if (isProblemFile) {
+          console.log(`[EMAIL PARSE HEALTH] 🔍 PROBLEM FILE staging check:`, {
+            emailId,
+            filename: file.filename,
+            stagingCount: stagingCount || 0,
+            stagingRows: stagingRows?.length || 0,
+            stagingError: stagingError?.message,
+            sampleStaging: stagingRows?.slice(0, 3),
+          });
+        }
 
         let bookingCount = 0;
         
@@ -230,11 +253,22 @@ export async function GET() {
             
             bookingCount = count || 0;
             
-            console.log(`[EMAIL PARSE HEALTH] File ${file.filename} bookings:`, {
-              bookingCount,
-              orCondition,
-              sampleMatches: matchingBookings?.slice(0, 3)?.map(b => ({ ref: b.reference, plate: b.plate })),
-            });
+            if (isProblemFile) {
+              console.log(`[EMAIL PARSE HEALTH] 🔍 PROBLEM FILE bookings check (via staging):`, {
+                bookingCount,
+                orCondition,
+                refs,
+                plates,
+                sampleMatches: matchingBookings?.slice(0, 3)?.map(b => ({ ref: b.reference, plate: b.plate })),
+                bookingError: bookingError?.message,
+              });
+            } else {
+              console.log(`[EMAIL PARSE HEALTH] File ${file.filename} bookings:`, {
+                bookingCount,
+                orCondition,
+                sampleMatches: matchingBookings?.slice(0, 3)?.map(b => ({ ref: b.reference, plate: b.plate })),
+              });
+            }
           }
         } else {
           // No staging rows - check if bookings were created recently (within 10 minutes of parse time)
@@ -253,11 +287,20 @@ export async function GET() {
             
             bookingCount = recentBookingCount || 0;
             
-            console.log(`[EMAIL PARSE HEALTH] File ${file.filename} no staging, checking recent bookings:`, {
-              parsedAt: file.parsed_at,
-              checkWindow: `${checkStart.toISOString()} to ${checkEnd.toISOString()}`,
-              recentBookingCount: bookingCount,
-            });
+            if (isProblemFile) {
+              console.log(`[EMAIL PARSE HEALTH] 🔍 PROBLEM FILE bookings check (time window fallback):`, {
+                parsedAt: file.parsed_at,
+                checkWindow: `${checkStart.toISOString()} to ${checkEnd.toISOString()}`,
+                recentBookingCount: bookingCount,
+                now: new Date().toISOString(),
+              });
+            } else {
+              console.log(`[EMAIL PARSE HEALTH] File ${file.filename} no staging, checking recent bookings:`, {
+                parsedAt: file.parsed_at,
+                checkWindow: `${checkStart.toISOString()} to ${checkEnd.toISOString()}`,
+                recentBookingCount: bookingCount,
+              });
+            }
           }
         }
 
@@ -272,14 +315,30 @@ export async function GET() {
         // If parsed but no staging rows AND no bookings, it's a potential issue
         // Note: We check both because staging might have been cleared but bookings exist
         if ((stagingCount || 0) === 0 && bookingCount === 0) {
-          console.log(`[EMAIL PARSE HEALTH] ⚠️ File ${file.filename} (${file.id}) parsed but empty - adding to issues`);
+          if (isProblemFile) {
+            console.log(`[EMAIL PARSE HEALTH] ⚠️ PROBLEM FILE ${file.filename} (${file.id}) parsed but empty - adding to issues`, {
+              stagingCount: stagingCount || 0,
+              bookingCount,
+              parsedAt: file.parsed_at,
+            });
+          } else {
+            console.log(`[EMAIL PARSE HEALTH] ⚠️ File ${file.filename} (${file.id}) parsed but empty - adding to issues`);
+          }
           parsedWithIssues.push({
             ...file,
             staging_count: stagingCount || 0,
             booking_count: bookingCount,
           });
         } else {
-          console.log(`[EMAIL PARSE HEALTH] ✅ File ${file.filename} (${file.id}) has data (staging: ${stagingCount || 0}, bookings: ${bookingCount}) - NOT adding to issues`);
+          if (isProblemFile) {
+            console.log(`[EMAIL PARSE HEALTH] ✅ PROBLEM FILE ${file.filename} (${file.id}) HAS DATA - NOT adding to issues`, {
+              stagingCount: stagingCount || 0,
+              bookingCount,
+              parsedAt: file.parsed_at,
+            });
+          } else {
+            console.log(`[EMAIL PARSE HEALTH] ✅ File ${file.filename} (${file.id}) has data (staging: ${stagingCount || 0}, bookings: ${bookingCount}) - NOT adding to issues`);
+          }
         }
       }
       console.log(`[EMAIL PARSE HEALTH] Found ${parsedWithIssues.length} empty parsed files out of ${parsedFiles.length} total`);
