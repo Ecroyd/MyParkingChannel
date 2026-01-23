@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/server-admin";
-import { getCurrentTenantContext } from "@/lib/auth/tenant-context";
+import { getCurrentTenantContext } from "@/lib/auth/current-tenant-context";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
