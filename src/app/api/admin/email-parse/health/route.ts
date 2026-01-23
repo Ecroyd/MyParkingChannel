@@ -212,9 +212,115 @@ export async function GET() {
         }
 
         let bookingCount = 0;
+        let hasSuccessfulImportRun = false;
+        
+        // First, check if there's a recent successful import run for this file
+        // Import runs are created with profile_name like "Email import: filename"
+        // Note: inserted_count includes both NEW inserts AND updates to existing bookings
+        if (file.parsed_at) {
+          const parsedTime = new Date(file.parsed_at);
+          const checkStart = new Date(parsedTime.getTime() - 10 * 60 * 1000); // 10 min before (wider window)
+          const checkEnd = new Date(parsedTime.getTime() + 10 * 60 * 1000); // 10 min after
+          
+          // Try exact match first, then partial match
+          // Escape special characters in filename for LIKE query
+          const exactMatch = `Email import: ${file.filename}`;
+          const escapedFilename = file.filename.replace(/%/g, '\\%').replace(/_/g, '\\_');
+          
+          const { data: importRuns, error: importRunError } = await adminClient
+            .from("import_runs")
+            .select("id, inserted_count, error_count, created_at, profile_name")
+            .eq("tenant_id", ctx.tenantId)
+            .gte("created_at", checkStart.toISOString())
+            .lte("created_at", checkEnd.toISOString())
+            .or(`profile_name.eq.${exactMatch},profile_name.ilike.%${escapedFilename}%`);
+          
+          if (isProblemFile) {
+            console.log(`[EMAIL PARSE HEALTH] 🔍 PROBLEM FILE checking import runs:`, {
+              exactMatch,
+              escapedFilename,
+              checkWindow: `${checkStart.toISOString()} to ${checkEnd.toISOString()}`,
+            });
+          }
+          
+          if (importRunError) {
+            console.error(`[EMAIL PARSE HEALTH] Error checking import runs for ${file.filename}:`, importRunError);
+          }
+          
+          if (importRuns && importRuns.length > 0) {
+            // Find the run with the best match (exact first, then any with inserted_count > 0)
+            const exactMatchRun = importRuns.find(run => run.profile_name === exactMatch);
+            const successfulRun = exactMatchRun || importRuns.find(run => (run.inserted_count || 0) > 0);
+            
+            if (successfulRun && (successfulRun.inserted_count || 0) > 0) {
+              hasSuccessfulImportRun = true;
+              bookingCount = successfulRun.inserted_count || 0;
+              
+              if (isProblemFile) {
+                console.log(`[EMAIL PARSE HEALTH] 🔍 PROBLEM FILE found successful import run:`, {
+                  runId: successfulRun.id,
+                  insertedCount: successfulRun.inserted_count,
+                  errorCount: successfulRun.error_count,
+                  createdAt: successfulRun.created_at,
+                  profileName: successfulRun.profile_name,
+                  allRunsFound: importRuns.map(r => ({ id: r.id, profile: r.profile_name, inserted: r.inserted_count })),
+                });
+              } else {
+                console.log(`[EMAIL PARSE HEALTH] File ${file.filename} found import run:`, {
+                  insertedCount: successfulRun.inserted_count,
+                  profileName: successfulRun.profile_name,
+                });
+              }
+            } else if (isProblemFile) {
+              console.log(`[EMAIL PARSE HEALTH] 🔍 PROBLEM FILE import runs found but none successful:`, {
+                runsFound: importRuns.length,
+                runs: importRuns.map(r => ({ id: r.id, profile: r.profile_name, inserted: r.inserted_count, errors: r.error_count })),
+              });
+            }
+          } else if (isProblemFile) {
+            console.log(`[EMAIL PARSE HEALTH] 🔍 PROBLEM FILE no import runs found in window:`, {
+              parsedAt: file.parsed_at,
+              checkWindow: `${checkStart.toISOString()} to ${checkEnd.toISOString()}`,
+              expectedProfile: exactMatch,
+            });
+          }
+        }
+        
+        // If import run shows 0 but we have staging rows, the bookings might have been updated (not inserted)
+        // Check if bookings exist that match the staging rows
+        if (hasSuccessfulImportRun && bookingCount === 0 && stagingRows && stagingRows.length > 0) {
+          // Import run exists but shows 0 - might be updates instead of inserts
+          // Check if bookings matching staging rows exist (they were updated, not inserted)
+          const refs = [...new Set(stagingRows.map(s => s.reference).filter(Boolean))];
+          const plates = [...new Set(stagingRows.map(s => s.vehicle_reg).filter(Boolean))];
+          
+          if (refs.length > 0 || plates.length > 0) {
+            let orCondition = "";
+            if (refs.length > 0 && plates.length > 0) {
+              orCondition = `reference.in.(${refs.join(",")}),plate.in.(${plates.join(",")})`;
+            } else if (refs.length > 0) {
+              orCondition = `reference.in.(${refs.join(",")})`;
+            } else {
+              orCondition = `plate.in.(${plates.join(",")})`;
+            }
+            
+            const { count: existingBookingCount } = await adminClient
+              .from("bookings")
+              .select("*", { count: "exact", head: true })
+              .eq("tenant_id", ctx.tenantId)
+              .or(orCondition);
+            
+            if (existingBookingCount && existingBookingCount > 0) {
+              bookingCount = existingBookingCount;
+              if (isProblemFile) {
+                console.log(`[EMAIL PARSE HEALTH] 🔍 PROBLEM FILE import run shows 0, but found ${existingBookingCount} existing bookings (were updated, not inserted)`);
+              }
+            }
+          }
+        }
         
         // If we have staging rows, check for matching bookings
-        if (stagingRows && stagingRows.length > 0) {
+        if (!hasSuccessfulImportRun && stagingRows && stagingRows.length > 0) {
           // Get unique references and plates from staging
           const refs = [...new Set(stagingRows.map(s => s.reference).filter(Boolean))];
           const plates = [...new Set(stagingRows.map(s => s.vehicle_reg).filter(Boolean))];
@@ -270,8 +376,8 @@ export async function GET() {
               });
             }
           }
-        } else {
-          // No staging rows - check if bookings were created recently (within 10 minutes of parse time)
+        } else if (!hasSuccessfulImportRun) {
+          // No staging rows and no import run - check if bookings were created recently (within 10 minutes of parse time)
           // This handles cases where staging was cleared but bookings exist
           if (file.parsed_at) {
             const parsedTime = new Date(file.parsed_at);
