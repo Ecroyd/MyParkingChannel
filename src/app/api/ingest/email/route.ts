@@ -24,24 +24,96 @@ function getEmailTenantMap(): Record<string, string> {
     "jcecroyd@gmail.com": "bab45dab-19e8-4230-b18e-ee1f663608e5",
     "info@flyparksexeter.co.uk": "bab45dab-19e8-4230-b18e-ee1f663608e5",
     "eek_me@hotmail.com": "bab45dab-19e8-4230-b18e-ee1f663608e5", // Added for Flyparks email forwarding
+    // Flyparks email addresses (for original senders, not forwarded)
+    "noreply@flyparks.com": "bab45dab-19e8-4230-b18e-ee1f663608e5",
+    "bookings@flyparks.com": "bab45dab-19e8-4230-b18e-ee1f663608e5",
+    "info@flyparks.com": "bab45dab-19e8-4230-b18e-ee1f663608e5",
+    // Flyparks domains (catch-all for any @flyparks.com or @flyparksexeter.co.uk)
+    "flyparks.com": "bab45dab-19e8-4230-b18e-ee1f663608e5",
+    "flyparksexeter.co.uk": "bab45dab-19e8-4230-b18e-ee1f663608e5",
     // Add more email addresses here as needed
     // "another@email.com": "bab45dab-19e8-4230-b18e-ee1f663608e5",
   };
 }
 
-function detectTenantFromEmail(email: { from_address?: string | null; subject?: string | null }): string | null {
+function detectTenantFromEmail(email: { 
+  from_address?: string | null; 
+  subject?: string | null;
+  raw_rfc822_base64?: string | null;
+}): string | null {
   const map = getEmailTenantMap();
   
   // Try explicit email address mapping
-  if (email.from_address && map[email.from_address]) {
-    return map[email.from_address];
-  }
-
-  // Try domain mapping
   if (email.from_address) {
-    const domain = email.from_address.split("@")[1];
+    const fromLower = email.from_address.toLowerCase().trim();
+    if (map[fromLower]) {
+      return map[fromLower];
+    }
+
+    // Try domain mapping
+    const domain = fromLower.split("@")[1];
     if (domain && map[domain]) {
       return map[domain];
+    }
+  }
+
+  // For forwarded emails, check subject and content for Flyparks indicators
+  // This handles cases where emails are forwarded and the "from" address changes
+  if (email.subject) {
+    const subjectLower = email.subject.toLowerCase();
+    
+    // Check for Flyparks indicators in subject
+    if (subjectLower.includes("flyparks") || 
+        subjectLower.includes("payment successful") ||
+        subjectLower.includes("booking confirmation")) {
+      // If it looks like a Flyparks email, check if we can extract original sender from raw email
+      if (email.raw_rfc822_base64) {
+        try {
+          const rawEmail = Buffer.from(email.raw_rfc822_base64, "base64").toString("utf-8");
+          
+          // Look for original sender in email headers (common in forwarded emails)
+          const originalFromMatch = rawEmail.match(/^(?:X-Original-From|Reply-To|Return-Path):\s*([^\s<>]+@[^\s<>]+)/im);
+          if (originalFromMatch) {
+            const originalFrom = originalFromMatch[1].toLowerCase().trim();
+            if (map[originalFrom]) {
+              console.log(`[ingest-email] Found original sender in headers: ${originalFrom}`);
+              return map[originalFrom];
+            }
+            // Try domain
+            const originalDomain = originalFrom.split("@")[1];
+            if (originalDomain && map[originalDomain]) {
+              console.log(`[ingest-email] Found original domain in headers: ${originalDomain}`);
+              return map[originalDomain];
+            }
+          }
+          
+          // Check for Flyparks email addresses in the raw email content
+          const flyparksEmailPatterns = [
+            /noreply@flyparks\.com/i,
+            /bookings@flyparks\.com/i,
+            /info@flyparks\.com/i,
+            /info@flyparksexeter\.co\.uk/i,
+            /@flyparks\./i,
+          ];
+          
+          for (const pattern of flyparksEmailPatterns) {
+            if (pattern.test(rawEmail)) {
+              console.log(`[ingest-email] Detected Flyparks email pattern in content, using tenant mapping`);
+              // Return the tenant ID for Flyparks (using info@flyparksexeter.co.uk mapping)
+              return map["info@flyparksexeter.co.uk"] || map["eek_me@hotmail.com"];
+            }
+          }
+        } catch (err) {
+          console.error(`[ingest-email] Error parsing raw email for tenant detection:`, err);
+        }
+      }
+      
+      // Fallback: if subject suggests Flyparks and we have a Flyparks mapping, use it
+      // This is a safety net for forwarded emails
+      if (map["info@flyparksexeter.co.uk"]) {
+        console.log(`[ingest-email] Subject suggests Flyparks, using Flyparks tenant mapping`);
+        return map["info@flyparksexeter.co.uk"];
+      }
     }
   }
 
@@ -363,7 +435,11 @@ export async function POST(req: Request) {
     }
 
     // Auto-parse files if tenant mapping exists
-    const tenantId = fileIds.length > 0 ? detectTenantFromEmail({ from_address: body.from, subject: body.subject }) : null;
+    const tenantId = fileIds.length > 0 ? detectTenantFromEmail({ 
+      from_address: body.from, 
+      subject: body.subject,
+      raw_rfc822_base64: raw,
+    }) : null;
     
     console.log(`[ingest-email] Auto-parse check:`, {
       fileIdsCount: fileIds.length,
