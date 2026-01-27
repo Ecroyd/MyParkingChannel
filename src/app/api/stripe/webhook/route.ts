@@ -86,7 +86,10 @@ async function handleCheckoutSessionCompleted(session: any) {
     const customerEmail = session.customer_email || session.customer_details?.email || '';
     const customerPhone = session.customer_details?.phone || null;
     
-    // Try to get stored booking data
+    // Get metadata from payment intent (contains booking data)
+    const metadata = paymentIntent.metadata || {};
+    
+    // Try to get stored booking data from temp-store
     let storedBookingData = null;
     try {
       const tempBookingResponse = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3002'}/api/bookings/temp-store?tenantId=${tenantId}&reference=${bookingReference}`);
@@ -98,14 +101,14 @@ async function handleCheckoutSessionCompleted(session: any) {
       console.error('Failed to retrieve stored booking data:', error);
     }
 
-    // Use stored data or fallback to session data
-    const plate = storedBookingData?.plate || 'UNKNOWN';
+    // Use stored data, then fallback to Stripe metadata, then session data
+    const plate = storedBookingData?.plate || metadata.plate || 'UNKNOWN';
     const flightNumber = storedBookingData?.flightNumber || null;
-    const startAt = storedBookingData?.startAt || new Date().toISOString();
-    const endAt = storedBookingData?.endAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const finalCustomerName = storedBookingData?.customerName || customerName;
-    const finalCustomerEmail = storedBookingData?.customerEmail || customerEmail;
-    const finalCustomerPhone = storedBookingData?.customerPhone || customerPhone;
+    const startAt = storedBookingData?.startAt || metadata.start_at || new Date().toISOString();
+    const endAt = storedBookingData?.endAt || metadata.end_at || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const finalCustomerName = storedBookingData?.customerName || metadata.customer_name || customerName;
+    const finalCustomerEmail = storedBookingData?.customerEmail || metadata.customer_email || customerEmail;
+    const finalCustomerPhone = storedBookingData?.customerPhone || metadata.customer_phone || customerPhone;
 
     // Create the booking with payment information
     const bookingData = {
