@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
       start_at: startAt,
       end_at: endAt,
       status: 'reserved',
-      source: 'other',
+      source: 'direct',
       money_received: amount || 0,
       money_charged: amount || 0,
       reference: reference,

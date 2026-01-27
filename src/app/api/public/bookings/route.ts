@@ -205,7 +205,7 @@ export async function POST(req: NextRequest) {
     start_at: s.toISOString(),
     end_at: e.toISOString(),
     status: 'reserved', // Use 'reserved' instead of 'pending' since 'pending' is not in the enum
-    source: 'other', // Use 'other' instead of 'website' since 'website' is not in the enum
+    source: 'direct', // Direct bookings from the public site
     money_received: 0,
     money_charged: totalAmount,
     reference: generateReference(), // Generate a unique reference

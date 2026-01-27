@@ -121,7 +121,7 @@ async function handleCheckoutSessionCompleted(session: any) {
       start_at: startAt,
       end_at: endAt,
       status: 'reserved',
-      source: 'other',
+      source: 'direct',
       money_received: paymentIntent.amount / 100, // Convert from cents
       money_charged: paymentIntent.amount / 100,
       reference: bookingReference // Use the reference from the URL

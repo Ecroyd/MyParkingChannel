@@ -1,6 +1,7 @@
+import { Suspense } from "react";
 import { getTenantContext } from "@/lib/site";
 import { Header, Footer } from "../_components/Chrome";
-import BookingModal from "@/components/tenant/BookingModal";
+import BookingPageClient from "./BookingPageClient";
 
 export const dynamic = "force-dynamic";
 
@@ -15,9 +16,9 @@ export default async function BookPage({ params }: { params: Promise<{ slug: str
       <Header title={title} slug={slug} />
       <main className="max-w-6xl mx-auto px-4 py-10">
         <h1 className="text-2xl md:text-3xl font-semibold mb-4">Book airport parking</h1>
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">
-          <BookingModal slug={slug} />
-        </div>
+        <Suspense fallback={<div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">Loading...</div>}>
+          <BookingPageClient slug={slug} />
+        </Suspense>
       </main>
       <Footer title={title} />
     </>

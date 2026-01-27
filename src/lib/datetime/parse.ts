@@ -6,6 +6,9 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/admin';
+import { startOfDay } from 'date-fns';
+import { utcToZonedTime, zonedTimeToUtc } from 'date-fns-tz';
+import path from 'path';
 
 /**
  * Parse booking start and end times using Postgres RPC function
@@ -73,5 +76,45 @@ export async function parseDateTimeToUtc(
   }
 
   return data;
+}
+
+/**
+ * Override start time to midnight (00:00) for EXTZ10 files (hotel+parking bundle)
+ * 
+ * EXTZ10 files represent hotel+parking bundles where parking access starts at midnight
+ * on the start_date, regardless of the time specified in the row.
+ * 
+ * @param startUtc - ISO string in UTC (from normalise_booking_times)
+ * @param tenantTimezone - Tenant timezone (default: 'Europe/London')
+ * @returns ISO string in UTC representing start of day in tenant timezone
+ */
+export function overrideStartToMidnight(
+  startUtc: string,
+  tenantTimezone: string = 'Europe/London'
+): string {
+  // Parse the UTC datetime
+  const startDate = new Date(startUtc);
+  
+  // Convert to tenant timezone
+  const tenantDate = utcToZonedTime(startDate, tenantTimezone);
+  
+  // Get start of day in tenant timezone
+  const startOfDayInTenant = startOfDay(tenantDate);
+  
+  // Convert back to UTC
+  const startOfDayUtc = zonedTimeToUtc(startOfDayInTenant, tenantTimezone);
+  
+  return startOfDayUtc.toISOString();
+}
+
+/**
+ * Check if a filename indicates an EXTZ10 file (hotel+parking bundle)
+ * 
+ * @param filename - File basename or full path
+ * @returns true if filename starts with EXTZ10 (case-insensitive)
+ */
+export function isExtz10File(filename: string): boolean {
+  const basename = path.basename(filename);
+  return basename.toUpperCase().startsWith('EXTZ10');
 }
 

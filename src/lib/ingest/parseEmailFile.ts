@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { makeImportDedupeKey } from "@/lib/bookings/dedupe";
 import { mapAphCsvLike, detectAndMapFromAttachment } from "@/lib/importers/canonical/mappers";
 import { isImageFile } from "@/lib/ingest/fileTypeUtils";
+import { isExtz10File, overrideStartToMidnight } from "@/lib/datetime/parse";
 
 /**
  * Parse file using canonical mappers (supports APH, CAVU, etc.)
@@ -362,7 +363,17 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   let successCount = 0;
   let errorCount = 0;
   const errors: any[] = [];
-  const tz = 'Europe/London';
+  
+  // Get tenant timezone (default to Europe/London)
+  const { data: tenantData } = await adminSupabase
+    .from("tenants")
+    .select("timezone")
+    .eq("id", tenantId)
+    .single();
+  const tz = tenantData?.timezone || 'Europe/London';
+  
+  // Check if this is an EXTZ10 file (hotel+parking bundle - parking starts at midnight)
+  const isExtz10 = isExtz10File(file.filename);
 
   // Create import run
   const { data: run, error: runErr } = await adminSupabase
@@ -421,6 +432,16 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
         errors.push({ rowIndex: i + 1, reason: "Invalid dates", rowData: raw });
         errorCount++;
         continue;
+      }
+
+      // EXTZ10 override: hotel+parking bundle - parking access starts at midnight on start_date
+      if (isExtz10 && startAtParsed) {
+        startAtParsed = overrideStartToMidnight(startAtParsed, tz);
+        console.log(`[parseEmailFile] Applied EXTZ10 midnight override for row ${i + 1}:`, {
+          original: parsed[0].start_utc,
+          overridden: startAtParsed,
+          filename: file.filename,
+        });
       }
 
       const dedupe_key = makeImportDedupeKey({
