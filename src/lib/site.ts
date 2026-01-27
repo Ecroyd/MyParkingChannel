@@ -69,10 +69,24 @@ export async function getTenantContext(slug: string) {
     // If there's an error about column not existing, default to null (card style)
     if (result.error && result.error.code === '42703') {
       // Column doesn't exist yet - that's okay, default to card
+      console.log('[GET_TENANT_CONTEXT] booking_modal_style column does not exist yet');
       site = null;
-    } else if (!result.error) {
+    } else if (result.error) {
+      // Other error - log it
+      console.error('[GET_TENANT_CONTEXT] Error fetching site:', result.error);
+      site = null;
+    } else {
       site = result.data || null;
+      console.log('[GET_TENANT_CONTEXT] Site data fetched:', {
+        tenantId: tenant.id,
+        slug: tenant.slug,
+        siteData: site,
+        bookingModalStyle: site?.booking_modal_style
+      });
     }
+  } else {
+    // Promise was rejected
+    console.error('[GET_TENANT_CONTEXT] Site query promise rejected:', siteResult);
   }
 
   return { 
