@@ -89,6 +89,25 @@ export default async function TenantSitesServerPage() {
       : { data: [], error: null }
   ]);
 
+  // Debug: Also query sites by slug for flyparksexeter specifically
+  if (tenantIds.length > 0) {
+    const flyParksTenant = tenants?.find(t => t.slug === 'flyparksexeter');
+    if (flyParksTenant) {
+      const { data: flyParksSite, error: flyParksError } = await adminClient
+        .from('sites')
+        .select('id, tenant_id, slug, status, template, primary_domain, booking_modal_style')
+        .eq('tenant_id', flyParksTenant.id)
+        .maybeSingle();
+      
+      console.log('🔍 Direct query for Fly Parks Exeter site:', {
+        tenantId: flyParksTenant.id,
+        siteFound: !!flyParksSite,
+        site: flyParksSite,
+        error: flyParksError
+      });
+    }
+  }
+
   if (sitesResult.error) {
     console.error('❌ Tenant Sites: Error fetching sites:', sitesResult.error);
   }

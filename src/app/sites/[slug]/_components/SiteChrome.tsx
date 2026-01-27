@@ -11,17 +11,18 @@ export function Header({ title, logoUrl, tenantSlug }: { title: string; logoUrl?
     setIsMobileMenuOpen(!isMobileMenuOpen);
   };
 
+  const basePath = tenantSlug ? `/sites/${tenantSlug}` : "";
   const navLinks = [
-    { href: "/book", label: "Book" },
-    { href: "/directions", label: "Directions" },
-    { href: "/manage-booking", label: "Manage Booking" },
-    { href: "/contact", label: "Contact" },
+    { href: `${basePath}/book`, label: "Book" },
+    { href: `${basePath}/directions`, label: "Directions" },
+    { href: `${basePath}/manage-booking`, label: "Manage Booking" },
+    { href: `${basePath}/contact`, label: "Contact" },
   ];
 
   return (
     <header className="sticky top-0 z-40 bg-white/80 backdrop-blur border-b border-slate-200">
       <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-3">
+        <Link href={basePath || "/"} className="flex items-center gap-3">
           {logoUrl ? (
             <img 
               src={logoUrl} 

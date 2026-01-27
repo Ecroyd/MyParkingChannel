@@ -28,7 +28,7 @@ export async function getTenantContext(slug: string) {
     return null;
   }
 
-  const [brandingResult, siteResult] = await Promise.all([
+  const [brandingResult, siteResult] = await Promise.allSettled([
     sb
       .from("tenant_branding")
       .select(`
@@ -58,8 +58,8 @@ export async function getTenantContext(slug: string) {
       .maybeSingle()
   ]);
 
-  const branding = brandingResult.data || null;
-  const site = siteResult.data || null;
+  const branding = brandingResult.status === 'fulfilled' ? (brandingResult.value.data || null) : null;
+  const site = siteResult.status === 'fulfilled' ? (siteResult.value.data || null) : null;
 
   return { 
     tenant, 
