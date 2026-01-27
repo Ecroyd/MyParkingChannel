@@ -15,6 +15,7 @@ import ContactSettingsForm from '@/components/admin/ContactSettingsForm';
 import { ExternalLink, Eye, Globe, Building2, Settings, Plus, Trash2, Star } from 'lucide-react';
 import { siteUrlForTenantSlug } from '@/lib/sites/domain';
 import { createClient } from '@/lib/supabase/client';
+import { useRouter } from 'next/navigation';
 
 type Tenant = {
   id: string;
@@ -64,8 +65,10 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
   const [domainsLoaded, setDomainsLoaded] = useState(false);
   const [savingModalStyle, setSavingModalStyle] = useState<Record<string, boolean>>({});
   const [bookingModalStyles, setBookingModalStyles] = useState<Record<string, 'card' | 'banner'>>({});
+  const [creatingSite, setCreatingSite] = useState<Record<string, boolean>>({});
   const { toast } = useToast();
   const supabase = createClient();
+  const router = useRouter();
 
   // Initialize booking modal styles from props
   useEffect(() => {
@@ -241,6 +244,47 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
     return siteUrlForTenantSlug(tenant.slug);
   };
 
+  const handleCreateSite = async (tenantId: string) => {
+    if (!tenantId) return;
+
+    setCreatingSite(prev => ({ ...prev, [tenantId]: true }));
+
+    try {
+      const response = await fetch('/api/admin/sites/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          template: 'default',
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create site');
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Site created successfully. Refreshing...',
+      });
+
+      // Refresh the page to show the new site
+      router.refresh();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to create site.',
+        variant: 'destructive',
+      });
+    } finally {
+      setCreatingSite(prev => ({ ...prev, [tenantId]: false }));
+    }
+  };
+
   const handleBookingModalStyleChange = async (siteId: string, style: 'card' | 'banner') => {
     if (!siteId) return;
 
@@ -352,7 +396,7 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
                       )}
                     </div>
                     <Badge variant={tenant.site?.status === 'published' ? 'default' : 'secondary'} className="shrink-0">
-                      {tenant.site?.status || 'No site'}
+                      {tenant.site ? (tenant.site.status || 'ready') : 'No site'}
                     </Badge>
                   </div>
                 </CardHeader>
@@ -365,6 +409,7 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
                   
                   {tenant.site ? (
                     <div className="space-y-3">
+                      {/* Preview and Live Site Buttons */}
                       <div className="flex flex-col sm:flex-row gap-2">
                         <Button
                           size="sm"
@@ -393,33 +438,56 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
                       )}
 
                       {/* Booking Modal Style Selector */}
-                      <div className="space-y-2 pt-2 border-t">
-                        <Label htmlFor={`modal-style-${tenant.site.id}`} className="text-sm font-medium">
-                          Booking Modal Style
-                        </Label>
-                        <Select
-                          value={bookingModalStyles[tenant.site.id] || tenant.site.booking_modal_style || 'card'}
-                          onValueChange={(value: 'card' | 'banner') => 
-                            handleBookingModalStyleChange(tenant.site!.id, value)
-                          }
-                          disabled={savingModalStyle[tenant.site.id]}
-                        >
-                          <SelectTrigger id={`modal-style-${tenant.site.id}`}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="card">Card Style</SelectItem>
-                            <SelectItem value="banner">Banner Style</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <p className="text-xs text-gray-500">
-                          Choose how the booking form appears on the site
-                        </p>
-                      </div>
+                      {tenant.site.id && (
+                        <div className="space-y-2 pt-2 border-t">
+                          <Label htmlFor={`modal-style-${tenant.site.id}`} className="text-sm font-medium">
+                            Booking Modal Style
+                          </Label>
+                          <Select
+                            value={bookingModalStyles[tenant.site.id] || tenant.site.booking_modal_style || 'card'}
+                            onValueChange={(value: 'card' | 'banner') => 
+                              handleBookingModalStyleChange(tenant.site!.id, value)
+                            }
+                            disabled={savingModalStyle[tenant.site.id]}
+                          >
+                            <SelectTrigger id={`modal-style-${tenant.site.id}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="card">Card Style</SelectItem>
+                              <SelectItem value="banner">Banner Style</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-gray-500">
+                            Choose how the booking form appears on the site
+                          </p>
+                        </div>
+                      )}
                     </div>
                   ) : (
-                    <div className="text-sm text-gray-500">
-                      No site configured yet
+                    <div className="space-y-3">
+                      <div className="text-sm text-gray-500">
+                        No site configured yet
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={() => handleCreateSite(tenant.id)}
+                        disabled={creatingSite[tenant.id]}
+                        className="w-full"
+                      >
+                        {creatingSite[tenant.id] ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                            Creating...
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="h-4 w-4 mr-2" />
+                            Create Site
+                          </>
+                        )}
+                      </Button>
                     </div>
                   )}
 

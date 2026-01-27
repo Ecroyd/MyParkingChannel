@@ -84,11 +84,19 @@ export default async function TenantSitesServerPage() {
       .in('tenant_id', tenantIds)
   ]);
 
+  if (sitesResult.error) {
+    console.error('❌ Tenant Sites: Error fetching sites:', sitesResult.error);
+  }
+  if (brandingResult.error) {
+    console.error('❌ Tenant Sites: Error fetching branding:', brandingResult.error);
+  }
+
   const sites = sitesResult.data || [];
   const branding = brandingResult.data || [];
 
   console.log('📊 Tenant Sites: Sites found:', sites?.length || 0, sites)
   console.log('📊 Tenant Sites: Branding found:', branding?.length || 0, branding)
+  console.log('📊 Tenant Sites: Tenant IDs being searched:', tenantIds)
 
   // Combine data
   const tenantsWithSites = userTenants.map(ut => {
@@ -97,6 +105,17 @@ export default async function TenantSitesServerPage() {
     
     const site = sites.find(s => s.tenant_id === tenant.id);
     const tenantBranding = branding.find(b => b.tenant_id === tenant.id);
+    
+    // Debug logging for site matching
+    if (tenant.slug === 'flyparksexeter') {
+      console.log('🔍 Debug Fly Parks Exeter:', {
+        tenantId: tenant.id,
+        tenantSlug: tenant.slug,
+        sitesFound: sites.length,
+        matchingSite: site,
+        allSites: sites.map(s => ({ id: s.id, tenant_id: s.tenant_id, slug: s.slug, status: s.status }))
+      });
+    }
     
     return {
       ...tenant,
