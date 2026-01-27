@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -21,8 +21,9 @@ interface BookingsServerClientProps {
   bookings: any[];
 }
 
-export default function BookingsServerClient({ user, tenant, bookings }: BookingsServerClientProps) {
-  const [filteredBookings, setFilteredBookings] = useState<any[]>(bookings);
+export default function BookingsServerClient({ user, tenant, bookings: initialBookings }: BookingsServerClientProps) {
+  const [bookings, setBookings] = useState<any[]>(initialBookings);
+  const [filteredBookings, setFilteredBookings] = useState<any[]>(initialBookings);
   const [dateRange, setDateRange] = useState('all');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
@@ -35,6 +36,7 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const [newBookingModalOpen, setNewBookingModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const getDateRange = () => {
     const today = new Date();
@@ -146,6 +148,30 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
     });
     return sorted;
   };
+
+  // Fetch bookings from API
+  const fetchBookings = useCallback(async () => {
+    try {
+      setRefreshing(true);
+      const response = await fetch(`/api/admin/bookings/list?tenantId=${tenant.id}`);
+      if (response.ok) {
+        const data = await response.json();
+        setBookings(data.bookings || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch bookings:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [tenant.id]);
+
+  // Fetch bookings on mount and set up polling
+  useEffect(() => {
+    fetchBookings();
+    // Refresh every 15 seconds
+    const interval = setInterval(fetchBookings, 15000);
+    return () => clearInterval(interval);
+  }, [fetchBookings]);
 
   // Get unique channels from bookings
   const getUniqueChannels = () => {
@@ -261,8 +287,8 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
       if (response.ok) {
         toast.success(`Successfully deleted ${selectedBookings.size} booking(s)`);
         setSelectedBookings(new Set());
-        // Refresh the page to get updated data
-        window.location.reload();
+        // Refresh bookings from API
+        await fetchBookings();
       } else {
         const error = await response.json();
         toast.error(error.message || 'Failed to delete bookings');
@@ -403,6 +429,9 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
             <CardTitle className="flex items-center gap-2">
               <CalendarDays className="w-5 h-5" />
               Bookings ({filteredBookings.length})
+              {refreshing && (
+                <span className="text-sm text-gray-500 ml-2">(refreshing...)</span>
+              )}
             </CardTitle>
             {selectedBookings.size > 0 && (
               <div className="flex items-center gap-2">
@@ -570,8 +599,8 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
           open={!!selectedBookingId}
           onClose={() => setSelectedBookingId(null)}
           onBookingUpdated={() => {
-            // Refresh the page to get updated data
-            window.location.reload();
+            // Refresh bookings from API
+            fetchBookings();
           }}
         />
       )}
@@ -582,8 +611,8 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
         open={newBookingModalOpen}
         onClose={() => setNewBookingModalOpen(false)}
         onBookingCreated={() => {
-          // Refresh the page to get updated data
-          window.location.reload();
+          // Refresh bookings from API
+          fetchBookings();
         }}
       />
     </div>
