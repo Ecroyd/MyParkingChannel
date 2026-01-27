@@ -74,11 +74,12 @@ export default async function TenantSitesServerPage() {
 
   // Get site and branding data for each tenant
   // Query all sites first, then filter - this ensures we get all sites even if tenantIds is empty
+  // Note: booking_modal_style may not exist yet, so we'll query it separately if needed
   const [sitesResult, brandingResult] = await Promise.all([
     tenantIds.length > 0 
       ? adminClient
           .from('sites')
-          .select('id, tenant_id, slug, status, template, primary_domain, booking_modal_style')
+          .select('id, tenant_id, slug, status, template, primary_domain')
           .in('tenant_id', tenantIds)
       : { data: [], error: null },
     tenantIds.length > 0
@@ -96,8 +97,37 @@ export default async function TenantSitesServerPage() {
     console.error('❌ Tenant Sites: Error fetching branding:', brandingResult.error);
   }
 
-  const sites = sitesResult.data || [];
+  const sites = (sitesResult.data || []).map(site => ({
+    ...site,
+    booking_modal_style: null as 'card' | 'banner' | null // Default to null since column doesn't exist yet
+  }));
   const branding = brandingResult.data || [];
+
+  // Try to get booking_modal_style if the column exists (graceful fallback)
+  let bookingModalStylesMap: Record<string, 'card' | 'banner' | null> = {};
+  if (sites.length > 0) {
+    try {
+      const { data: stylesData } = await adminClient
+        .from('sites')
+        .select('id, booking_modal_style')
+        .in('id', sites.map(s => s.id));
+      
+      if (stylesData) {
+        stylesData.forEach((s: any) => {
+          if (s.booking_modal_style) {
+            bookingModalStylesMap[s.id] = s.booking_modal_style;
+            const siteIndex = sites.findIndex(site => site.id === s.id);
+            if (siteIndex >= 0) {
+              sites[siteIndex].booking_modal_style = s.booking_modal_style;
+            }
+          }
+        });
+      }
+    } catch (error) {
+      // Column doesn't exist yet - that's okay, we'll use null as default
+      console.log('ℹ️ booking_modal_style column not found, using default');
+    }
+  }
 
   // Debug: Also query sites by slug for flyparksexeter specifically
   if (tenantIds.length > 0 && sites.length > 0) {
@@ -107,17 +137,17 @@ export default async function TenantSitesServerPage() {
       const [directQuery, slugQuery, allSitesQuery] = await Promise.all([
         adminClient
           .from('sites')
-          .select('id, tenant_id, slug, status, template, primary_domain, booking_modal_style')
+          .select('id, tenant_id, slug, status, template, primary_domain')
           .eq('tenant_id', flyParksTenant.id)
           .maybeSingle(),
         adminClient
           .from('sites')
-          .select('id, tenant_id, slug, status, template, primary_domain, booking_modal_style')
+          .select('id, tenant_id, slug, status, template, primary_domain')
           .eq('slug', 'flyparksexeter')
           .maybeSingle(),
         adminClient
           .from('sites')
-          .select('id, tenant_id, slug, status, template, primary_domain, booking_modal_style')
+          .select('id, tenant_id, slug, status, template, primary_domain')
           .limit(10)
       ]);
       
