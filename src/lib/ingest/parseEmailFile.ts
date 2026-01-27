@@ -130,15 +130,17 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     .download(file.storage_path);
 
   if (downloadError || !fileData) {
+    const errorMsg = downloadError?.message || "unknown";
     await supabase
       .from("ingest_email_files")
       .update({ 
         parse_outcome: "failed",
         parse_status: "failed", 
-        parse_error: `Download failed: ${downloadError?.message || "unknown"}` 
+        parse_error: `Download failed: ${errorMsg}`,
+        parse_reason: `exception:${errorMsg.substring(0, 200)}`,
       })
       .eq("id", fileId);
-    throw new Error(`Download failed: ${downloadError?.message}`);
+    throw new Error(`Download failed: ${errorMsg}`);
   }
 
   // 3. Convert to Buffer
@@ -165,12 +167,24 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     }
   } catch (parseErr: any) {
     console.error(`[parseEmailFile] Parse error:`, parseErr);
+    
+    // Determine parse_reason based on error type
+    let parseReason: string | null = null;
+    if (parseErr.message?.includes("Could not detect format")) {
+      parseReason = "format_not_detected";
+    } else {
+      // For other exceptions, use "exception:<message>" (truncated to 200 chars)
+      const errorMsg = parseErr.message || "unknown error";
+      parseReason = `exception:${errorMsg.substring(0, 200)}`;
+    }
+    
     await supabase
       .from("ingest_email_files")
       .update({ 
         parse_outcome: "failed",
         parse_status: "failed", 
-        parse_error: `Parse failed: ${parseErr.message}` 
+        parse_error: `Parse failed: ${parseErr.message}`,
+        parse_reason: parseReason,
       })
       .eq("id", fileId);
     throw parseErr;
@@ -183,7 +197,8 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       .update({ 
         parse_outcome: "failed",
         parse_status: "failed", 
-        parse_error: "File format detected but no valid rows extracted. File may be empty or have no data rows." 
+        parse_error: "File format detected but no valid rows extracted. File may be empty or have no data rows.",
+        parse_reason: "no_rows_extracted",
       })
       .eq("id", fileId);
     throw new Error("No valid rows found in file");
@@ -325,15 +340,17 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     } else {
       console.error(`[parseEmailFile] Staging insert failed:`, stagingError);
       // Update file status with error
+      const errorMsg = stagingError.message || "unknown error";
       await supabase
         .from("ingest_email_files")
         .update({ 
           parse_outcome: "failed",
           parse_status: "failed", 
-          parse_error: `Staging insert failed: ${stagingError.message}` 
+          parse_error: `Staging insert failed: ${errorMsg}`,
+          parse_reason: `exception:${errorMsg.substring(0, 200)}`,
         })
         .eq("id", fileId);
-      throw new Error(`Staging insert failed: ${stagingError.message}`);
+      throw new Error(`Staging insert failed: ${errorMsg}`);
     }
   } else {
     stagedData = insertedData || [];

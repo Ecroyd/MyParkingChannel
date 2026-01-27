@@ -355,12 +355,14 @@ export async function POST(req: Request) {
                   errorCode: (storageError as any).error,
                 });
                 // Update file status to failed
+                const errorMsg = storageError.message || "unknown error";
                 await supabase
                   .from("ingest_email_files")
                   .update({ 
                     parse_outcome: "failed",
                     parse_status: "failed", 
-                    parse_error: `Storage upload failed: ${storageError.message}` 
+                    parse_error: `Storage upload failed: ${errorMsg}`,
+                    parse_reason: `exception:${errorMsg.substring(0, 200)}`,
                   })
                   .eq("id", fileData.id);
               } else {
