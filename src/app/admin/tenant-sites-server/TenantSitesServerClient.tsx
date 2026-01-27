@@ -31,7 +31,7 @@ type Site = {
   id: string;
   tenant_id: string;
   slug: string;
-  status: 'draft' | 'published';
+  status: 'draft' | 'published' | 'ready' | string | null;
   template: string;
   primary_domain: string | null;
   booking_modal_style?: 'card' | 'banner' | null;

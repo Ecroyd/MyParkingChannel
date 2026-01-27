@@ -73,15 +73,20 @@ export default async function TenantSitesServerPage() {
   console.log('📊 Tenant Sites: Tenant details found:', tenants?.length || 0, tenants)
 
   // Get site and branding data for each tenant
+  // Query all sites first, then filter - this ensures we get all sites even if tenantIds is empty
   const [sitesResult, brandingResult] = await Promise.all([
-    adminClient
-      .from('sites')
-      .select('id, tenant_id, slug, status, template, primary_domain, booking_modal_style')
-      .in('tenant_id', tenantIds),
-    adminClient
-      .from('tenant_branding')
-      .select('tenant_id, app_name, theme_color')
-      .in('tenant_id', tenantIds)
+    tenantIds.length > 0 
+      ? adminClient
+          .from('sites')
+          .select('id, tenant_id, slug, status, template, primary_domain, booking_modal_style')
+          .in('tenant_id', tenantIds)
+      : { data: [], error: null },
+    tenantIds.length > 0
+      ? adminClient
+          .from('tenant_branding')
+          .select('tenant_id, app_name, theme_color')
+          .in('tenant_id', tenantIds)
+      : { data: [], error: null }
   ]);
 
   if (sitesResult.error) {
@@ -97,29 +102,60 @@ export default async function TenantSitesServerPage() {
   console.log('📊 Tenant Sites: Sites found:', sites?.length || 0, sites)
   console.log('📊 Tenant Sites: Branding found:', branding?.length || 0, branding)
   console.log('📊 Tenant Sites: Tenant IDs being searched:', tenantIds)
+  
+  // Debug: Log all sites for flyparksexeter specifically
+  if (sites.length > 0) {
+    const flyParksSite = sites.find(s => {
+      const tenant = tenants?.find(t => t.id === s.tenant_id);
+      return tenant?.slug === 'flyparksexeter';
+    });
+    if (flyParksSite) {
+      console.log('✅ Found Fly Parks Exeter site:', flyParksSite);
+    } else {
+      console.log('⚠️ Fly Parks Exeter site not found in results. All sites:', sites.map(s => ({ id: s.id, tenant_id: s.tenant_id, slug: s.slug })));
+    }
+  }
 
   // Combine data
   const tenantsWithSites = userTenants.map(ut => {
     const tenant = tenants?.find(t => t.id === ut.tenant_id);
     if (!tenant) return null; // Skip if tenant not found
     
-    const site = sites.find(s => s.tenant_id === tenant.id);
-    const tenantBranding = branding.find(b => b.tenant_id === tenant.id);
+    // Try to find site by tenant_id - use strict equality
+    const site = sites.find(s => {
+      // Handle both UUID and string comparisons
+      const siteTenantId = String(s.tenant_id);
+      const tenantId = String(tenant.id);
+      return siteTenantId === tenantId;
+    });
+    const tenantBranding = branding.find(b => {
+      const brandTenantId = String(b.tenant_id);
+      const tenantId = String(tenant.id);
+      return brandTenantId === tenantId;
+    });
     
     // Debug logging for site matching
     if (tenant.slug === 'flyparksexeter') {
       console.log('🔍 Debug Fly Parks Exeter:', {
         tenantId: tenant.id,
+        tenantIdType: typeof tenant.id,
         tenantSlug: tenant.slug,
         sitesFound: sites.length,
         matchingSite: site,
-        allSites: sites.map(s => ({ id: s.id, tenant_id: s.tenant_id, slug: s.slug, status: s.status }))
+        siteTenantIds: sites.map(s => ({ 
+          siteId: s.id, 
+          siteTenantId: s.tenant_id, 
+          siteTenantIdType: typeof s.tenant_id,
+          slug: s.slug, 
+          status: s.status 
+        })),
+        allTenantIds: tenantIds
       });
     }
     
     return {
       ...tenant,
-      site,
+      site: site || undefined, // Explicitly set to undefined if not found
       branding: tenantBranding,
       role: ut.role,
       is_default: ut.is_default
