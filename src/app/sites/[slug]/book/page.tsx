@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { getSiteContext } from "@/lib/site";
 import { Header, Footer } from "../_components/SiteChrome";
 import BookingWidget from "@/components/booking/BookingWidget";
+import BookingPageClient from "@/app/t/[slug]/book/BookingPageClient";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +36,35 @@ export default async function BookPage({ params, searchParams }: { params: Promi
   }
 
   const title = ctx.branding?.app_name || ctx.tenant.name || "Airport Parking";
+  const bookingModalStyle = ctx.site?.booking_modal_style || 'card';
 
+  // Debug logging
+  if (process.env.NEXT_PUBLIC_DEBUG_SITE === '1') {
+    console.log('[BOOK_PAGE] Booking modal style:', {
+      slug: resolvedParams.slug,
+      site: ctx.site,
+      bookingModalStyle,
+      willShowBanner: bookingModalStyle === 'banner'
+    });
+  }
+
+  // If banner style, show the banner modal instead of the widget
+  if (bookingModalStyle === 'banner') {
+    return (
+      <>
+        <Header title={title} tenantSlug={resolvedParams.slug} />
+        <main className="max-w-6xl mx-auto px-4 py-10">
+          <h1 className="text-2xl md:text-3xl font-semibold mb-4">Book airport parking</h1>
+          <Suspense fallback={<div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">Loading...</div>}>
+            <BookingPageClient slug={resolvedParams.slug} bookingModalStyle={bookingModalStyle} />
+          </Suspense>
+        </main>
+        <Footer title={title} />
+      </>
+    );
+  }
+
+  // Default: show the widget (card style)
   return (
     <>
       <Header title={title} tenantSlug={resolvedParams.slug} />

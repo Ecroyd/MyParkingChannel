@@ -59,6 +59,26 @@ export async function PUT(req: NextRequest) {
     }
 
     // Update the site's booking modal style
+    // First check if the column exists by trying to select it
+    const { error: columnCheckError } = await adminClient
+      .from('sites')
+      .select('booking_modal_style')
+      .eq('id', siteId)
+      .limit(1);
+
+    if (columnCheckError && columnCheckError.code === '42703') {
+      // Column doesn't exist (PostgreSQL error code 42703 = undefined_column)
+      console.error('booking_modal_style column does not exist. Please run the migration.');
+      return NextResponse.json(
+        { 
+          error: 'Database column not found. Please run the migration to add booking_modal_style column to the sites table.',
+          code: 'COLUMN_NOT_FOUND',
+          migrationFile: 'docs/add-booking-modal-style-column.sql'
+        },
+        { status: 500 }
+      );
+    }
+
     const { data: updatedSite, error: updateError } = await adminClient
       .from('sites')
       .update({ booking_modal_style: bookingModalStyle })
@@ -68,8 +88,21 @@ export async function PUT(req: NextRequest) {
 
     if (updateError) {
       console.error('Error updating booking modal style:', updateError);
+      
+      // Check if it's a column not found error
+      if (updateError.code === '42703') {
+        return NextResponse.json(
+          { 
+            error: 'Database column not found. Please run the migration to add booking_modal_style column to the sites table.',
+            code: 'COLUMN_NOT_FOUND',
+            migrationFile: 'docs/add-booking-modal-style-column.sql'
+          },
+          { status: 500 }
+        );
+      }
+      
       return NextResponse.json(
-        { error: 'Failed to update booking modal style' },
+        { error: 'Failed to update booking modal style', details: updateError.message },
         { status: 500 }
       );
     }

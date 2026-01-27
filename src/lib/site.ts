@@ -58,8 +58,22 @@ export async function getTenantContext(slug: string) {
       .maybeSingle()
   ]);
 
-  const branding = brandingResult.status === 'fulfilled' ? (brandingResult.value.data || null) : null;
-  const site = siteResult.status === 'fulfilled' ? (siteResult.value.data || null) : null;
+  const branding = brandingResult.status === 'fulfilled' && !brandingResult.value.error 
+    ? (brandingResult.value.data || null) 
+    : null;
+  
+  // Handle site result - check if it succeeded and if column exists
+  let site = null;
+  if (siteResult.status === 'fulfilled') {
+    const result = siteResult.value;
+    // If there's an error about column not existing, default to null (card style)
+    if (result.error && result.error.code === '42703') {
+      // Column doesn't exist yet - that's okay, default to card
+      site = null;
+    } else if (!result.error) {
+      site = result.data || null;
+    }
+  }
 
   return { 
     tenant, 

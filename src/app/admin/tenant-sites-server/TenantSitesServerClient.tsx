@@ -305,6 +305,12 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
       const data = await response.json();
 
       if (!response.ok) {
+        if (data.code === 'COLUMN_NOT_FOUND') {
+          throw new Error(
+            'Database column not found. Please run the SQL migration in Supabase SQL Editor: ' + 
+            (data.migrationFile || 'docs/add-booking-modal-style-column.sql')
+          );
+        }
         throw new Error(data.error || 'Failed to update booking modal style');
       }
 
