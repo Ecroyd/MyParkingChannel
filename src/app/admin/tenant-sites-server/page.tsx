@@ -177,7 +177,10 @@ export default async function TenantSitesServerPage() {
       const foundSite = directQuery.data;
       if (foundSite && !sites.find(s => s.id === foundSite.id)) {
         console.log('⚠️ Site found via direct query but not in main query - adding it manually');
-        sites.push(foundSite);
+        sites.push({
+          ...foundSite,
+          booking_modal_style: bookingModalStylesMap[foundSite.id] || null
+        });
       }
     }
   }
