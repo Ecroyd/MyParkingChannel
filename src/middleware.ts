@@ -51,6 +51,10 @@ export async function middleware(req: NextRequest) {
 
   // 🔴 Do NOT rewrite API routes, PWA assets, manifest, or static files
   // These should always go to root paths, not tenant-specific paths
+  // Decode URL to handle encoded filenames (e.g., parking%20favicon.png)
+  const decodedPath = decodeURIComponent(url.pathname);
+  const isStaticFile = /\.(svg|png|jpg|jpeg|gif|ico|webp|woff|woff2|ttf|eot|css|js|json|xml|txt)$/i.test(decodedPath);
+  
   if (
     url.pathname.startsWith("/api") ||
     url.pathname === "/sw.js" ||
@@ -59,7 +63,9 @@ export async function middleware(req: NextRequest) {
     url.pathname === "/manifest.webmanifest" ||
     url.pathname === "/~offline" ||
     url.pathname.startsWith("/_next") ||
-    url.pathname.match(/\.(svg|png|jpg|jpeg|gif|ico|webp|png|woff|woff2|ttf|eot)$/i)
+    isStaticFile ||
+    decodedPath.includes("file.svg") ||
+    decodedPath.includes("parking") && decodedPath.includes("favicon")
   ) {
     console.log("[TENANT_RESOLVE] Skipping rewrite for:", url.pathname);
     return NextResponse.next();

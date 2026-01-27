@@ -115,9 +115,14 @@ export default async (phase: any) => {
         // Exclude problematic files from precaching
         exclude: [
           /file\.svg$/,
-          /parking.*favicon\.png$/,
+          /parking.*favicon\.png$/i,
+          /parking%20favicon\.png$/i,
           /^\/_next\/static\/css\/.*\.css$/,
         ],
+        // Don't fail on missing precache files
+        dontCacheBustURLsMatching: /\.\w{8}\./,
+        // Ignore precache errors for missing files
+        ignoreURLParametersMatching: [/^utm_/, /^fbclid$/],
         runtimeCaching: [
           // Cache GET requests for public assets (images, css, js)
           {
