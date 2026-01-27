@@ -144,9 +144,10 @@ export default async function TenantSitesServerPage() {
       });
       
       // If we found it via direct query but not in main query, add it manually
-      if (directQuery.data && !sites.find(s => s.id === directQuery.data.id)) {
+      const foundSite = directQuery.data;
+      if (foundSite && !sites.find(s => s.id === foundSite.id)) {
         console.log('⚠️ Site found via direct query but not in main query - adding it manually');
-        sites.push(directQuery.data);
+        sites.push(foundSite);
       }
     }
   }
