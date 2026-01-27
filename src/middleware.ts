@@ -77,26 +77,38 @@ export async function middleware(req: NextRequest) {
   }
 
   try {
-    // 1) Find the tenant_domain for this host
-    const { data: domainRow, error: domainError } = await supabase
-      .from("tenant_domains")
-      .select("tenant_id, tenants!inner(slug)")
-      .eq("domain", normalizedHost)
-      .maybeSingle();
+    let slug: string | null = null;
 
-    if (domainError) {
-      console.error("[TENANT_RESOLVE] domainError", domainError);
+    // First, try to extract slug from subdomain (e.g., flyparksexeter.myparkingchannel.app)
+    const baseHost = "myparkingchannel.app";
+    if (normalizedHost.endsWith("." + baseHost)) {
+      slug = normalizedHost.slice(0, -(baseHost.length + 1));
+      console.log("[TENANT_RESOLVE] Extracted slug from subdomain:", slug);
     }
 
-    const slug =
-      (domainRow as any)?.tenants?.slug ??
-      (domainRow as any)?.slug ??
-      null;
+    // If not a subdomain, look up in tenant_domains table
+    if (!slug) {
+      const { data: domainRow, error: domainError } = await supabase
+        .from("tenant_domains")
+        .select("tenant_id, tenants!inner(slug)")
+        .eq("domain", normalizedHost)
+        .maybeSingle();
+
+      if (domainError) {
+        console.error("[TENANT_RESOLVE] domainError", domainError);
+      }
+
+      slug =
+        (domainRow as any)?.tenants?.slug ??
+        (domainRow as any)?.slug ??
+        null;
+    }
 
     console.log("[TENANT_RESOLVE]", {
       rawHost,
       normalizedHost,
       slug,
+      isSubdomain: normalizedHost.endsWith("." + baseHost),
     });
 
     if (!slug) {
