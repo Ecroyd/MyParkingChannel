@@ -2,6 +2,7 @@ import { getServiceSupabase } from "@/lib/supabase/service";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { makeImportDedupeKey } from "@/lib/bookings/dedupe";
 import { mapAphCsvLike, detectAndMapFromAttachment } from "@/lib/importers/canonical/mappers";
+import { isImageFile } from "@/lib/ingest/fileTypeUtils";
 
 /**
  * Parse file using canonical mappers (supports APH, CAVU, etc.)
@@ -94,6 +95,35 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   
   console.log(`[parseEmailFile] File status: ${file.parse_status}, filename: ${file.filename}`);
 
+  // 1.5. Check if file is an image (non-booking attachment) - skip it
+  if (isImageFile(file.filename, file.content_type)) {
+    console.log(`[parseEmailFile] Skipping image file: ${file.filename}`);
+    await supabase
+      .from("ingest_email_files")
+      .update({ 
+        parse_outcome: "skipped",
+        parse_status: "parsed", // Mark as parsed so it doesn't show as pending
+        parse_reason: "non_booking_attachment:image",
+        parsed_at: new Date().toISOString(),
+        parse_error: null,
+      })
+      .eq("id", fileId);
+    
+    return {
+      ok: true,
+      fileId: file.id,
+      filename: file.filename,
+      rowsParsed: 0,
+      stagedCount: 0,
+      importResult: {
+        runId: null,
+        successCount: 0,
+        errorCount: 0,
+        errors: [],
+      },
+    };
+  }
+
   // 2. Download file from Storage
   const { data: fileData, error: downloadError } = await supabase.storage
     .from(file.storage_bucket)
@@ -103,6 +133,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     await supabase
       .from("ingest_email_files")
       .update({ 
+        parse_outcome: "failed",
         parse_status: "failed", 
         parse_error: `Download failed: ${downloadError?.message || "unknown"}` 
       })
@@ -137,6 +168,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     await supabase
       .from("ingest_email_files")
       .update({ 
+        parse_outcome: "failed",
         parse_status: "failed", 
         parse_error: `Parse failed: ${parseErr.message}` 
       })
@@ -149,6 +181,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     await supabase
       .from("ingest_email_files")
       .update({ 
+        parse_outcome: "failed",
         parse_status: "failed", 
         parse_error: "File format detected but no valid rows extracted. File may be empty or have no data rows." 
       })
@@ -245,6 +278,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     await supabase
       .from("ingest_email_files")
       .update({ 
+        parse_outcome: "parsed",
         parse_status: "parsed",
         parsed_at: new Date().toISOString(),
         parse_error: "File format detected but no valid rows extracted"
@@ -294,6 +328,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       await supabase
         .from("ingest_email_files")
         .update({ 
+          parse_outcome: "failed",
           parse_status: "failed", 
           parse_error: `Staging insert failed: ${stagingError.message}` 
         })
@@ -519,9 +554,11 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   const { error: updateError, data: updatedFile } = await supabase
     .from("ingest_email_files")
     .update({ 
+      parse_outcome: "parsed",
       parse_status: "parsed",
       parsed_at: new Date().toISOString(),
       parse_error: null, // Clear any previous errors
+      parse_reason: null, // Clear any previous reason
     })
     .eq("id", fileId)
     .select("id, parse_status, parsed_at")

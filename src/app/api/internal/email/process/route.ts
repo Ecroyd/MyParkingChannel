@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { simpleParser } from "mailparser";
 import { detectAndMapFromAttachment, mapFlyparksEmailText } from "@/lib/importers/canonical/mappers";
 import type { CanonicalBooking } from "@/lib/importers/canonical/types";
+import { isImageFile } from "@/lib/ingest/fileTypeUtils";
 
 export const runtime = "nodejs";
 
@@ -98,6 +99,9 @@ export async function POST(req: NextRequest) {
         continue; // Skip this attachment but continue with others
       }
 
+      // Check if file is an image (non-booking attachment)
+      const isImage = isImageFile(filename, att.contentType);
+      
       // Also create file record in ingest_email_files
       await supabase.from("ingest_email_files").insert({
         email_id: email_ingest_id,
@@ -105,8 +109,16 @@ export async function POST(req: NextRequest) {
         content_type: att.contentType || null,
         storage_bucket: "email-imports",
         storage_path: storagePath,
-        parse_status: "pending",
+        parse_status: isImage ? "parsed" : "pending", // Mark images as parsed immediately
+        parse_outcome: isImage ? "skipped" : null,
+        parse_reason: isImage ? "non_booking_attachment:image" : null,
       });
+
+      // Skip parsing if it's an image
+      if (isImage) {
+        console.log(`[email-process] Skipped image file: ${filename}`);
+        continue;
+      }
 
       // Try parse text attachments
       const isTexty =

@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/server-admin";
 import { getCurrentTenantContext } from "@/lib/auth/current-tenant-context";
 import { NextResponse } from "next/server";
+import { isBookingCapableFile } from "@/lib/ingest/fileTypeUtils";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +52,7 @@ export async function GET() {
     const adminClient = await createAdminClient();
 
     // Get files that failed to parse in the last 24 hours
+    // Only include files with parse_outcome='failed' (not 'skipped')
     // We'll filter by tenant after fetching by checking email mapping
     const { data: allFailedFiles, error: failedError } = await adminClient
       .from("ingest_email_files")
@@ -58,6 +60,7 @@ export async function GET() {
         id,
         filename,
         parse_status,
+        parse_outcome,
         parse_error,
         parsed_at,
         created_at,
@@ -68,20 +71,28 @@ export async function GET() {
           created_at
         )
       `)
-      .eq("parse_status", "failed")
+      .eq("parse_outcome", "failed")
       .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
       .order("created_at", { ascending: false })
       .limit(100);
 
-    // Filter by tenant (check if email maps to current tenant)
+    // Filter by tenant and only include booking-capable files
+    // Skip image files and other non-booking attachments
     const failedFiles = (allFailedFiles || []).filter((file: any) => {
       const email = file.ingest_emails;
       const fileTenantId = detectTenantFromEmail(email);
       const matches = fileTenantId === ctx.tenantId;
-      if (matches) {
-        console.log(`[EMAIL PARSE HEALTH] Failed file ${file.filename} (${file.id}) matches tenant ${ctx.tenantId}`);
+      
+      // Only include booking-capable files in alerts
+      const isBookingCapable = isBookingCapableFile(file.filename);
+      
+      if (matches && isBookingCapable) {
+        console.log(`[EMAIL PARSE HEALTH] Failed booking-capable file ${file.filename} (${file.id}) matches tenant ${ctx.tenantId}`);
+      } else if (matches && !isBookingCapable) {
+        console.log(`[EMAIL PARSE HEALTH] Skipping non-booking-capable failed file ${file.filename} (${file.id}) from alerts`);
       }
-      return matches;
+      
+      return matches && isBookingCapable;
     }).slice(0, 50);
 
     if (failedError) {

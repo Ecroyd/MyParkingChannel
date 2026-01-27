@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { getServiceSupabase } from "@/lib/supabase/service";
 // @ts-ignore - mailparser types may not be fully compatible
 import { simpleParser } from "mailparser";
+import { isImageFile } from "@/lib/ingest/fileTypeUtils";
 
 export const runtime = "nodejs";
 
@@ -313,6 +314,9 @@ export async function POST(req: Request) {
           const sanitizedFilename = attachment.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
           const storagePath = `${data.id}/${timestamp}-${sanitizedFilename}`;
 
+          // Check if file is an image (non-booking attachment)
+          const isImage = isImageFile(attachment.filename, attachment.content_type);
+          
           // Store file metadata in database
           const { data: fileData, error: fileError } = await supabase
             .from("ingest_email_files")
@@ -323,7 +327,9 @@ export async function POST(req: Request) {
               file_size: attachment.size || null,
               storage_bucket: "email-imports",
               storage_path: storagePath,
-              parse_status: "pending",
+              parse_status: isImage ? "parsed" : "pending", // Mark images as parsed immediately
+              parse_outcome: isImage ? "skipped" : null,
+              parse_reason: isImage ? "non_booking_attachment:image" : null,
             })
             .select("id")
             .single();
@@ -351,10 +357,18 @@ export async function POST(req: Request) {
                 // Update file status to failed
                 await supabase
                   .from("ingest_email_files")
-                  .update({ parse_status: "failed", parse_error: `Storage upload failed: ${storageError.message}` })
+                  .update({ 
+                    parse_outcome: "failed",
+                    parse_status: "failed", 
+                    parse_error: `Storage upload failed: ${storageError.message}` 
+                  })
                   .eq("id", fileData.id);
               } else {
-                console.log(`[ingest-email] Successfully uploaded ${attachment.filename} to ${storagePath}`);
+                if (isImage) {
+                  console.log(`[ingest-email] Skipped image file ${attachment.filename} (non-booking attachment)`);
+                } else {
+                  console.log(`[ingest-email] Successfully uploaded ${attachment.filename} to ${storagePath}`);
+                }
               }
             } catch (storageErr: any) {
               console.error(`[ingest-email] Storage exception for ${attachment.filename}:`, {
@@ -387,7 +401,7 @@ export async function POST(req: Request) {
           const storagePath = `${data.id}/${timestamp}-email-body.txt`;
           const bodyBuffer = Buffer.from(emailBodyText, "utf-8");
           
-          // Store file metadata
+          // Store file metadata (email body is booking-capable)
           const { data: fileData, error: fileError } = await supabase
             .from("ingest_email_files")
             .insert({
@@ -398,6 +412,7 @@ export async function POST(req: Request) {
               storage_bucket: "email-imports",
               storage_path: storagePath,
               parse_status: "pending",
+              parse_outcome: null, // Will be set when parsed
             })
             .select("id")
             .single();
