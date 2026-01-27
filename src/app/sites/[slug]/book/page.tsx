@@ -6,6 +6,7 @@ import BookingWidget from "@/components/booking/BookingWidget";
 import BookingPageClient from "@/app/t/[slug]/book/BookingPageClient";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export default async function BookPage({ params, searchParams }: { params: Promise<{ slug: string }>, searchParams: Promise<{ preview?: string }> }) {
   const resolvedParams = await params;
@@ -36,26 +37,22 @@ export default async function BookPage({ params, searchParams }: { params: Promi
   }
 
   const title = ctx.branding?.app_name || ctx.tenant.name || "Airport Parking";
-  const bookingModalStyle = ctx.site?.booking_modal_style || 'card';
-
-  // Debug logging - always log in production to help diagnose
-  console.log('[BOOK_PAGE] Booking modal style check:', {
-    slug: resolvedParams.slug,
-    siteData: ctx.site,
-    bookingModalStyle,
-    willShowBanner: bookingModalStyle === 'banner',
-    timestamp: new Date().toISOString()
-  });
+  
+  // Explicit logging and style selection
+  console.log('[BOOK_PAGE] ctx.site', ctx.site);
+  console.log('[BOOK_PAGE] booking_modal_style', ctx.site?.booking_modal_style);
+  
+  const modalStyle = (ctx.site?.booking_modal_style ?? "card").toLowerCase();
 
   // If banner style, show the banner modal instead of the widget
-  if (bookingModalStyle === 'banner') {
+  if (modalStyle === "banner") {
     return (
       <>
         <Header title={title} tenantSlug={resolvedParams.slug} />
         <main className="max-w-6xl mx-auto px-4 py-10">
           <h1 className="text-2xl md:text-3xl font-semibold mb-4">Book airport parking</h1>
           <Suspense fallback={<div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">Loading...</div>}>
-            <BookingPageClient slug={resolvedParams.slug} bookingModalStyle={bookingModalStyle} />
+            <BookingPageClient slug={resolvedParams.slug} bookingModalStyle={modalStyle as 'card' | 'banner'} />
           </Suspense>
         </main>
         <Footer title={title} />
