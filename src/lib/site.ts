@@ -28,30 +28,44 @@ export async function getTenantContext(slug: string) {
     return null;
   }
 
-  const { data: branding } = await sb
-    .from("tenant_branding")
-    .select(`
-      app_name, 
-      short_name, 
-      theme_color, 
-      background_color, 
-      icon_192_url, 
-      icon_512_url, 
-      maskable_512_url,
-      contact_email,
-      contact_phone,
-      contact_address,
-      contact_city,
-      contact_postcode,
-      contact_country,
-      business_hours,
-      website_url,
-      social_media
-    `)
-    .eq("tenant_id", tenant.id)
-    .maybeSingle();
+  const [brandingResult, siteResult] = await Promise.all([
+    sb
+      .from("tenant_branding")
+      .select(`
+        app_name, 
+        short_name, 
+        theme_color, 
+        background_color, 
+        icon_192_url, 
+        icon_512_url, 
+        maskable_512_url,
+        contact_email,
+        contact_phone,
+        contact_address,
+        contact_city,
+        contact_postcode,
+        contact_country,
+        business_hours,
+        website_url,
+        social_media
+      `)
+      .eq("tenant_id", tenant.id)
+      .maybeSingle(),
+    sb
+      .from("sites")
+      .select("booking_modal_style")
+      .eq("tenant_id", tenant.id)
+      .maybeSingle()
+  ]);
 
-  return { tenant, branding: branding || null };
+  const branding = brandingResult.data || null;
+  const site = siteResult.data || null;
+
+  return { 
+    tenant, 
+    branding: branding || null,
+    site: site || null
+  };
 }
 
 // Back-compat for older /sites/[slug] pages:

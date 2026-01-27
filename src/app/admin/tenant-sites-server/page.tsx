@@ -76,7 +76,7 @@ export default async function TenantSitesServerPage() {
   const [sitesResult, brandingResult] = await Promise.all([
     adminClient
       .from('sites')
-      .select('id, tenant_id, slug, status, template, primary_domain')
+      .select('id, tenant_id, slug, status, template, primary_domain, booking_modal_style')
       .in('tenant_id', tenantIds),
     adminClient
       .from('tenant_branding')

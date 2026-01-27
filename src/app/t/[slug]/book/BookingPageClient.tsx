@@ -1,22 +1,24 @@
 "use client";
 import { useState, useEffect } from "react";
-import { useSearchParams } from "next/navigation";
 import BookingModal from "@/components/tenant/BookingModal";
 import BookingModalBanner from "@/components/tenant/BookingModalBanner";
 
-export default function BookingPageClient({ slug }: { slug: string }) {
-  const searchParams = useSearchParams();
-  const modalStyle = searchParams.get("modal") || "card"; // "card" or "banner"
+interface BookingPageClientProps {
+  slug: string;
+  bookingModalStyle?: 'card' | 'banner' | null;
+}
+
+export default function BookingPageClient({ slug, bookingModalStyle = 'card' }: BookingPageClientProps) {
   const [bannerModalOpen, setBannerModalOpen] = useState(false);
 
   // If banner style is selected, open it automatically on mount
   useEffect(() => {
-    if (modalStyle === "banner") {
+    if (bookingModalStyle === "banner") {
       setBannerModalOpen(true);
     }
-  }, [modalStyle]);
+  }, [bookingModalStyle]);
 
-  if (modalStyle === "banner") {
+  if (bookingModalStyle === "banner") {
     return (
       <BookingModalBanner 
         slug={slug} 

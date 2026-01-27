@@ -11,13 +11,15 @@ export default async function BookPage({ params }: { params: Promise<{ slug: str
   if (!ctx) return <main className="max-w-xl mx-auto py-24 px-4">Unknown tenant.</main>;
 
   const title = ctx.branding?.app_name || ctx.tenant.name || "Airport Parking";
+  const bookingModalStyle = ctx.site?.booking_modal_style || 'card';
+  
   return (
     <>
       <Header title={title} slug={slug} />
       <main className="max-w-6xl mx-auto px-4 py-10">
         <h1 className="text-2xl md:text-3xl font-semibold mb-4">Book airport parking</h1>
         <Suspense fallback={<div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">Loading...</div>}>
-          <BookingPageClient slug={slug} />
+          <BookingPageClient slug={slug} bookingModalStyle={bookingModalStyle} />
         </Suspense>
       </main>
       <Footer title={title} />

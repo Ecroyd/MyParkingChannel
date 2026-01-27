@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import EmptyState from '@/components/admin/EmptyState';
 import WidgetEmbedCard from '@/components/admin/WidgetEmbedCard';
@@ -31,6 +33,7 @@ type Site = {
   status: 'draft' | 'published';
   template: string;
   primary_domain: string | null;
+  booking_modal_style?: 'card' | 'banner' | null;
 };
 
 type Domain = {
@@ -59,8 +62,21 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
   const [newDomain, setNewDomain] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [domainsLoaded, setDomainsLoaded] = useState(false);
+  const [savingModalStyle, setSavingModalStyle] = useState<Record<string, boolean>>({});
+  const [bookingModalStyles, setBookingModalStyles] = useState<Record<string, 'card' | 'banner'>>({});
   const { toast } = useToast();
   const supabase = createClient();
+
+  // Initialize booking modal styles from props
+  useEffect(() => {
+    const initialStyles: Record<string, 'card' | 'banner'> = {};
+    tenants.forEach(tenant => {
+      if (tenant.site?.id && tenant.site.booking_modal_style) {
+        initialStyles[tenant.site.id] = tenant.site.booking_modal_style;
+      }
+    });
+    setBookingModalStyles(initialStyles);
+  }, [tenants]);
 
   // Load domains for each tenant
   useEffect(() => {
@@ -225,6 +241,50 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
     return siteUrlForTenantSlug(tenant.slug);
   };
 
+  const handleBookingModalStyleChange = async (siteId: string, style: 'card' | 'banner') => {
+    if (!siteId) return;
+
+    setSavingModalStyle(prev => ({ ...prev, [siteId]: true }));
+
+    try {
+      const response = await fetch('/api/admin/sites/booking-modal-style', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          siteId,
+          bookingModalStyle: style,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to update booking modal style');
+      }
+
+      // Update local state
+      setBookingModalStyles(prev => ({
+        ...prev,
+        [siteId]: style,
+      }));
+
+      toast({
+        title: 'Success',
+        description: `Booking modal style updated to ${style}.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update booking modal style.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingModalStyle(prev => ({ ...prev, [siteId]: false }));
+    }
+  };
+
   if (tenants.length === 0) {
     return (
       <EmptyState
@@ -331,6 +391,31 @@ export default function TenantSitesServerClient({ user, tenants }: TenantSitesSe
                           Site is in draft mode. Use preview link to view.
                         </p>
                       )}
+
+                      {/* Booking Modal Style Selector */}
+                      <div className="space-y-2 pt-2 border-t">
+                        <Label htmlFor={`modal-style-${tenant.site.id}`} className="text-sm font-medium">
+                          Booking Modal Style
+                        </Label>
+                        <Select
+                          value={bookingModalStyles[tenant.site.id] || tenant.site.booking_modal_style || 'card'}
+                          onValueChange={(value: 'card' | 'banner') => 
+                            handleBookingModalStyleChange(tenant.site!.id, value)
+                          }
+                          disabled={savingModalStyle[tenant.site.id]}
+                        >
+                          <SelectTrigger id={`modal-style-${tenant.site.id}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="card">Card Style</SelectItem>
+                            <SelectItem value="banner">Banner Style</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-gray-500">
+                          Choose how the booking form appears on the site
+                        </p>
+                      </div>
                     </div>
                   ) : (
                     <div className="text-sm text-gray-500">
