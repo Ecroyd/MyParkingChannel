@@ -93,18 +93,51 @@ export default async function TenantSitesServerPage() {
   if (tenantIds.length > 0) {
     const flyParksTenant = tenants?.find(t => t.slug === 'flyparksexeter');
     if (flyParksTenant) {
-      const { data: flyParksSite, error: flyParksError } = await adminClient
-        .from('sites')
-        .select('id, tenant_id, slug, status, template, primary_domain, booking_modal_style')
-        .eq('tenant_id', flyParksTenant.id)
-        .maybeSingle();
+      // Try multiple query methods to find the site
+      const [directQuery, slugQuery, allSitesQuery] = await Promise.all([
+        adminClient
+          .from('sites')
+          .select('id, tenant_id, slug, status, template, primary_domain, booking_modal_style')
+          .eq('tenant_id', flyParksTenant.id)
+          .maybeSingle(),
+        adminClient
+          .from('sites')
+          .select('id, tenant_id, slug, status, template, primary_domain, booking_modal_style')
+          .eq('slug', 'flyparksexeter')
+          .maybeSingle(),
+        adminClient
+          .from('sites')
+          .select('id, tenant_id, slug, status, template, primary_domain, booking_modal_style')
+          .limit(10)
+      ]);
       
       console.log('🔍 Direct query for Fly Parks Exeter site:', {
         tenantId: flyParksTenant.id,
-        siteFound: !!flyParksSite,
-        site: flyParksSite,
-        error: flyParksError
+        tenantIdType: typeof flyParksTenant.id,
+        directQuerySite: directQuery.data,
+        directQueryError: directQuery.error,
+        slugQuerySite: slugQuery.data,
+        slugQueryError: slugQuery.error,
+        allSitesSample: allSitesQuery.data?.slice(0, 3).map(s => ({ 
+          id: s.id, 
+          tenant_id: s.tenant_id, 
+          tenant_id_type: typeof s.tenant_id,
+          slug: s.slug 
+        })),
+        sitesInMainQuery: sites.length,
+        sitesInMainQueryData: sites.map(s => ({ 
+          id: s.id, 
+          tenant_id: s.tenant_id, 
+          tenant_id_type: typeof s.tenant_id,
+          slug: s.slug 
+        }))
       });
+      
+      // If we found it via direct query but not in main query, add it manually
+      if (directQuery.data && !sites.find(s => s.id === directQuery.data.id)) {
+        console.log('⚠️ Site found via direct query but not in main query - adding it manually');
+        sites.push(directQuery.data);
+      }
     }
   }
 
