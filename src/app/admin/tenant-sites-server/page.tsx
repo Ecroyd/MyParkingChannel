@@ -89,8 +89,18 @@ export default async function TenantSitesServerPage() {
       : { data: [], error: null }
   ]);
 
+  if (sitesResult.error) {
+    console.error('❌ Tenant Sites: Error fetching sites:', sitesResult.error);
+  }
+  if (brandingResult.error) {
+    console.error('❌ Tenant Sites: Error fetching branding:', brandingResult.error);
+  }
+
+  const sites = sitesResult.data || [];
+  const branding = brandingResult.data || [];
+
   // Debug: Also query sites by slug for flyparksexeter specifically
-  if (tenantIds.length > 0) {
+  if (tenantIds.length > 0 && sites.length > 0) {
     const flyParksTenant = tenants?.find(t => t.slug === 'flyparksexeter');
     if (flyParksTenant) {
       // Try multiple query methods to find the site
@@ -140,16 +150,6 @@ export default async function TenantSitesServerPage() {
       }
     }
   }
-
-  if (sitesResult.error) {
-    console.error('❌ Tenant Sites: Error fetching sites:', sitesResult.error);
-  }
-  if (brandingResult.error) {
-    console.error('❌ Tenant Sites: Error fetching branding:', brandingResult.error);
-  }
-
-  const sites = sitesResult.data || [];
-  const branding = brandingResult.data || [];
 
   console.log('📊 Tenant Sites: Sites found:', sites?.length || 0, sites)
   console.log('📊 Tenant Sites: Branding found:', branding?.length || 0, branding)
