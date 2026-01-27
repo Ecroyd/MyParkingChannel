@@ -38,15 +38,14 @@ export default async function BookPage({ params, searchParams }: { params: Promi
   const title = ctx.branding?.app_name || ctx.tenant.name || "Airport Parking";
   const bookingModalStyle = ctx.site?.booking_modal_style || 'card';
 
-  // Debug logging
-  if (process.env.NEXT_PUBLIC_DEBUG_SITE === '1') {
-    console.log('[BOOK_PAGE] Booking modal style:', {
-      slug: resolvedParams.slug,
-      site: ctx.site,
-      bookingModalStyle,
-      willShowBanner: bookingModalStyle === 'banner'
-    });
-  }
+  // Debug logging - always log in production to help diagnose
+  console.log('[BOOK_PAGE] Booking modal style check:', {
+    slug: resolvedParams.slug,
+    siteData: ctx.site,
+    bookingModalStyle,
+    willShowBanner: bookingModalStyle === 'banner',
+    timestamp: new Date().toISOString()
+  });
 
   // If banner style, show the banner modal instead of the widget
   if (bookingModalStyle === 'banner') {

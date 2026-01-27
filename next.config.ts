@@ -112,6 +112,12 @@ export default async (phase: any) => {
         // Skip preloading CSS files that aren't immediately used
         skipWaiting: true,
         clientsClaim: true,
+        // Exclude problematic files from precaching
+        exclude: [
+          /file\.svg$/,
+          /parking.*favicon\.png$/,
+          /^\/_next\/static\/css\/.*\.css$/,
+        ],
         runtimeCaching: [
           // Cache GET requests for public assets (images, css, js)
           {

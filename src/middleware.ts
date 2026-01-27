@@ -49,7 +49,7 @@ export async function middleware(req: NextRequest) {
   const rawHost = req.headers.get("host");
   const normalizedHost = normalizeHost(rawHost);
 
-  // 🔴 Do NOT rewrite API routes, PWA assets, or manifest
+  // 🔴 Do NOT rewrite API routes, PWA assets, manifest, or static files
   // These should always go to root paths, not tenant-specific paths
   if (
     url.pathname.startsWith("/api") ||
@@ -57,7 +57,9 @@ export async function middleware(req: NextRequest) {
     url.pathname.startsWith("/workbox-") ||
     url.pathname.startsWith("/fallback-") ||
     url.pathname === "/manifest.webmanifest" ||
-    url.pathname === "/~offline"
+    url.pathname === "/~offline" ||
+    url.pathname.startsWith("/_next") ||
+    url.pathname.match(/\.(svg|png|jpg|jpeg|gif|ico|webp|png|woff|woff2|ttf|eot)$/i)
   ) {
     console.log("[TENANT_RESOLVE] Skipping rewrite for:", url.pathname);
     return NextResponse.next();
