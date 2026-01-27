@@ -39,12 +39,14 @@ export async function GET(req: NextRequest) {
     }
 
     // Fetch all bookings for the tenant
+    // Order by created_at descending to show most recently created bookings first
+    // This ensures new bookings appear at the top
     const { data: bookings, error } = await adminClient
       .from('bookings')
       .select('*')
       .eq('tenant_id', tenantId)
-      .order('start_at', { ascending: false })
-      .limit(500);
+      .order('created_at', { ascending: false })
+      .limit(1000);
 
     if (error) {
       console.error('[Bookings List] Error:', error);

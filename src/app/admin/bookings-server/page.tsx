@@ -87,8 +87,8 @@ export default async function BookingsServerPage() {
       .from('bookings')
       .select('*')
       .eq('tenant_id', tenant.id)
-      .order('start_at', { ascending: false })
-      .limit(500);
+      .order('created_at', { ascending: false })
+      .limit(1000);
 
     if (bookingsError) {
       console.log('❌ Bookings: Error fetching bookings:', bookingsError)

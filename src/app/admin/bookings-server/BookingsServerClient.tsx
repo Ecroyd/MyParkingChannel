@@ -74,6 +74,7 @@ export default function BookingsServerClient({ user, tenant, bookings: initialBo
     if (!dateRange) return bookings; // 'all' - return all bookings
     
     return bookings.filter(booking => {
+      if (!booking.start_at || !booking.end_at) return true; // Include bookings without dates
       const startDate = new Date(booking.start_at).toISOString().split('T')[0];
       const endDate = new Date(booking.end_at).toISOString().split('T')[0];
       
@@ -100,6 +101,7 @@ export default function BookingsServerClient({ user, tenant, bookings: initialBo
     
     const now = new Date();
     return bookings.filter(booking => {
+      if (!booking.end_at) return true; // Include bookings without end_at
       const endDate = new Date(booking.end_at);
       return endDate >= now;
     });
@@ -156,7 +158,19 @@ export default function BookingsServerClient({ user, tenant, bookings: initialBo
       const response = await fetch(`/api/admin/bookings/list?tenantId=${tenant.id}`);
       if (response.ok) {
         const data = await response.json();
-        setBookings(data.bookings || []);
+        const fetchedBookings = data.bookings || [];
+        console.log('[Bookings Fetch] Fetched bookings:', fetchedBookings.length);
+        // Check if the specific booking is in the results
+        const targetBooking = fetchedBookings.find((b: any) => b.reference === 'QRSW36');
+        if (targetBooking) {
+          console.log('[Bookings Fetch] Found QRSW36 booking:', targetBooking);
+        } else {
+          console.log('[Bookings Fetch] QRSW36 booking NOT found in fetched results');
+        }
+        setBookings(fetchedBookings);
+      } else {
+        const errorData = await response.json();
+        console.error('[Bookings Fetch] API error:', errorData);
       }
     } catch (error) {
       console.error('Failed to fetch bookings:', error);
@@ -180,7 +194,8 @@ export default function BookingsServerClient({ user, tenant, bookings: initialBo
       if (booking.source) {
         channels.add(booking.source);
       }
-      if (booking.external_source) {
+      // Only add external_source if it's not empty
+      if (booking.external_source && booking.external_source.trim().length > 0) {
         channels.add(booking.external_source);
       }
     });
@@ -196,6 +211,16 @@ export default function BookingsServerClient({ user, tenant, bookings: initialBo
     const cancelledFiltered = filterCancelledBookings(finishedFiltered, showCancelledBookings);
     const channelFiltered = filterByChannel(cancelledFiltered, channelFilter);
     const sorted = sortBookings(channelFiltered, sortOrder);
+    
+    // Debug logging
+    console.log('[Bookings Filter] Total bookings:', bookings.length);
+    console.log('[Bookings Filter] After date filter:', dateFiltered.length);
+    console.log('[Bookings Filter] After search filter:', searchFiltered.length);
+    console.log('[Bookings Filter] After finished filter:', finishedFiltered.length);
+    console.log('[Bookings Filter] After cancelled filter:', cancelledFiltered.length);
+    console.log('[Bookings Filter] After channel filter:', channelFiltered.length);
+    console.log('[Bookings Filter] Final filtered count:', sorted.length);
+    
     setFilteredBookings(sorted);
   }, [dateRange, customStartDate, customEndDate, searchTerm, sortOrder, showFinishedBookings, showCancelledBookings, channelFilter, bookings]);
 
