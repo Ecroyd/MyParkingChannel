@@ -77,6 +77,40 @@ export async function POST(req: Request) {
         'cancelled',
         adminClient
       ).catch((err) => console.error('[Videofit] Background sync error:', err));
+
+      // Queue cancellation email
+      if (updatedBooking.customer_email) {
+        try {
+          const { queueEmail } = await import('@/lib/email/emailService');
+          const { data: tenant } = await adminClient
+            .from('tenants')
+            .select('name')
+            .eq('id', updatedBooking.tenant_id)
+            .single();
+
+          await queueEmail({
+            tenantId: updatedBooking.tenant_id,
+            to: updatedBooking.customer_email,
+            toName: updatedBooking.customer_name || null,
+            subject: `Booking Cancelled - ${updatedBooking.reference}`,
+            templateKey: 'booking_cancelled',
+            payload: {
+              bookingReference: updatedBooking.reference,
+              customerName: updatedBooking.customer_name || 'Customer',
+              plate: updatedBooking.plate || '',
+              startAt: updatedBooking.start_at,
+              endAt: updatedBooking.end_at,
+              refundAmount: updatedBooking.money_received || 0,
+              currency: 'GBP',
+              tenantName: tenant?.name,
+            },
+            dedupeKey: `booking:${updatedBooking.id}:cancel:v1`,
+          });
+        } catch (emailError) {
+          console.error('[BOOKING CANCEL] Failed to queue cancellation email:', emailError);
+          // Don't fail the cancellation if email fails
+        }
+      }
     }
 
     return NextResponse.json({ 

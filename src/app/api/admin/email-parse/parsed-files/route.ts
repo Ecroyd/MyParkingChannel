@@ -3,6 +3,9 @@ import { getCurrentTenantContext } from "@/lib/auth/current-tenant-context";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+const API_VERSION = "parsed-files-v3-staging-join-emailid-filename";
 
 // Reuse the email-to-tenant mapping logic
 function getEmailTenantMap(): Record<string, string> {
@@ -19,6 +22,21 @@ function getEmailTenantMap(): Record<string, string> {
     "info@flyparksexeter.co.uk": "bab45dab-19e8-4230-b18e-ee1f663608e5",
     "eek_me@hotmail.com": "bab45dab-19e8-4230-b18e-ee1f663608e5",
   };
+}
+
+function bookingSourceFromParserKey(parserKey: string | null): string | null {
+  switch (parserKey) {
+    case "aph_email_import":
+      return "aph";
+    case "cavu_email_import":
+      return "cavu";
+    case "holiday_extras_email_import":
+      return "holidayextras";
+    case "flyparks_email_import":
+      return "direct";
+    default:
+      return null;
+  }
 }
 
 function detectTenantFromEmail(email: { from_address?: string | null }): string | null {
@@ -124,16 +142,7 @@ export async function GET() {
           (file.parser_key === null || file.parser_key !== expectedParserKey);
 
         // Map parser_key to booking source for display (single source of truth)
-        let bookingSource: string | null = null;
-        if (file.parser_key === 'aph_email_import') {
-          bookingSource = 'other'; // APH uses 'other' since 'aph' not in enum
-        } else if (file.parser_key === 'cavu_email_import') {
-          bookingSource = 'cavu';
-        } else if (file.parser_key === 'holiday_extras_email_import') {
-          bookingSource = 'holidayextras';
-        } else if (file.parser_key === 'flyparks_email_import') {
-          bookingSource = 'other';
-        }
+        const bookingSource = bookingSourceFromParserKey(file.parser_key);
 
         filesWithSource.push({
           file_id: file.id,
@@ -153,6 +162,11 @@ export async function GET() {
           bookings_created: stagingCount || 0, // From staging (correct)
           sample_references: sampleReferences, // From staging (correct)
           has_source_issue: hasSourceIssue,
+          // Debug fields
+          debug_file_parser_key: file.parser_key,
+          debug_file_external_source: file.external_source,
+          debug_stg_rows: stagingCount || 0,
+          debug_stg_refs_first5: sampleReferences,
         });
       }
 
@@ -242,11 +256,19 @@ export async function GET() {
       }
     }
 
-    return NextResponse.json({
-      ok: true,
-      files: filesWithSource,
-      bookings: bookingsWithSource,
-    });
+    return NextResponse.json(
+      {
+        ok: true,
+        api_version: API_VERSION,
+        files: filesWithSource,
+        bookings: bookingsWithSource,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+        },
+      }
+    );
   } catch (err: any) {
     console.error("[PARSED FILES] Unexpected error:", err);
     return NextResponse.json(

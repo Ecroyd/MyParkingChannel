@@ -76,28 +76,11 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     throw new Error("File not found");
   }
 
-  // If already parsed, reset status to allow re-parsing (for retry scenarios)
-  if (file.parse_status === "parsed") {
-    console.log(`[parseEmailFile] File already parsed, resetting status for retry: ${fileId}`);
-    const { error: resetError } = await supabase
-      .from("ingest_email_files")
-      .update({ 
-        parse_status: "pending",
-        parsed_at: null,
-        parse_error: null,
-      })
-      .eq("id", fileId);
-    
-    if (resetError) {
-      console.error(`[parseEmailFile] Failed to reset status:`, resetError);
-    } else {
-      console.log(`[parseEmailFile] ✅ Status reset to pending for retry`);
-    }
-  }
-  
-  console.log(`[parseEmailFile] File status: ${file.parse_status}, filename: ${file.filename}`);
+  // Type guard for file with parse_outcome
+  const fileWithOutcome = file as typeof file & { parse_outcome?: string | null };
 
-  // 1.5. Check if file is an image (non-booking attachment) - skip it
+  // 1.5. Check if file is an image (non-booking attachment) - skip it FIRST
+  // This prevents images from being re-parsed
   if (isImageFile(file.filename, file.content_type)) {
     console.log(`[parseEmailFile] Skipping image file: ${file.filename}`);
     await supabase
@@ -125,6 +108,46 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       },
     };
   }
+
+  // If already parsed and skipped, don't re-parse
+  if (fileWithOutcome.parse_status === "parsed" && fileWithOutcome.parse_outcome === "skipped") {
+    console.log(`[parseEmailFile] File already skipped, not re-parsing: ${fileId}`);
+    return {
+      ok: true,
+      fileId: file.id,
+      filename: file.filename,
+      rowsParsed: 0,
+      stagedCount: 0,
+      importResult: {
+        runId: null,
+        successCount: 0,
+        errorCount: 0,
+        errors: [],
+      },
+    };
+  }
+
+  // If already parsed, reset status to allow re-parsing (for retry scenarios)
+  // BUT: Don't reset if it was skipped (images) or if parse_outcome is "skipped"
+  if (fileWithOutcome.parse_status === "parsed" && fileWithOutcome.parse_outcome !== "skipped") {
+    console.log(`[parseEmailFile] File already parsed, resetting status for retry: ${fileId}`);
+    const { error: resetError } = await supabase
+      .from("ingest_email_files")
+      .update({ 
+        parse_status: "pending",
+        parsed_at: null,
+        parse_error: null,
+      })
+      .eq("id", fileId);
+    
+    if (resetError) {
+      console.error(`[parseEmailFile] Failed to reset status:`, resetError);
+    } else {
+      console.log(`[parseEmailFile] ✅ Status reset to pending for retry`);
+    }
+  }
+  
+  console.log(`[parseEmailFile] File status: ${file.parse_status}, filename: ${file.filename}`);
 
   // 2. Download file from Storage
   const { data: fileData, error: downloadError } = await supabase.storage

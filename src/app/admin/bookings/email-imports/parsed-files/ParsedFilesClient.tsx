@@ -53,9 +53,12 @@ export default function ParsedFilesClient({ tenantId }: { tenantId: string }) {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/email-parse/parsed-files');
+      const res = await fetch('/api/admin/email-parse/parsed-files', {
+        cache: 'no-store',
+      });
       const data = await res.json();
       if (data.ok) {
+        console.log('[PARSED FILES] API version:', data.api_version);
         setFiles(data.files || []);
         setBookings(data.bookings || []);
       }
@@ -84,8 +87,10 @@ export default function ParsedFilesClient({ tenantId }: { tenantId: string }) {
   };
 
   const getSourceStatus = (file: ParsedFile) => {
-    // Use has_source_issue flag from API if available (single source of truth)
-    if ('has_source_issue' in file && file.has_source_issue === true) {
+    // Use has_source_issue flag from API (single source of truth) - NO FALLBACK
+    const hasIssue = file.has_source_issue === true; // Explicit check, no fallback
+    
+    if (hasIssue) {
       const channel = file.detected_channel || 'Unknown';
       const bookingSource = file.booking_source || 'Not set';
       const externalSource = file.booking_external_source || 'Not set';
@@ -97,33 +102,18 @@ export default function ParsedFilesClient({ tenantId }: { tenantId: string }) {
       };
     }
 
-    // Fallback to calculation if flag not available
-    const channel = file.detected_channel;
-    const bookingSource = file.booking_source;
-    const externalSource = file.booking_external_source;
-
-    if (!channel || !bookingSource || !externalSource) {
+    // If has_source_issue is missing or false, check if we have attribution data
+    if (!file.parser_key || !file.external_source) {
       return { status: 'unknown', message: 'Source not yet set', icon: AlertTriangle, color: 'text-gray-600' };
     }
 
-    if (channel === 'CAVU' && bookingSource === 'cavu' && externalSource === 'CAVU Email Import') {
-      return { status: 'correct', message: '✅ CAVU source correct', icon: CheckCircle2, color: 'text-green-600' };
-    }
-    if (channel === 'HOLIDAY_EXTRAS' && bookingSource === 'holidayextras' && externalSource === 'Holiday Extras Email Import') {
-      return { status: 'correct', message: '✅ Holiday Extras source correct', icon: CheckCircle2, color: 'text-green-600' };
-    }
-    if (channel === 'APH' && bookingSource === 'other' && externalSource === 'APH Email Import') {
-      return { status: 'correct', message: '✅ APH source correct', icon: CheckCircle2, color: 'text-green-600' };
-    }
-    if (channel === 'FLYPARKS_EMAIL' && bookingSource === 'other' && externalSource === 'Flyparks Email Import') {
-      return { status: 'correct', message: '✅ Flyparks source correct', icon: CheckCircle2, color: 'text-green-600' };
-    }
-
+    // All good - show correct status
+    const channel = file.detected_channel || 'Unknown';
     return { 
-      status: 'incorrect', 
-      message: `⚠️ ${channel} file tagged as ${bookingSource}/${externalSource}`, 
-      icon: AlertTriangle, 
-      color: 'text-red-600' 
+      status: 'correct', 
+      message: `✅ ${channel} source correct`, 
+      icon: CheckCircle2, 
+      color: 'text-green-600' 
     };
   };
 

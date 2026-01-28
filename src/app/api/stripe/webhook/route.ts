@@ -143,13 +143,49 @@ async function handleCheckoutSessionCompleted(session: any) {
     const { data: booking, error } = await admin
       .from('bookings')
       .insert(bookingData)
-      .select('id, reference')
+      .select('id, reference, customer_name, customer_email, plate, start_at, end_at, money_charged')
       .single();
 
     if (error) {
       console.error('Failed to create booking:', error);
     } else {
       console.log('Booking created successfully:', booking?.reference);
+      
+      // Queue booking confirmation email
+      if (booking && finalCustomerEmail) {
+        try {
+          const { queueEmail } = await import('@/lib/email/emailService');
+          const { data: tenant } = await admin
+            .from('tenants')
+            .select('name, slug')
+            .eq('id', tenantId)
+            .single();
+
+          await queueEmail({
+            tenantId,
+            to: finalCustomerEmail,
+            toName: finalCustomerName,
+            subject: `Booking Confirmed - ${booking.reference}`,
+            templateKey: 'booking_confirmation',
+            payload: {
+              bookingReference: booking.reference,
+              customerName: finalCustomerName,
+              customerEmail: finalCustomerEmail,
+              plate: plate || '',
+              startAt: startAt,
+              endAt: endAt,
+              amount: booking.money_charged || paymentIntent.amount / 100,
+              currency: 'GBP',
+              tenantName: tenant?.name,
+              tenantSlug: tenant?.slug,
+            },
+            dedupeKey: `booking:${booking.id}:confirmation:v1`,
+          });
+        } catch (emailError) {
+          console.error('[STRIPE WEBHOOK] Failed to queue confirmation email:', emailError);
+          // Don't fail the booking creation if email fails
+        }
+      }
     }
   } catch (error) {
     console.error('Error handling checkout session completed:', error);

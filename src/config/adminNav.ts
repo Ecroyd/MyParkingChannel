@@ -62,6 +62,7 @@ export const ADMIN_NAV: NavNode[] = [
       { key: "applications", label: "Applications", href: "/admin/applications", section: "Platform Management", feature: "platform_admin" },
       { key: "tenants", label: "Tenants", href: "/admin/tenants", section: "Platform Management", feature: "platform_admin" },
       { key: "tenants-new", label: "Add Tenant", href: "/admin/tenants/new", section: "Platform Management", feature: "platform_admin" },
+      { key: "platform-email", label: "Email Settings", href: "/admin/platform/email-settings", section: "Platform Management", feature: "platform_admin" },
 
   // ——— Settings ———
   {
@@ -72,6 +73,7 @@ export const ADMIN_NAV: NavNode[] = [
     minRole: "admin",
     children: [
       { key: "members", label: "Members", href: "/admin/settings/members", minRole: "admin" },
+      { key: "email", label: "Email Settings", href: "/admin/settings/email", minRole: "admin" },
       { key: "staff-vehicles", label: "Staff Vehicles", href: "/admin/settings/staff-vehicles", minRole: "admin" },
       { key: "capacity", label: "Capacity", href: "/admin/settings/capacity", minRole: "admin" },
       { key: "pwa", label: "PWA Settings", href: "/admin/pwa-settings", minRole: "admin" },

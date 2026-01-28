@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
     const { data: booking, error } = await admin
       .from('bookings')
       .insert(bookingData)
-      .select('id, reference')
+      .select('id, reference, customer_name, customer_email, plate, start_at, end_at, money_charged')
       .single();
 
     // Handle potential duplicate key error gracefully
@@ -82,6 +82,42 @@ export async function POST(req: NextRequest) {
       }
       console.error('Failed to create booking:', error);
       return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
+    }
+
+    // Queue booking confirmation email
+    if (booking && customerEmail) {
+      try {
+        const { queueEmail } = await import('@/lib/email/emailService');
+        const { data: tenant } = await admin
+          .from('tenants')
+          .select('name, slug')
+          .eq('id', tenantId)
+          .single();
+
+        await queueEmail({
+          tenantId,
+          to: customerEmail,
+          toName: customerName,
+          subject: `Booking Confirmed - ${booking.reference}`,
+          templateKey: 'booking_confirmation',
+          payload: {
+            bookingReference: booking.reference,
+            customerName,
+            customerEmail,
+            plate: normalizedPlate || '',
+            startAt: startAt,
+            endAt: endAt,
+            amount: booking.money_charged || amount || 0,
+            currency: 'GBP',
+            tenantName: tenant?.name,
+            tenantSlug: tenant?.slug,
+          },
+          dedupeKey: `booking:${booking.id}:confirmation:v1`,
+        });
+      } catch (emailError) {
+        console.error('[BOOKING CREATE] Failed to queue confirmation email:', emailError);
+        // Don't fail the booking creation if email fails
+      }
     }
 
     return NextResponse.json({ success: true, booking });
