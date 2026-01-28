@@ -1,9 +1,7 @@
 import Link from "next/link";
-import { Suspense } from "react";
 import { getSiteContext } from "@/lib/site";
 import { Header, Footer } from "../_components/SiteChrome";
-import BookingWidget from "@/components/booking/BookingWidget";
-import BookingPageClient from "@/app/t/[slug]/book/BookingPageClient";
+import BookingHero from "@/components/booking/BookingHero";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -54,41 +52,33 @@ export default async function BookPage({ params, searchParams }: { params: Promi
   console.log('[BOOK_PAGE] ctx.site', ctx.site);
   console.log('[BOOK_PAGE] booking_modal_style', ctx.site?.booking_modal_style);
   
-  // TEMPORARY: Force banner to test UI rendering
-  // const modalStyle = "banner";
   const modalStyle = (ctx.site?.booking_modal_style ?? "card").toLowerCase();
   console.log('[BOOK_PAGE] Final modalStyle decision:', modalStyle);
 
-  // If banner style, show the banner modal instead of the widget
-  if (modalStyle === "banner") {
-    return (
-      <>
-        <Header title={title} tenantSlug={resolvedParams.slug} />
-        <main className="max-w-6xl mx-auto px-4 py-10">
-          <h1 className="text-2xl md:text-3xl font-semibold mb-4">Book airport parking</h1>
-          <Suspense fallback={<div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6">Loading...</div>}>
-            <BookingPageClient slug={resolvedParams.slug} bookingModalStyle={modalStyle as 'card' | 'banner'} />
-          </Suspense>
-        </main>
-        <Footer title={title} />
-      </>
-    );
-  }
-
-  // Default: show the widget (card style)
   return (
     <>
       <Header title={title} tenantSlug={resolvedParams.slug} />
-      <main className="max-w-6xl mx-auto px-4 py-10">
-        <div className="grid lg:grid-cols-2 gap-10 items-start">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-semibold">Book airport parking</h1>
-            <p className="text-slate-600 mt-2 mb-6">
-              Secure your parking space with our easy online booking system. 
+      
+      {/* Booking Hero - banner or card, decided once */}
+      <BookingHero 
+        slug={resolvedParams.slug}
+        tenantId={ctx.tenant.id}
+        site={ctx.site}
+        businessName={title}
+        tagline="Secure your parking space with our easy online booking system."
+      />
+
+      {/* Content below hero */}
+      <main className="mx-auto max-w-6xl px-6 py-12">
+        {/* Instructions section (only show if banner style, otherwise already in hero) */}
+        {modalStyle === "banner" && (
+          <div className="max-w-2xl mx-auto">
+            <h1 className="text-2xl md:text-3xl font-semibold mb-6">Book airport parking</h1>
+            <p className="text-slate-600 mb-8">
               Choose your dates, enter your details, and you're all set!
             </p>
             
-            <div className="space-y-4">
+            <div className="space-y-4 mb-8">
               <div className="flex items-start gap-3">
                 <div className="w-6 h-6 bg-sky-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
                   <span className="text-sky-600 text-sm font-medium">1</span>
@@ -119,20 +109,16 @@ export default async function BookPage({ params, searchParams }: { params: Promi
                 </div>
               </div>
             </div>
-            
-            <Link href="/" className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl border border-slate-300 hover:border-slate-400 mt-6">
-              ← Back to home
-            </Link>
           </div>
-          
-          <div className="lg:sticky lg:top-10">
-            <BookingWidget 
-              tenantSlug={resolvedParams.slug} 
-              tenantId={ctx.tenant.id} 
-            />
-          </div>
+        )}
+        
+        <div className="text-center">
+          <Link href="/" className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl border border-slate-300 hover:border-slate-400">
+            ← Back to home
+          </Link>
         </div>
       </main>
+      
       <Footer title={title} />
     </>
   );
