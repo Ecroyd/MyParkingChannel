@@ -15,11 +15,15 @@ interface ParsedFile {
   subject: string;
   email_received: string;
   detected_channel: string | null;
-  staging_source: string | null;
+  staging_source?: string | null;
   booking_external_source: string | null;
   booking_source: string | null;
   bookings_created: number;
   sample_references?: string[];
+  has_source_issue?: boolean; // Single source of truth flag from API
+  parser_key?: string | null;
+  external_source?: string | null;
+  attribution_confidence?: string | null;
 }
 
 interface BookingWithSource {
@@ -80,6 +84,20 @@ export default function ParsedFilesClient({ tenantId }: { tenantId: string }) {
   };
 
   const getSourceStatus = (file: ParsedFile) => {
+    // Use has_source_issue flag from API if available (single source of truth)
+    if ('has_source_issue' in file && file.has_source_issue === true) {
+      const channel = file.detected_channel || 'Unknown';
+      const bookingSource = file.booking_source || 'Not set';
+      const externalSource = file.booking_external_source || 'Not set';
+      return { 
+        status: 'incorrect', 
+        message: `⚠️ ${channel} file tagged as ${bookingSource}/${externalSource}`, 
+        icon: AlertTriangle, 
+        color: 'text-red-600' 
+      };
+    }
+
+    // Fallback to calculation if flag not available
     const channel = file.detected_channel;
     const bookingSource = file.booking_source;
     const externalSource = file.booking_external_source;

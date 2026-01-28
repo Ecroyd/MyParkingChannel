@@ -47,104 +47,108 @@ export async function GET() {
 
     const adminClient = await createAdminClient();
 
-    // Get parsed files from last 7 days
-    const { data: allParsedFiles, error: parsedError } = await adminClient
-      .from("ingest_email_files")
-      .select(`
-        id,
-        filename,
-        parse_status,
-        parsed_at,
-        created_at,
-        ingest_emails!inner(
+    // Single source of truth query using ingest_email_files for attribution
+    // Use direct query - ingest_email_files is the authoritative source
+    const { data: queryResult, error: queryError } = await adminClient
+        .from("ingest_email_files")
+        .select(`
           id,
-          from_address,
-          subject,
-          created_at
-        )
-      `)
-      .eq("parse_status", "parsed")
-      .gte("parsed_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
-      .order("parsed_at", { ascending: false })
-      .limit(100);
+          filename,
+          parse_status,
+          parsed_at,
+          created_at,
+          parser_key,
+          detected_source,
+          external_source,
+          attribution_confidence,
+          email_id,
+          ingest_emails!inner(
+            id,
+            from_address,
+            subject,
+            created_at
+          )
+        `)
+        .eq("parse_status", "parsed")
+        .gte("parsed_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+        .order("parsed_at", { ascending: false })
+        .limit(100);
 
-    if (parsedError) {
-      console.error("[PARSED FILES] Error fetching files:", parsedError);
-      return NextResponse.json({ ok: false, error: parsedError.message }, { status: 500 });
-    }
-
-    // Filter by tenant
-    const parsedFiles = (allParsedFiles || []).filter((file: any) => {
-      const email = file.ingest_emails;
-      const fileTenantId = detectTenantFromEmail(email);
-      return fileTenantId === ctx.tenantId;
-    });
-
-    // Get source info for each file
-    const filesWithSource: any[] = [];
-    for (const file of parsedFiles) {
-      const emailId = (file.ingest_emails as any).id;
-
-      // Get channel from staging
-      const { data: stagingRow } = await adminClient
-        .from("booking_import_staging")
-        .select("raw_json, source")
-        .eq("source_email_id", emailId)
-        .eq("source_filename", file.filename)
-        .limit(1)
-        .maybeSingle();
-
-      // Get source from bookings
-      const { data: bookingRow } = await adminClient
-        .from("bookings")
-        .select("source, external_source")
-        .eq("tenant_id", ctx.tenantId)
-        .gte("created_at", new Date(file.parsed_at || file.created_at).toISOString())
-        .limit(1)
-        .maybeSingle();
-
-      // Count bookings and get sample references
-      const { count: bookingCount, data: sampleBookings } = await adminClient
-        .from("bookings")
-        .select("reference", { count: "exact" })
-        .eq("tenant_id", ctx.tenantId)
-        .gte("created_at", new Date(file.parsed_at || file.created_at).toISOString())
-        .limit(5); // Get up to 5 sample references
-
-      // Also try to get references from staging if no bookings yet
-      let sampleReferences: string[] = [];
-      if (sampleBookings && sampleBookings.length > 0) {
-        sampleReferences = sampleBookings.map((b: any) => b.reference).filter(Boolean);
-      } else {
-        // Get from staging
-        const { data: stagingRefs } = await adminClient
-          .from("booking_import_staging")
-          .select("reference")
-          .eq("source_email_id", emailId)
-          .eq("source_filename", file.filename)
-          .limit(5);
-        if (stagingRefs) {
-          sampleReferences = stagingRefs.map((s: any) => s.reference).filter(Boolean);
-        }
+      if (queryError) {
+        console.error("[PARSED FILES] Error fetching files:", queryError);
+        return NextResponse.json({ ok: false, error: queryError.message }, { status: 500 });
       }
 
-      filesWithSource.push({
-        file_id: file.id,
-        filename: file.filename,
-        parse_status: file.parse_status,
-        parsed_at: file.parsed_at,
-        file_created: file.created_at,
-        from_address: (file.ingest_emails as any).from_address,
-        subject: (file.ingest_emails as any).subject,
-        email_received: (file.ingest_emails as any).created_at,
-        detected_channel: stagingRow?.raw_json?.channel || null,
-        staging_source: stagingRow?.source || null,
-        booking_external_source: bookingRow?.external_source || null,
-        booking_source: bookingRow?.source || null,
-        bookings_created: bookingCount || 0,
-        sample_references: sampleReferences,
-      });
-    }
+      // Filter by tenant and enrich with staging data
+      const filesWithSource: any[] = [];
+      for (const file of queryResult || []) {
+        const email = file.ingest_emails;
+        const fileTenantId = detectTenantFromEmail(email);
+        if (fileTenantId !== ctx.tenantId) continue;
+
+        const emailId = (email as any).id;
+
+        // Get staging data (bookings count and sample references) - single source of truth
+        const { data: stagingData, count: stagingCount } = await adminClient
+          .from("booking_import_staging")
+          .select("reference, raw_json", { count: "exact" })
+          .eq("source_email_id", emailId)
+          .eq("source_filename", file.filename);
+
+        const stagingChannel = stagingData?.[0]?.raw_json?.channel || null;
+        const sampleReferences = stagingData
+          ? Array.from(new Set(stagingData.map((s: any) => s.reference).filter(Boolean))).slice(0, 5)
+          : [];
+
+        // Determine expected parser key from detected_source or staging channel
+        const detectedSource = file.detected_source || stagingChannel;
+        let expectedParserKey: string | null = null;
+        if (detectedSource === 'APH') {
+          expectedParserKey = 'aph_email_import';
+        } else if (detectedSource === 'CAVU') {
+          expectedParserKey = 'cavu_email_import';
+        } else if (detectedSource === 'HOLIDAY_EXTRAS') {
+          expectedParserKey = 'holiday_extras_email_import';
+        } else if (detectedSource === 'FLYPARKS_EMAIL') {
+          expectedParserKey = 'flyparks_email_import';
+        }
+
+        // Determine if there's a source issue (only flag real mismatches)
+        const hasSourceIssue = expectedParserKey !== null && 
+          (file.parser_key === null || file.parser_key !== expectedParserKey);
+
+        // Map parser_key to booking source for display (single source of truth)
+        let bookingSource: string | null = null;
+        if (file.parser_key === 'aph_email_import') {
+          bookingSource = 'other'; // APH uses 'other' since 'aph' not in enum
+        } else if (file.parser_key === 'cavu_email_import') {
+          bookingSource = 'cavu';
+        } else if (file.parser_key === 'holiday_extras_email_import') {
+          bookingSource = 'holidayextras';
+        } else if (file.parser_key === 'flyparks_email_import') {
+          bookingSource = 'other';
+        }
+
+        filesWithSource.push({
+          file_id: file.id,
+          filename: file.filename,
+          parse_status: file.parse_status,
+          parsed_at: file.parsed_at,
+          file_created: file.created_at,
+          from_address: (email as any).from_address, // From ingest_emails (correct)
+          subject: (email as any).subject,
+          email_received: (email as any).created_at,
+          detected_channel: detectedSource,
+          parser_key: file.parser_key,
+          external_source: file.external_source,
+          attribution_confidence: file.attribution_confidence,
+          booking_source: bookingSource, // From parser_key mapping (single source of truth)
+          booking_external_source: file.external_source, // From ingest_email_files (single source of truth)
+          bookings_created: stagingCount || 0, // From staging (correct)
+          sample_references: sampleReferences, // From staging (correct)
+          has_source_issue: hasSourceIssue,
+        });
+      }
 
     // Get recent bookings with source trace
     const { data: recentBookings, error: bookingsError } = await adminClient
