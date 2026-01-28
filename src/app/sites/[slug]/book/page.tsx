@@ -9,10 +9,22 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function BookPage({ params, searchParams }: { params: Promise<{ slug: string }>, searchParams: Promise<{ preview?: string }> }) {
+  console.log("[BOOK_PAGE_HIT] route=/sites/[slug]/book file=app/sites/[slug]/book/page.tsx");
+  
   const resolvedParams = await params;
   const resolvedSearchParams = await searchParams;
   const preview = resolvedSearchParams?.preview === "1";
-  const ctx = await getSiteContext(resolvedParams.slug, { preview });
+  
+  // Use params.slug explicitly - don't derive from host
+  const slug = resolvedParams.slug;
+  console.log("[BOOK_PAGE] Using slug from params:", slug);
+  
+  const ctx = await getSiteContext(slug, { preview });
+  
+  // Print full ctx to catch wrong property
+  console.log("[BOOK_PAGE] ctx keys", ctx ? Object.keys(ctx) : null);
+  console.log("[BOOK_PAGE] ctx.site", ctx?.site);
+  console.log("[BOOK_PAGE] ctx", ctx);
   if (!ctx) {
     if (process.env.NEXT_PUBLIC_DEBUG_SITE === '1') {
       console.warn('[SITE_GUARD] no ctx for slug=', resolvedParams.slug)
@@ -42,7 +54,10 @@ export default async function BookPage({ params, searchParams }: { params: Promi
   console.log('[BOOK_PAGE] ctx.site', ctx.site);
   console.log('[BOOK_PAGE] booking_modal_style', ctx.site?.booking_modal_style);
   
+  // TEMPORARY: Force banner to test UI rendering
+  // const modalStyle = "banner";
   const modalStyle = (ctx.site?.booking_modal_style ?? "card").toLowerCase();
+  console.log('[BOOK_PAGE] Final modalStyle decision:', modalStyle);
 
   // If banner style, show the banner modal instead of the widget
   if (modalStyle === "banner") {

@@ -1,7 +1,12 @@
 import { createServerClientDirect } from "@/lib/supabase/server-direct";
 
 export async function getTenantContext(slug: string) {
-  if (!slug) return null;
+  console.log("[GET_SITE_CONTEXT] inputs", { slugParam: slug });
+  
+  if (!slug) {
+    console.log("[GET_SITE_CONTEXT] ERROR: slug is empty or undefined");
+    return null;
+  }
   const sb = createServerClientDirect({ admin: true });
 
   const { data: tenant, error: tErr } = await sb

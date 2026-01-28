@@ -7,8 +7,17 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function BookPage({ params }: { params: Promise<{ slug: string }> }) {
+  console.log("[BOOK_PAGE_HIT] route=/t/[slug]/book file=app/t/[slug]/book/page.tsx");
+  
   const { slug } = await params;
+  console.log("[BOOK_PAGE] Using slug from params:", slug);
+  
   const ctx = await getTenantContext(slug);
+  
+  // Print full ctx to catch wrong property
+  console.log("[BOOK_PAGE] ctx keys", ctx ? Object.keys(ctx) : null);
+  console.log("[BOOK_PAGE] ctx.site", ctx?.site);
+  console.log("[BOOK_PAGE] ctx", ctx);
   if (!ctx) return <main className="max-w-xl mx-auto py-24 px-4">Unknown tenant.</main>;
 
   const title = ctx.branding?.app_name || ctx.tenant.name || "Airport Parking";
@@ -17,7 +26,10 @@ export default async function BookPage({ params }: { params: Promise<{ slug: str
   console.log('[BOOK_PAGE] ctx.site', ctx.site);
   console.log('[BOOK_PAGE] booking_modal_style', ctx.site?.booking_modal_style);
   
+  // TEMPORARY: Force banner to test UI rendering
+  // const modalStyle = "banner";
   const modalStyle = (ctx.site?.booking_modal_style ?? "card").toLowerCase();
+  console.log('[BOOK_PAGE] Final modalStyle decision:', modalStyle);
   
   return (
     <>
