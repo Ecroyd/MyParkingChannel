@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { getSiteContext } from "@/lib/site";
 import { Header, Footer } from "./_components/SiteChrome";
-import BookingEntry from "@/components/booking/BookingEntry";
+import BookingHero from "@/components/booking/BookingHero";
 import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 async function getProfile(slug: string) {
   const ctx = await getSiteContext(slug);
@@ -152,23 +153,29 @@ export default async function TenantHome({
       {faqLd && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqLd) }} />}
       
       <Header title={title} logoUrl={p?.logo_url} tenantSlug={resolvedParams.slug} />
-      <main className="max-w-6xl mx-auto px-4 pt-14 pb-10">
-        {/* HERO */}
-        <section className="grid lg:grid-cols-2 gap-8 items-center mb-16">
-          <div>
+      
+      {/* Booking Hero - banner or card, decided once */}
+      <BookingHero 
+        slug={resolvedParams.slug}
+        tenantId={tenant.id}
+        site={site}
+        businessName={p?.business_name ?? branding?.app_name ?? tenant.name}
+        tagline={p?.short_tagline}
+      />
+
+      {/* Everything below is now "content", not hero */}
+      <main className="mx-auto max-w-6xl px-6 py-12 space-y-12">
+        {/* Logo and intro section (only show if banner style, otherwise already in hero) */}
+        {site?.booking_modal_style?.toLowerCase() === "banner" && (
+          <section className="text-center">
             {/* Large Logo */}
             {p?.logo_url && (
-              <div className="mb-8 flex justify-center lg:justify-start">
+              <div className="mb-8 flex justify-center">
                 <img 
                   src={p.logo_url} 
                   alt={p?.business_name ?? branding?.app_name ?? "Airport Parking"} 
                   className="h-72 w-auto max-w-96 object-contain shadow-sm"
                 />
-              </div>
-            )}
-            {!p?.logo_url && (
-              <div className="mb-8 text-center text-gray-500 text-sm">
-                No logo URL found. Logo URL field: {p?.logo_url || 'undefined'}
               </div>
             )}
             <h1 className="text-4xl font-semibold tracking-tight text-slate-900 mb-6">
@@ -179,7 +186,7 @@ export default async function TenantHome({
             </p>
             
             {/* Features/USPs */}
-            <ul className="mt-6 grid grid-cols-2 gap-2 text-sm text-gray-700 mb-8">
+            <ul className="mt-6 grid grid-cols-2 gap-2 text-sm text-gray-700 mb-8 max-w-2xl mx-auto">
               {(p?.features ?? ["CCTV", "24/7 Access"]).map((f: string) => (
                 <li key={f} className="rounded-xl border px-3 py-2 bg-white/70 backdrop-blur shadow-sm">
                   {f}
@@ -187,28 +194,13 @@ export default async function TenantHome({
               ))}
             </ul>
             
-            <div className="mt-6 flex gap-3">
-              <Link href="#book" className="rounded-2xl bg-black text-white px-5 py-3 font-medium hover:bg-gray-800 transition-colors">
-                Book parking
-              </Link>
+            <div className="mt-6 flex gap-3 justify-center">
               <Link href="/directions" className="rounded-2xl border border-slate-300 px-5 py-3 font-medium hover:bg-slate-50 transition-colors">
                 Directions
               </Link>
             </div>
-          </div>
-
-          {/* Booking entry slot (banner vs card decided once) */}
-          <div id="book" className="rounded-2xl border bg-white/70 backdrop-blur shadow-lg p-4">
-            <BookingEntry 
-              slug={resolvedParams.slug} 
-              tenantId={tenant.id} 
-              site={site} 
-            />
-            <p className="mt-2 text-xs text-center text-gray-500">
-              Secure payments by Stripe • Free cancellations within 24h
-            </p>
-          </div>
-        </section>
+          </section>
+        )}
 
         {/* PRICING + INFO */}
         <section className="mt-12 grid lg:grid-cols-3 gap-6 mb-16">
