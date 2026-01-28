@@ -82,8 +82,14 @@ export async function GET() {
       // Filter by tenant and enrich with staging data
       const filesWithSource: any[] = [];
       for (const file of queryResult || []) {
-        const email = file.ingest_emails;
-        const fileTenantId = detectTenantFromEmail(email);
+        // ingest_emails!inner returns a single object, but TypeScript may infer as array
+        const email = Array.isArray(file.ingest_emails) 
+          ? file.ingest_emails[0] 
+          : (file.ingest_emails as any);
+        
+        if (!email || typeof email !== 'object') continue;
+        
+        const fileTenantId = detectTenantFromEmail(email as { from_address?: string | null });
         if (fileTenantId !== ctx.tenantId) continue;
 
         const emailId = (email as any).id;
