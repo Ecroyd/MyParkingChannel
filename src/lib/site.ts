@@ -7,6 +7,7 @@ export async function getTenantContext(slug: string) {
     console.log("[GET_SITE_CONTEXT] ERROR: slug is empty or undefined");
     return null;
   }
+
   const sb = createServerClientDirect({ admin: true });
 
   const { data: tenant, error: tErr } = await sb
@@ -14,6 +15,7 @@ export async function getTenantContext(slug: string) {
     .select("id, slug, name, site_hero_title, site_hero_subtitle, brand_primary, brand_secondary, brand_logo_url, status")
     .eq("slug", slug)
     .maybeSingle();
+
   if (tErr) throw tErr;
   if (!tenant) return null;
   
@@ -33,67 +35,89 @@ export async function getTenantContext(slug: string) {
     return null;
   }
 
-  const [brandingResult, siteResult] = await Promise.allSettled([
-    sb
-      .from("tenant_branding")
-      .select(`
-        app_name, 
-        short_name, 
-        theme_color, 
-        background_color, 
-        icon_192_url, 
-        icon_512_url, 
-        maskable_512_url,
-        contact_email,
-        contact_phone,
-        contact_address,
-        contact_city,
-        contact_postcode,
-        contact_country,
-        business_hours,
-        website_url,
-        social_media
-      `)
-      .eq("tenant_id", tenant.id)
-      .maybeSingle(),
-    sb
+  // Fetch branding (unchanged logic)
+  const { data: brandingData, error: brandingError } = await sb
+    .from("tenant_branding")
+    .select(`
+      app_name, 
+      short_name, 
+      theme_color, 
+      background_color, 
+      icon_192_url, 
+      icon_512_url, 
+      maskable_512_url,
+      contact_email,
+      contact_phone,
+      contact_address,
+      contact_city,
+      contact_postcode,
+      contact_country,
+      business_hours,
+      website_url,
+      social_media
+    `)
+    .eq("tenant_id", tenant.id)
+    .maybeSingle();
+
+  if (brandingError) {
+    console.error("[GET_SITE_CONTEXT] Error fetching branding:", brandingError);
+  }
+
+  const branding = brandingData || null;
+
+  // --- Updated site lookup: slug first, then tenant_id fallback ---
+  let site: any = null;
+
+  // 1) try slug if we have it (subdomain and /sites/[slug] routes)
+  if (slug) {
+    const { data, error } = await sb
+      .from("sites")
+      .select("id, tenant_id, slug, booking_modal_style")
+      .eq("slug", slug)
+      .maybeSingle();
+
+    console.log("[GET_SITE_CONTEXT] by slug", { slug, data, error });
+
+    if (error) {
+      // If there's an error about column not existing, default to null (card style)
+      if ((error as any).code === "42703") {
+        console.log("[GET_SITE_CONTEXT] booking_modal_style column does not exist yet (by slug lookup)");
+      } else {
+        console.error("[GET_SITE_CONTEXT] Error fetching site by slug:", error);
+      }
+    } else {
+      site = data ?? null;
+    }
+  }
+
+  // 2) fallback: if slug lookup failed, load site by tenant_id
+  if (!site) {
+    const { data, error } = await sb
       .from("sites")
       .select("id, tenant_id, slug, booking_modal_style")
       .eq("tenant_id", tenant.id)
-      .maybeSingle()
-  ]);
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-  const branding = brandingResult.status === 'fulfilled' && !brandingResult.value.error 
-    ? (brandingResult.value.data || null) 
-    : null;
-  
-  // Handle site result - check if it succeeded and if column exists
-  let site = null;
-  if (siteResult.status === 'fulfilled') {
-    const result = siteResult.value;
-    // If there's an error about column not existing, default to null (card style)
-    if (result.error && result.error.code === '42703') {
-      // Column doesn't exist yet - that's okay, default to card
-      console.log('[GET_SITE_CONTEXT] booking_modal_style column does not exist yet');
-      site = null;
-    } else if (result.error) {
-      // Other error - log it
-      console.error('[GET_SITE_CONTEXT] Error fetching site:', result.error);
-      site = null;
+    console.log("[GET_SITE_CONTEXT] by tenantId fallback", { tenantId: tenant.id, data, error });
+
+    if (error) {
+      if ((error as any).code === "42703") {
+        console.log("[GET_SITE_CONTEXT] booking_modal_style column does not exist yet (by tenantId fallback)");
+      } else {
+        console.error("[GET_SITE_CONTEXT] Error fetching site by tenant_id:", error);
+      }
     } else {
-      site = result.data || null;
-      console.log('[GET_SITE_CONTEXT] slug', slug);
-      console.log('[GET_SITE_CONTEXT] site', site);
-      console.log('[GET_SITE_CONTEXT] error', result.error);
+      site = data ?? null;
     }
-  } else {
-    // Promise was rejected
-    console.error('[GET_SITE_CONTEXT] Site query promise rejected:', siteResult);
   }
+
+  console.log("[GET_SITE_CONTEXT] final site selection", { slug, tenantId: tenant.id, site });
 
   return { 
     tenant, 
-    branding: branding || null,
+    branding,
     site: site || null
   };
 }
@@ -103,6 +127,6 @@ export async function getSiteContext(
   slug: string,
   _opts: { preview?: boolean } = {}
 ) {
-  // same behaviour as getTenantContext for our MVP
+  // For now, reuse getTenantContext (which now has the slug → tenant_id → sites logic)
   return getTenantContext(slug);
 }
