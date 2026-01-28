@@ -19,6 +19,7 @@ interface ParsedFile {
   booking_external_source: string | null;
   booking_source: string | null;
   bookings_created: number;
+  sample_references?: string[];
 }
 
 interface BookingWithSource {
@@ -227,6 +228,15 @@ export default function ParsedFilesClient({ tenantId }: { tenantId: string }) {
                               <div><span className="font-medium">From:</span> {file.from_address}</div>
                               <div><span className="font-medium">Parsed:</span> {formatDate(file.parsed_at)}</div>
                               <div><span className="font-medium">Bookings:</span> {file.bookings_created || 0}</div>
+                              {file.sample_references && file.sample_references.length > 0 && (
+                                <div>
+                                  <span className="font-medium">Sample References:</span>{' '}
+                                  <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">
+                                    {file.sample_references.slice(0, 3).join(', ')}
+                                    {file.sample_references.length > 3 && ` +${file.sample_references.length - 3} more`}
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           </div>
                           <div className={`px-3 py-1 rounded text-sm font-medium ${status.color} bg-white border`}>
@@ -283,6 +293,15 @@ export default function ParsedFilesClient({ tenantId }: { tenantId: string }) {
                                 <span className="font-medium">Parsed:</span> {formatDate(file.parsed_at)}
                               </div>
                             </div>
+                            {file.sample_references && file.sample_references.length > 0 && (
+                              <div className="text-sm mt-2">
+                                <span className="font-medium">Sample References:</span>{' '}
+                                <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">
+                                  {file.sample_references.slice(0, 5).join(', ')}
+                                  {file.sample_references.length > 5 && ` +${file.sample_references.length - 5} more`}
+                                </span>
+                              </div>
+                            )}
                             <div className="text-xs text-gray-500 mt-1">
                               From: {file.from_address} • Subject: {file.subject || '(no subject)'}
                             </div>

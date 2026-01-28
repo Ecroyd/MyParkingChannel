@@ -103,12 +103,30 @@ export async function GET() {
         .limit(1)
         .maybeSingle();
 
-      // Count bookings
-      const { count: bookingCount } = await adminClient
+      // Count bookings and get sample references
+      const { count: bookingCount, data: sampleBookings } = await adminClient
         .from("bookings")
-        .select("*", { count: "exact", head: true })
+        .select("reference", { count: "exact" })
         .eq("tenant_id", ctx.tenantId)
-        .gte("created_at", new Date(file.parsed_at || file.created_at).toISOString());
+        .gte("created_at", new Date(file.parsed_at || file.created_at).toISOString())
+        .limit(5); // Get up to 5 sample references
+
+      // Also try to get references from staging if no bookings yet
+      let sampleReferences: string[] = [];
+      if (sampleBookings && sampleBookings.length > 0) {
+        sampleReferences = sampleBookings.map((b: any) => b.reference).filter(Boolean);
+      } else {
+        // Get from staging
+        const { data: stagingRefs } = await adminClient
+          .from("booking_import_staging")
+          .select("reference")
+          .eq("source_email_id", emailId)
+          .eq("source_filename", file.filename)
+          .limit(5);
+        if (stagingRefs) {
+          sampleReferences = stagingRefs.map((s: any) => s.reference).filter(Boolean);
+        }
+      }
 
       filesWithSource.push({
         file_id: file.id,
@@ -124,6 +142,7 @@ export async function GET() {
         booking_external_source: bookingRow?.external_source || null,
         booking_source: bookingRow?.source || null,
         bookings_created: bookingCount || 0,
+        sample_references: sampleReferences,
       });
     }
 

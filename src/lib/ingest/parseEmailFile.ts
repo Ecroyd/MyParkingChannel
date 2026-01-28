@@ -4,6 +4,7 @@ import { makeImportDedupeKey } from "@/lib/bookings/dedupe";
 import { mapAphCsvLike, detectAndMapFromAttachment } from "@/lib/importers/canonical/mappers";
 import { isImageFile } from "@/lib/ingest/fileTypeUtils";
 import { isExtz10File, overrideStartToMidnight } from "@/lib/datetime/parse";
+import { channelToParserKey, getAttribution, assertAttribution, type ParserKey } from "@/lib/importAttribution";
 
 /**
  * Parse file using canonical mappers (supports APH, CAVU, etc.)
@@ -152,16 +153,21 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
 
   // 4. Parse file using canonical mappers
   let parsedData;
+  let winningParserKey: ParserKey = "unknown";
   try {
     console.log(`[parseEmailFile] Parsing file with canonical mappers: ${file.filename}`);
     parsedData = parseFileWithCanonicalMappers(buffer, file.filename);
     console.log(`[parseEmailFile] Parsed ${parsedData.rows.length} rows from ${file.filename}`);
     
-    // Log first few rows for debugging
+    // Determine winning parser from the channel detected in parsed rows
     if (parsedData.rows.length > 0) {
+      const detectedChannel = (parsedData.rows[0] as any).channel;
+      winningParserKey = channelToParserKey(detectedChannel);
+      console.log(`[parseEmailFile] Detected channel: ${detectedChannel}, parser key: ${winningParserKey}`);
+      
       console.log(`[parseEmailFile] Sample row:`, {
         reference: parsedData.rows[0].reference,
-        channel: (parsedData.rows[0] as any).channel,
+        channel: detectedChannel,
         start_at: parsedData.rows[0].start_at,
         vehicle_reg: parsedData.rows[0].vehicle_reg,
       });
@@ -212,27 +218,18 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   const email = (file as any).ingest_emails;
   const emailId = email?.id || null;
 
+  // Get attribution from winning parser (single source of truth)
+  const attribution = getAttribution(winningParserKey);
+  console.log(`[parseEmailFile] Using attribution:`, {
+    parserKey: winningParserKey,
+    bookingSource: attribution.bookingSource,
+    externalSource: attribution.externalSource,
+    detectedSource: attribution.detectedSource,
+  });
+
   // Prepare staging inserts
   const stagingInserts = parsedData.rows.map((raw) => {
-    // Determine source based on detected channel
     const channel = (raw as any).channel || "APH";
-    let sourceValue: string;
-    let externalSourceLabel: string;
-    
-    if (channel === "CAVU") {
-      sourceValue = "cavu"; // Valid enum value
-      externalSourceLabel = "CAVU Email Import";
-    } else if (channel === "HOLIDAY_EXTRAS") {
-      sourceValue = "holidayextras"; // Valid enum value (no underscore)
-      externalSourceLabel = "Holiday Extras Email Import";
-    } else if (channel === "FLYPARKS_EMAIL") {
-      sourceValue = "other"; // Valid enum value
-      externalSourceLabel = "Flyparks Email Import";
-    } else {
-      // Default to APH
-      sourceValue = "other"; // Valid enum value
-      externalSourceLabel = "APH Email Import";
-    }
 
     // Generate dedupe_key (required by staging table)
     // Use the start_at as-is for now, it will be normalized later when promoting to bookings
@@ -246,7 +243,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
 
     return {
       tenant_id: tenantId,
-      source: sourceValue,
+      source: attribution.bookingSource, // Use attribution from parser
       source_email_id: emailId,
       source_filename: file.filename,
       // Map to existing staging columns
@@ -502,24 +499,12 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
           successCount++;
         }
       } else {
-        // Determine source and external_source based on channel
-        const channel = (raw as any).channel || "APH";
-        let bookingSource: "cavu" | "holidayextras" | "other";
-        let externalSource: string;
-        
-        if (channel === "CAVU") {
-          bookingSource = "cavu";
-          externalSource = "CAVU Email Import";
-        } else if (channel === "HOLIDAY_EXTRAS") {
-          bookingSource = "holidayextras"; // Valid enum value (no underscore)
-          externalSource = "Holiday Extras Email Import";
-        } else if (channel === "FLYPARKS_EMAIL") {
-          bookingSource = "other";
-          externalSource = "Flyparks Email Import";
-        } else {
-          bookingSource = "other";
-          externalSource = "APH Email Import";
-        }
+        // Use attribution from winning parser (single source of truth)
+        const bookingSource = attribution.bookingSource;
+        const externalSource = attribution.externalSource;
+
+        // Validate attribution before inserting
+        assertAttribution(winningParserKey, bookingSource, externalSource);
 
         // Skip if vehicle_reg is missing (required for bookings table)
         if (!raw.vehicle_reg || raw.vehicle_reg.trim() === "" || raw.vehicle_reg === "-") {
@@ -580,13 +565,15 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       .eq("id", run.id);
   }
 
-  // Update file status to parsed
+  // Update file status to parsed with attribution
   console.log(`[parseEmailFile] Updating file status to parsed: ${fileId}`);
   console.log(`[parseEmailFile] Results summary:`, {
     rowsParsed: parsedData.rows.length,
     stagedCount: stagedData?.length || 0,
     successCount,
     errorCount,
+    parserKey: winningParserKey,
+    attribution: attribution,
   });
   
   const { error: updateError, data: updatedFile } = await supabase
@@ -597,9 +584,14 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       parsed_at: new Date().toISOString(),
       parse_error: null, // Clear any previous errors
       parse_reason: null, // Clear any previous reason
+      // Set attribution fields (single source of truth)
+      parser_key: winningParserKey,
+      detected_source: attribution.detectedSource,
+      external_source: attribution.externalSource,
+      attribution_confidence: winningParserKey === "unknown" ? "fallback" : "parser",
     })
     .eq("id", fileId)
-    .select("id, parse_status, parsed_at")
+    .select("id, parse_status, parsed_at, parser_key, external_source")
     .single();
   
   if (updateError) {
