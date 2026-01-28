@@ -64,9 +64,7 @@ export default function ParsedFilesClient({ tenantId }: { tenantId: string }) {
 
   useEffect(() => {
     fetchData();
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchData, 30000);
-    return () => clearInterval(interval);
+    // Only fetch on mount, no auto-refresh
   }, []);
 
   const formatDate = (dateString: string | null) => {
