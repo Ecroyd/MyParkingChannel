@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getSiteContext } from "@/lib/site";
 import { Header, Footer } from "./_components/SiteChrome";
-import BookingWidget from "@/components/booking/BookingWidget";
+import BookingEntry from "@/components/booking/BookingEntry";
 import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";
@@ -26,9 +26,10 @@ async function getProfile(slug: string) {
     console.log("Loaded tenant profile:", profile);
     console.log("Logo URL from database:", profile?.logo_url);
     console.log("Tenant ID:", ctx.tenant.id);
+    console.log("Site from ctx on homepage:", ctx.site);
   }
     
-  return { tenant: ctx.tenant, profile, branding: ctx.branding };
+  return { tenant: ctx.tenant, profile, branding: ctx.branding, site: ctx.site ?? null };
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
@@ -90,9 +91,11 @@ export default async function TenantHome({
     );
   }
 
-  const { tenant, profile, branding } = data;
+  const { tenant, profile, branding, site } = data;
   const p = profile;
   const title = p?.business_name ?? branding?.app_name ?? tenant.name ?? "Airport Parking";
+
+  console.log("[HOME_PAGE] booking_modal_style", site?.booking_modal_style);
 
   // JSON-LD (ParkingFacility + LocalBusiness + AggregateRating + FAQ)
   const ld = {
@@ -194,11 +197,12 @@ export default async function TenantHome({
             </div>
           </div>
 
-          {/* Booking widget slot */}
+          {/* Booking entry slot (banner vs card decided once) */}
           <div id="book" className="rounded-2xl border bg-white/70 backdrop-blur shadow-lg p-4">
-            <BookingWidget 
-              tenantSlug={resolvedParams.slug} 
+            <BookingEntry 
+              slug={resolvedParams.slug} 
               tenantId={tenant.id} 
+              site={site} 
             />
             <p className="mt-2 text-xs text-center text-gray-500">
               Secure payments by Stripe • Free cancellations within 24h
