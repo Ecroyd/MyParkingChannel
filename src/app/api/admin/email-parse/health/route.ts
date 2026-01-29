@@ -1,7 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/server-admin";
 import { getCurrentTenantContext } from "@/lib/auth/current-tenant-context";
 import { NextResponse } from "next/server";
-import { isBookingCapableFile } from "@/lib/ingest/fileTypeUtils";
+import { isBookingCapableFile, isImageFile } from "@/lib/ingest/fileTypeUtils";
 
 export const dynamic = "force-dynamic";
 
@@ -150,12 +150,15 @@ export async function GET() {
     }
 
     // Get files that were parsed but resulted in 0 bookings (potential issue)
+    // Exclude parse_outcome = 'skipped' (e.g. images) - they are not "empty parsed" issues
     const { data: allParsedFiles, error: parsedError } = await adminClient
       .from("ingest_email_files")
       .select(`
         id,
         filename,
+        content_type,
         parse_status,
+        parse_outcome,
         parsed_at,
         created_at,
         ingest_emails!inner(
@@ -170,8 +173,14 @@ export async function GET() {
       .order("parsed_at", { ascending: false })
       .limit(100);
 
-    // Filter by tenant
+    // Filter by tenant and exclude skipped/image files (never treat as "empty parsed" issues)
     const parsedFiles = (allParsedFiles || []).filter((file: any) => {
+      if (file.parse_outcome === "skipped") {
+        return false;
+      }
+      if (isImageFile(file.filename, file.content_type)) {
+        return false; // Images even without parse_outcome set (e.g. pre-backfill)
+      }
       const email = file.ingest_emails;
       const fileTenantId = detectTenantFromEmail(email);
       const matches = fileTenantId === ctx.tenantId;
