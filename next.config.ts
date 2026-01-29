@@ -50,7 +50,7 @@ const baseConfig = {
         value: isDev 
           ? `
             default-src 'self';
-            script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com;
+            script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://va.vercel-scripts.com;
             style-src 'self' 'unsafe-inline';
             img-src 'self' data: blob: https:;
             media-src 'self' https:;
@@ -60,7 +60,7 @@ const baseConfig = {
           `.replace(/\n/g, " ") // remove line breaks for HTTP header
           : `
             default-src 'self';
-            script-src 'self' 'unsafe-inline' https://js.stripe.com;
+            script-src 'self' 'unsafe-inline' https://js.stripe.com https://va.vercel-scripts.com;
             style-src 'self' 'unsafe-inline';
             img-src 'self' data: blob: https:;
             media-src 'self' https:;

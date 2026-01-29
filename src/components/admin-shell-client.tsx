@@ -55,17 +55,11 @@ export default function AdminShellClient({
   };
 
   return (
-    <div className="h-screen w-full overflow-hidden">
-      <div className="flex h-full w-full">
-        {/* Sidebar — fixed width, scrolls independently (Sidebar has its own border/bg) */}
-        <div className="h-full w-64 shrink-0 overflow-y-auto hidden md:block">
-          <Sidebar features={isPlatformAdmin ? ['platform_admin'] : []} userRole={userRole} />
-        </div>
+    <div className="flex h-screen bg-[#f9fafb] text-gray-900">
+      <Sidebar features={isPlatformAdmin ? ['platform_admin'] : []} userRole={userRole} />
 
-        {/* Right side: header + main */}
-        <div className="flex h-full min-w-0 flex-1 flex-col">
-          {/* Header — shrink-0 so it never shrinks */}
-          <header className="shrink-0 border-b border-gray-200 bg-white/80 backdrop-blur-md shadow-sm px-4 md:px-6 py-4">
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        <header className="shrink-0 bg-white/80 backdrop-blur-md shadow-sm border-b px-4 md:px-6 py-4">
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <button
@@ -111,19 +105,15 @@ export default function AdminShellClient({
             </div>
           </header>
 
-          {/* Main content — flex-1 min-h-0 overflow-y-auto is the fix for “blank / pushed to bottom” */}
-          <main className="flex-1 min-h-0 overflow-y-auto bg-gray-50">
-            <div className="mx-auto w-full max-w-[1600px] p-4">
-              <div className="space-y-4">
-                <EmailParseFailureBanner />
-                <CavuSyncHealthBanner />
-              </div>
-              <div className="pt-4">
-                {children}
-              </div>
-            </div>
-          </main>
-        </div>
+        <main className="flex-1 min-h-0 min-h-[50vh] overflow-y-auto overflow-x-hidden p-4 md:p-6 bg-[#f9fafb]">
+          <div className="space-y-4">
+            <EmailParseFailureBanner />
+            <CavuSyncHealthBanner />
+          </div>
+          <div className="pt-4 min-h-0">
+            {children}
+          </div>
+        </main>
       </div>
 
       {/* Mobile Navigation Overlay */}
