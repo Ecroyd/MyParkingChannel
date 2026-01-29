@@ -1,168 +1,79 @@
-import {
-  Body,
-  Container,
-  Head,
-  Heading,
-  Html,
-  Preview,
-  Section,
-  Text,
-} from '@react-email/components';
-import * as React from 'react';
-
 interface OpsAlertEmailProps {
   alertTitle: string;
   alertType: 'error' | 'warning' | 'info';
   message: string;
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
   tenantName?: string;
   timestamp: string;
 }
 
-export function OpsAlertEmail(props: OpsAlertEmailProps) {
-  const {
-    alertTitle,
-    alertType,
-    message,
-    details,
-    tenantName,
-    timestamp,
-  } = props;
+function formatDate(dateString: string) {
+  return new Date(dateString).toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString('en-GB', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
-  };
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+export function renderOpsAlertEmail(props: OpsAlertEmailProps): string {
+  const { alertTitle, alertType, message, details, tenantName, timestamp } = props;
 
   const alertColors = {
     error: { bg: '#fee', border: '#fcc', text: '#c33' },
     warning: { bg: '#ffd', border: '#fc9', text: '#963' },
     info: { bg: '#eef', border: '#ccf', text: '#339' },
   };
-
   const colors = alertColors[alertType] || alertColors.info;
 
-  return (
-    <Html>
-      <Head />
-      <Preview>{alertTitle} - {tenantName || 'My Parking Channel'}</Preview>
-      <Body style={main}>
-        <Container style={container}>
-          <Heading style={h1}>{alertTitle}</Heading>
-          
-          <Section style={{ ...alertBox, backgroundColor: colors.bg, borderColor: colors.border }}>
-            <Text style={{ ...text, color: colors.text }}>
-              {message}
-            </Text>
-          </Section>
+  const tenantSection = tenantName
+    ? `
+    <div style="padding: 16px 0; border-bottom: 1px solid #e6ebf1;">
+      <p style="color: #666; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px;">Tenant</p>
+      <p style="color: #333; font-size: 16px; font-weight: 500; margin: 0;">${escapeHtml(tenantName)}</p>
+    </div>`
+    : '';
 
-          {tenantName && (
-            <Section style={section}>
-              <Text style={label}>Tenant</Text>
-              <Text style={value}>{tenantName}</Text>
-            </Section>
-          )}
+  const detailsSection =
+    details && Object.keys(details).length > 0
+      ? `
+    <div style="padding: 16px 0; border-bottom: 1px solid #e6ebf1;">
+      <p style="color: #666; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px;">Details</p>
+      <pre style="background-color: #f5f5f5; padding: 12px; border-radius: 4px; font-size: 12px; line-height: 18px; overflow: auto; color: #333; margin: 8px 0 0;">${escapeHtml(JSON.stringify(details, null, 2))}</pre>
+    </div>`
+      : '';
 
-          <Section style={section}>
-            <Text style={label}>Time</Text>
-            <Text style={value}>{formatDate(timestamp)}</Text>
-          </Section>
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="background-color: #f6f9fc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Ubuntu, sans-serif; margin: 0; padding: 0;">
+  <div style="background-color: #ffffff; margin: 0 auto; padding: 20px 0 48px; max-width: 600px;">
+    <h1 style="color: #333; font-size: 24px; font-weight: bold; margin: 40px 0 0; padding: 0;">${escapeHtml(alertTitle)}</h1>
 
-          {details && Object.keys(details).length > 0 && (
-            <Section style={section}>
-              <Text style={label}>Details</Text>
-              <pre style={pre}>
-                {JSON.stringify(details, null, 2)}
-              </pre>
-            </Section>
-          )}
-
-          <Text style={footer}>
-            This is an automated alert from My Parking Channel.
-          </Text>
-        </Container>
-      </Body>
-    </Html>
-  );
+    <div style="padding: 16px; border-radius: 5px; border: 2px solid ${colors.border}; margin: 20px 0; background-color: ${colors.bg};">
+      <p style="color: ${colors.text}; font-size: 16px; line-height: 26px; margin: 0;">${escapeHtml(message)}</p>
+    </div>
+    ${tenantSection}
+    <div style="padding: 16px 0; border-bottom: 1px solid #e6ebf1;">
+      <p style="color: #666; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 4px;">Time</p>
+      <p style="color: #333; font-size: 16px; font-weight: 500; margin: 0;">${formatDate(timestamp)}</p>
+    </div>
+    ${detailsSection}
+    <p style="color: #666; font-size: 14px; line-height: 24px; margin-top: 40px;">This is an automated alert from My Parking Channel.</p>
+  </div>
+</body>
+</html>`;
 }
 
-const main = {
-  backgroundColor: '#f6f9fc',
-  fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Ubuntu,sans-serif',
-};
-
-const container = {
-  backgroundColor: '#ffffff',
-  margin: '0 auto',
-  padding: '20px 0 48px',
-  marginBottom: '64px',
-  maxWidth: '600px',
-};
-
-const h1 = {
-  color: '#333',
-  fontSize: '24px',
-  fontWeight: 'bold',
-  margin: '40px 0',
-  padding: '0',
-};
-
-const text = {
-  color: '#333',
-  fontSize: '16px',
-  lineHeight: '26px',
-};
-
-const alertBox = {
-  padding: '16px',
-  borderRadius: '5px',
-  border: '2px solid',
-  margin: '20px 0',
-};
-
-const section = {
-  padding: '16px 0',
-  borderBottom: '1px solid #e6ebf1',
-};
-
-const label = {
-  color: '#666',
-  fontSize: '12px',
-  fontWeight: '600',
-  textTransform: 'uppercase',
-  letterSpacing: '0.5px',
-  margin: '0 0 4px',
-};
-
-const value = {
-  color: '#333',
-  fontSize: '16px',
-  fontWeight: '500',
-  margin: '0',
-};
-
-const pre = {
-  backgroundColor: '#f5f5f5',
-  padding: '12px',
-  borderRadius: '4px',
-  fontSize: '12px',
-  lineHeight: '18px',
-  overflow: 'auto',
-  color: '#333',
-  margin: '8px 0 0',
-};
-
-const footer = {
-  color: '#666',
-  fontSize: '14px',
-  lineHeight: '24px',
-  marginTop: '40px',
-};
-
-export default OpsAlertEmail;
+export default { renderOpsAlertEmail };

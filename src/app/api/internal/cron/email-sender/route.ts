@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sendDueEmails } from '@/lib/email/emailService';
+import { alertEmailFailures, checkBounceRate } from '@/lib/email/alerting';
 
 /**
  * Internal cron job to send queued emails

@@ -1,11 +1,9 @@
 import { createAdminClient } from '@/lib/supabase/server-admin';
 import { Resend } from 'resend';
-import { render } from '@react-email/render';
-import React from 'react';
-import { BookingConfirmationEmail } from '@/emails/BookingConfirmationEmail';
-import { BookingCancelledEmail } from '@/emails/BookingCancelledEmail';
-import { SetupInviteEmail } from '@/emails/SetupInviteEmail';
-import { OpsAlertEmail } from '@/emails/OpsAlertEmail';
+import { renderBookingConfirmationEmail } from '@/emails/BookingConfirmationEmail';
+import { renderBookingCancelledEmail } from '@/emails/BookingCancelledEmail';
+import { renderSetupInviteEmail } from '@/emails/SetupInviteEmail';
+import { renderOpsAlertEmail } from '@/emails/OpsAlertEmail';
 
 export interface QueueEmailParams {
   tenantId?: string | null;
@@ -88,27 +86,19 @@ async function getEmailSettings(tenantId?: string | null): Promise<EmailSettings
 /**
  * Render email template to HTML
  */
-async function renderTemplate(templateKey: string, payload: Record<string, any>): Promise<string> {
-  let component: React.ReactElement;
-  
+function renderTemplate(templateKey: string, payload: Record<string, any>): string {
   switch (templateKey) {
     case 'booking_confirmation':
-      component = React.createElement(BookingConfirmationEmail, payload);
-      break;
+      return renderBookingConfirmationEmail(payload as Parameters<typeof renderBookingConfirmationEmail>[0]);
     case 'booking_cancelled':
-      component = React.createElement(BookingCancelledEmail, payload);
-      break;
+      return renderBookingCancelledEmail(payload as Parameters<typeof renderBookingCancelledEmail>[0]);
     case 'setup_invite':
-      component = React.createElement(SetupInviteEmail, payload);
-      break;
+      return renderSetupInviteEmail(payload as Parameters<typeof renderSetupInviteEmail>[0]);
     case 'ops_alert':
-      component = React.createElement(OpsAlertEmail, payload);
-      break;
+      return renderOpsAlertEmail(payload as Parameters<typeof renderOpsAlertEmail>[0]);
     default:
       throw new Error(`Unknown template key: ${templateKey}`);
   }
-  
-  return await render(component);
 }
 
 /**
@@ -218,7 +208,7 @@ export async function sendDueEmails(limit: number = 20): Promise<{ sent: number;
         }
 
         // Render template
-        const html = await renderTemplate(email.template_key, email.payload);
+        const html = renderTemplate(email.template_key, email.payload);
 
         // Send via Resend
         const resend = new Resend(settings.apiKey);
@@ -227,7 +217,7 @@ export async function sendDueEmails(limit: number = 20): Promise<{ sent: number;
           to: email.to_email,
           subject: email.subject,
           html,
-          reply_to: email.reply_to || undefined,
+          replyTo: email.reply_to || undefined,
         });
 
         if (result.error) {
