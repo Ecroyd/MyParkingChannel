@@ -57,6 +57,11 @@ body {
   .glass-dark {
     @apply bg-white/10 backdrop-blur-xl border border-white/10 shadow-lg;
   }
+  /* Admin main area: subtle gradient + glass so content is readable */
+  .bg-glass-gradient {
+    background: linear-gradient(to bottom, rgba(249, 250, 251, 0.98), rgba(243, 244, 246, 0.95));
+    min-height: 100%;
+  }
 
   .card {
     @apply rounded-2xl p-5 shadow-md;

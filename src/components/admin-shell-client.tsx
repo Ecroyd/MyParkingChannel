@@ -141,13 +141,13 @@ export default function AdminShellClient({
         )}
 
         {/* Main Content */}
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto min-h-0">
           {/* Health Banners */}
           <div className="px-4 md:px-6 pt-4 space-y-4">
             <EmailParseFailureBanner />
             <CavuSyncHealthBanner />
           </div>
-          <div className="p-4 md:p-6">
+          <div className="p-4 md:p-6 min-h-[400px]">
             {children}
           </div>
         </main>
