@@ -36,6 +36,7 @@ export async function POST(req: NextRequest) {
     if (!authHeader || authHeader !== `Bearer ${cronKey}`) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    console.log('[INGEST CANARY] step=auth_ok');
 
     const supabase = createAdminClient();
     let previousDown = false;
@@ -59,6 +60,7 @@ export async function POST(req: NextRequest) {
         .eq('id', latestRun.id);
       previousDown = true;
     }
+    console.log('[INGEST CANARY] step=prev_checked');
 
     // B) Create new canary run and send email
     const now = new Date();
@@ -76,9 +78,11 @@ export async function POST(req: NextRequest) {
       sent_at: now.toISOString(),
       status: 'sent',
     });
+    console.log('[INGEST CANARY] step=run_inserted token=' + token);
 
     const subject = `[CANARY] cloudflare-ingest token=${token}`;
     const dedupeKey = `ingest-canary-${timePart}`;
+    console.log('[INGEST CANARY] step=send_start');
     const queueResult = await queueEmail({
       tenantId: null,
       to: CANARY_TO_EMAIL,
@@ -109,12 +113,16 @@ export async function POST(req: NextRequest) {
 
     // Send immediately so canary email goes out in this request
     await sendDueEmails(5);
+    console.log('[INGEST CANARY] step=send_done');
 
     return NextResponse.json({ ok: true, token, previousMarkedDown: previousDown });
   } catch (err: any) {
-    console.error('[INGEST CANARY] Error:', err);
+    console.error('[INGEST CANARY] ERROR', {
+      message: err?.message || String(err),
+      stack: err?.stack,
+    });
     return NextResponse.json(
-      { ok: false, error: err?.message ?? 'Unknown error' },
+      { ok: false, error: err?.message || String(err) },
       { status: 500 }
     );
   }
