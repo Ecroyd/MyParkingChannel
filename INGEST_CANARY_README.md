@@ -10,11 +10,11 @@ Proves the inbound booking email path is alive: **Email Routing → Worker → P
 - **Action:** Send to a Worker → **parking-channel-email-ingest**
 - Do **not** forward canary to Gmail or elsewhere; the proof is `ingest_emails` + `ingest_canary_runs`.
 
-### 2. Cron (e.g. cron-job.org)
+### 2. Cron (cron-job.org)
 
-- **URL:** `POST https://yourdomain.com/api/internal/cron/ingest-canary`
-- **Header:** `Authorization: Bearer <INTERNAL_CRON_KEY>`
-- **Schedule:** e.g. every 10–15 minutes
+- **cron-job.org** must call **POST** `https://yourdomain.com/api/internal/cron/ingest-canary` with header **`Authorization: Bearer <INTERNAL_CRON_KEY>`**.
+- **Recommended schedule:** every **15 minutes**.
+- **Canary is considered down** if not received within **10 minutes** (next run marks `status = 'down'`).
 
 ### 3. Expected behaviour
 
@@ -33,3 +33,52 @@ Proves the inbound booking email path is alive: **Email Routing → Worker → P
 
 - **`ingest_canary_runs`:** `id`, `token`, `sent_at`, `received_at`, `status` (`sent` | `received` | `down`), `last_error`, `created_at`, `updated_at`.
 - RLS: SELECT for platform admins; INSERT/UPDATE only via service role (cron and ingest route).
+
+---
+
+## Manual test plan
+
+### 1. Trigger canary (POST with auth)
+
+**PowerShell:**
+```powershell
+$key = $env:INTERNAL_CRON_KEY   # or set manually
+Invoke-RestMethod -Uri "https://yourdomain.com/api/internal/cron/ingest-canary" -Method POST -Headers @{ "Authorization" = "Bearer $key" }
+```
+
+**curl:**
+```bash
+curl -X POST "https://yourdomain.com/api/internal/cron/ingest-canary" \
+  -H "Authorization: Bearer YOUR_INTERNAL_CRON_KEY"
+```
+
+Expected: `200` with JSON like `{ "ok": true, "token": "ingest-YYYYMMDD-HHMM-xxxxxx", "previousMarkedDown": false }`.
+
+### 2. Ping (GET, no auth)
+
+**PowerShell:**
+```powershell
+Invoke-RestMethod -Uri "https://yourdomain.com/api/internal/cron/ingest-canary" -Method GET
+```
+
+**curl:**
+```bash
+curl "https://yourdomain.com/api/internal/cron/ingest-canary"
+```
+
+Expected: `200` with `{ "ok": true, "note": "use POST for real runs" }`.
+
+### 3. Verify in database
+
+**Latest canary run:**
+```sql
+SELECT id, token, sent_at, received_at, status, last_error, updated_at
+FROM public.ingest_canary_runs
+ORDER BY sent_at DESC
+LIMIT 5;
+```
+
+**Count by status:**
+```sql
+SELECT status, COUNT(*) FROM public.ingest_canary_runs GROUP BY status;
+```

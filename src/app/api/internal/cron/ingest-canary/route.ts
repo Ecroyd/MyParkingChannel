@@ -110,7 +110,7 @@ export async function POST(req: NextRequest) {
     // Send immediately so canary email goes out in this request
     await sendDueEmails(5);
 
-    return NextResponse.json({ ok: true, previousDown, token });
+    return NextResponse.json({ ok: true, token, previousMarkedDown: previousDown });
   } catch (err: any) {
     console.error('[INGEST CANARY] Error:', err);
     return NextResponse.json(

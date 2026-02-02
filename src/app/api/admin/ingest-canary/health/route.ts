@@ -4,7 +4,8 @@ import { createAdminClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
-const STALE_HOURS = 6;
+const OK_RECEIVED_WITHIN_HOURS = 2;
+const SENT_DOWN_AFTER_MINUTES = 15;
 
 /**
  * Health for ingest canary (Cloudflare Email Routing + Worker + /api/ingest/email).
@@ -21,43 +22,45 @@ export async function GET(req: NextRequest) {
     const supabase = createAdminClient();
     const { data: latest } = await supabase
       .from('ingest_canary_runs')
-      .select('status, sent_at, received_at, last_error')
+      .select('token, status, sent_at, received_at, last_error')
       .order('sent_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
     if (!latest) {
       return NextResponse.json({
-        ok: true,
         status: 'unknown',
         lastSentAt: null,
         lastReceivedAt: null,
         lastError: null,
+        token: null,
       });
     }
 
     const now = Date.now();
-    const sixHoursAgo = now - STALE_HOURS * 60 * 60 * 1000;
+    const twoHoursAgo = now - OK_RECEIVED_WITHIN_HOURS * 60 * 60 * 1000;
+    const fifteenMinutesAgo = now - SENT_DOWN_AFTER_MINUTES * 60 * 1000;
     const lastReceivedAt = latest.received_at ? new Date(latest.received_at).getTime() : null;
-    const receivedWithinSixHours = lastReceivedAt !== null && lastReceivedAt >= sixHoursAgo;
-    const sentAtOlderThanSixHours = latest.sent_at ? new Date(latest.sent_at).getTime() < sixHoursAgo : true;
+    const receivedWithinTwoHours = lastReceivedAt !== null && lastReceivedAt >= twoHoursAgo;
+    const sentAt = latest.sent_at ? new Date(latest.sent_at).getTime() : 0;
+    const sentOlderThan15Min = sentAt < fifteenMinutesAgo;
 
     let status: 'ok' | 'down' | 'unknown' = 'unknown';
-    if (latest.status === 'received' && receivedWithinSixHours) {
+    if (latest.status === 'received' && receivedWithinTwoHours) {
       status = 'ok';
-    } else if (latest.status === 'down' || sentAtOlderThanSixHours) {
+    } else if (latest.status === 'down' || (latest.status === 'sent' && sentOlderThan15Min)) {
       status = 'down';
     } else {
-      // status === 'sent' and sent within 6h: not yet received → down (ingest path not confirmed)
+      // status === 'sent' and sent within 15 min: still waiting → down (not yet confirmed)
       status = 'down';
     }
 
     return NextResponse.json({
-      ok: true,
       status,
       lastSentAt: latest.sent_at,
       lastReceivedAt: latest.received_at,
       lastError: latest.last_error,
+      token: latest.token,
     });
   } catch (err: any) {
     console.error('[INGEST CANARY HEALTH] error', err);

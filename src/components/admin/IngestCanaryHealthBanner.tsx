@@ -25,7 +25,7 @@ export function IngestCanaryHealthBanner({ isPlatformAdmin = false }: IngestCana
     try {
       const res = await fetch('/api/admin/ingest-canary/health');
       const json = await res.json();
-      if (json.ok !== false) {
+      if (res.ok && json.error == null) {
         setData(json);
         if (json.status === 'down') setIsVisible(true);
       }

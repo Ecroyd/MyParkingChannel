@@ -309,15 +309,23 @@ export async function POST(req: Request) {
       const tokenMatch = subject.match(/token=([A-Za-z0-9_-]+)/);
       if (tokenMatch?.[1]) {
         const token = tokenMatch[1];
-        await supabase
-          .from("ingest_canary_runs")
-          .update({
-            received_at: new Date().toISOString(),
-            status: "received",
-            last_error: null,
-          })
-          .eq("token", token);
-        console.log(`[ingest-email] Canary received: token=${token}`);
+        try {
+          const { error: canaryError } = await supabase
+            .from("ingest_canary_runs")
+            .update({
+              received_at: new Date().toISOString(),
+              status: "received",
+              last_error: null,
+            })
+            .eq("token", token);
+          if (canaryError) {
+            console.warn(`[ingest-email] Canary token not found or update failed: token=${token}`, canaryError.message);
+          } else {
+            console.log(`[ingest-email] CANARY_RECEIVED`, { token, message_id: body.message_id || null, to_address: body.to || null });
+          }
+        } catch (e) {
+          console.warn(`[ingest-email] Canary update error (non-fatal):`, e);
+        }
       }
     }
 
