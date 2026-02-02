@@ -43,7 +43,7 @@ export default function PlatformEmailSettingsClient({ initialSettings }: Platfor
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          resend_api_key: settings.resend_api_key || undefined, // Only send if provided
+          resend_api_key: settings.resend_api_key || undefined,
           default_from_email: settings.default_from_email,
           default_from_name: settings.default_from_name,
           default_reply_to: settings.default_reply_to || null,
@@ -51,10 +51,16 @@ export default function PlatformEmailSettingsClient({ initialSettings }: Platfor
         }),
       });
 
-      const result = await response.json();
+      const result = await response.json().catch(() => ({}));
 
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to save settings');
+      if (!response.ok || !result.success) {
+        const errorMessage = result.error || response.statusText || 'Failed to save settings';
+        toast({
+          title: 'Error',
+          description: errorMessage,
+          variant: 'destructive',
+        });
+        return;
       }
 
       toast({
@@ -62,12 +68,22 @@ export default function PlatformEmailSettingsClient({ initialSettings }: Platfor
         description: 'Email settings saved successfully',
       });
 
-      // Clear API key field after saving
-      setSettings({ ...settings, resend_api_key: '' });
+      // Update form with persisted values from DB (and clear API key)
+      if (result.settings) {
+        setSettings({
+          resend_api_key: '',
+          default_from_email: result.settings.default_from_email ?? settings.default_from_email,
+          default_from_name: result.settings.default_from_name ?? settings.default_from_name,
+          default_reply_to: result.settings.default_reply_to ?? '',
+          is_enabled: result.settings.is_enabled ?? settings.is_enabled,
+        });
+      } else {
+        setSettings({ ...settings, resend_api_key: '' });
+      }
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to save settings',
+        description: error?.message || 'Failed to save settings',
         variant: 'destructive',
       });
     } finally {
