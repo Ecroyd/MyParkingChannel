@@ -200,6 +200,7 @@ See [STRIPE_INTEGRATED_SETUP.md](./STRIPE_INTEGRATED_SETUP.md) for detailed inst
 ### Cron Jobs
 - `GET /api/cron/pull-parkvia` - Sync ParkVia data
 - `GET /api/cron/pull-holidayextras` - Sync Holiday Extras data
+- `POST /api/internal/cron/ingest-canary` - Ingest canary (Cloudflare Email Routing + Worker + `/api/ingest/email`). See [INGEST_CANARY_README.md](./INGEST_CANARY_README.md).
 
 ## Security Features
 

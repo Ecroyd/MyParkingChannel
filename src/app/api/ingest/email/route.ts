@@ -303,6 +303,24 @@ export async function POST(req: Request) {
       );
     }
 
+    // Ingest canary: if subject is [CANARY] with token=, mark run as received (proof of Email Routing + Worker + ingest)
+    const subject = body.subject || "";
+    if (subject.includes("[CANARY]") && subject.includes("token=")) {
+      const tokenMatch = subject.match(/token=([A-Za-z0-9_-]+)/);
+      if (tokenMatch?.[1]) {
+        const token = tokenMatch[1];
+        await supabase
+          .from("ingest_canary_runs")
+          .update({
+            received_at: new Date().toISOString(),
+            status: "received",
+            last_error: null,
+          })
+          .eq("token", token);
+        console.log(`[ingest-email] Canary received: token=${token}`);
+      }
+    }
+
     // Process attachments if any
     const fileIds: string[] = [];
     if (allAttachments && allAttachments.length > 0 && data) {

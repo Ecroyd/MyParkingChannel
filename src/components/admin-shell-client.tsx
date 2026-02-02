@@ -8,6 +8,7 @@ import { Menu, X } from 'lucide-react';
 import { DynamicPricingBadge } from './admin/DynamicPricingBadge';
 import { CavuSyncHealthBanner } from './admin/CavuSyncHealthBanner';
 import { EmailParseFailureBanner } from './admin/EmailParseFailureBanner';
+import { IngestCanaryHealthBanner } from './admin/IngestCanaryHealthBanner';
 import Sidebar from '@/components/admin/Sidebar';
 import MobileSidebar from '@/components/admin/MobileSidebar';
 import InstallPWAButton from '@/components/InstallPWAButton';
@@ -107,6 +108,7 @@ export default function AdminShellClient({
 
         <main className="flex-1 min-h-0 min-h-[50vh] overflow-y-auto overflow-x-hidden p-4 md:p-6 bg-[#f9fafb]">
           <div className="space-y-4">
+            <IngestCanaryHealthBanner isPlatformAdmin={isPlatformAdmin} />
             <EmailParseFailureBanner />
             <CavuSyncHealthBanner />
           </div>
