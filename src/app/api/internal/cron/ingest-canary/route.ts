@@ -26,15 +26,25 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   console.log('[INGEST CANARY] POST /api/internal/cron/ingest-canary called');
   try {
-    const authHeader = req.headers.get('authorization');
-    const cronKey = process.env.INTERNAL_CRON_KEY;
+    const envKey = process.env.INTERNAL_CRON_KEY?.trim();
+    const auth = req.headers.get('authorization') ?? '';
+    const xKey = req.headers.get('x-internal-cron-key')?.trim() ?? '';
 
-    if (!cronKey) {
+    if (!envKey) {
       console.error('[INGEST CANARY] INTERNAL_CRON_KEY not configured');
       return NextResponse.json({ ok: false, error: 'Cron key not configured' }, { status: 500 });
     }
-    if (!authHeader || authHeader !== `Bearer ${cronKey}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    let bearerToken = '';
+    const m = auth.match(/^Bearer\s+(.+)$/i);
+    if (m) bearerToken = m[1].trim();
+
+    const valid = bearerToken === envKey || xKey === envKey;
+    if (!valid) {
+      return NextResponse.json(
+        { ok: false, reason: 'invalid token', hasAuth: !!auth, hasXInternal: !!xKey },
+        { status: 401 }
+      );
     }
     console.log('[INGEST CANARY] step=auth_ok');
 
