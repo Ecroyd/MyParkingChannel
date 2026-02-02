@@ -8,11 +8,23 @@ const STALE_MINUTES = 10;
 const TOKEN_RANDOM_BYTES = 4; // 6 chars base64url
 
 /**
+ * GET: Test run / ping. cron-job.org "test run" may use GET; return 200 so it succeeds.
+ */
+export async function GET(req: NextRequest) {
+  console.log('[INGEST CANARY] GET /api/internal/cron/ingest-canary called');
+  return NextResponse.json({
+    ok: true,
+    note: 'use POST for real runs',
+  });
+}
+
+/**
  * Internal cron: evaluate previous ingest canary and send next one.
  * Auth: Authorization: Bearer INTERNAL_CRON_KEY
  * External scheduler (e.g. cron-job.org) calls POST /api/internal/cron/ingest-canary with header.
  */
 export async function POST(req: NextRequest) {
+  console.log('[INGEST CANARY] POST /api/internal/cron/ingest-canary called');
   try {
     const authHeader = req.headers.get('authorization');
     const cronKey = process.env.INTERNAL_CRON_KEY;
