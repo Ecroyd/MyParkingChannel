@@ -90,11 +90,6 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
   useEffect(() => {
     fetchStatus();
     fetchRecentImports();
-    const interval = setInterval(() => {
-      fetchStatus();
-      fetchRecentImports();
-    }, 30000);
-    return () => clearInterval(interval);
   }, []);
 
   const handleRetry = async (fileId: string) => {

@@ -4,6 +4,10 @@ import { getServiceSupabase } from "@/lib/supabase/service";
 import { simpleParser } from "mailparser";
 import { isImageFile } from "@/lib/ingest/fileTypeUtils";
 import { getParsableBodyForDirectBooking } from "@/lib/email/forwarded";
+import {
+  extractFlyparksReceiptFromForward,
+  guessFlyparksFields,
+} from "@/lib/email/flyparksForward";
 
 export const runtime = "nodejs";
 
@@ -201,28 +205,30 @@ export async function POST(req: Request) {
 
     const sha256 = crypto.createHash("sha256").update(raw).digest("hex");
 
-    // Parse attachments from raw email if not provided by Worker
+    // Always parse raw email so we have subject + text for ingest_email_parses and (when no Worker attachments) for attachment extraction
     let extractedAttachments: Attachment[] = [];
     let emailBodyText: string | null = null;
     let parsedHtml: string | null = null;
-    if (!body.attachments || body.attachments.length === 0) {
-      // Worker didn't extract attachments, parse them server-side
-      try {
-        const rawEmailBuffer = Buffer.from(raw, "base64");
-        const parsed = await simpleParser(rawEmailBuffer);
-        
-        // Extract email body text for Flyparks parsing
-        // Prefer plain text, fall back to HTML (we'll strip tags in the mapper)
-        emailBodyText = parsed.textAsHtml ? null : (parsed.text || parsed.html || null);
-        // If we only have HTML, we'll parse it in the mapper
-        if (!emailBodyText && parsed.html) {
-          emailBodyText = parsed.html;
-        }
-        parsedHtml = parsed.html ?? null;
-        
+    /** Set when simpleParser succeeds; used to write ingest_email_parses so parser runs automatically */
+    let parsedForReceipt: { subject: string; text: string } | null = null;
+    try {
+      const rawEmailBuffer = Buffer.from(raw, "base64");
+      const parsed = await simpleParser(rawEmailBuffer);
+      const subject = parsed.subject ?? body.subject ?? "";
+      const text = parsed.text ?? "";
+      parsedForReceipt = { subject, text };
+
+      // Extract email body text for Flyparks parsing
+      emailBodyText = parsed.textAsHtml ? null : (parsed.text || parsed.html || null);
+      if (!emailBodyText && parsed.html) {
+        emailBodyText = parsed.html;
+      }
+      parsedHtml = parsed.html ?? null;
+
+      // When Worker didn't send attachments, extract from parsed MIME
+      if (!body.attachments || body.attachments.length === 0) {
         if (parsed.attachments && parsed.attachments.length > 0) {
           console.log(`[ingest-email] Extracting ${parsed.attachments.length} attachments from raw email`);
-          
           for (const att of parsed.attachments) {
             try {
               const content = att.content as Buffer;
@@ -232,15 +238,15 @@ export async function POST(req: Request) {
                 size: content.length,
                 data_base64: content.toString("base64"),
               });
-            } catch (err: any) {
+            } catch (err: unknown) {
               console.error(`[ingest-email] Failed to extract attachment:`, err);
             }
           }
         }
-      } catch (parseErr: any) {
-        console.error(`[ingest-email] Failed to parse raw email:`, parseErr.message);
-        // Continue without attachments
       }
+    } catch (parseErr: unknown) {
+      console.error(`[ingest-email] Failed to parse raw email:`, (parseErr as Error)?.message);
+      // Continue; ingest_email_parses won't be written for this email
     }
 
     // Forward-aware body: for FW:/Fwd: Flyparks Payment Successful, use only forwarded region and strip signatures
@@ -342,6 +348,35 @@ export async function POST(req: Request) {
         } catch (e) {
           console.warn(`[ingest-email] Canary update error (non-fatal):`, e);
         }
+      }
+    }
+
+    // Always write to ingest_email_parses so the parser runs automatically (forward receipt + plate/ref guesses)
+    if (data && parsedForReceipt) {
+      try {
+        const forwarded_text = extractFlyparksReceiptFromForward(parsedForReceipt);
+        const guessed = guessFlyparksFields(forwarded_text);
+        const { error: parseRowErr } = await supabase.from("ingest_email_parses").upsert(
+          {
+            ingest_email_id: data.id,
+            parsed_subject: parsedForReceipt.subject,
+            parsed_text: parsedForReceipt.text,
+            forwarded_text,
+            booking_plate_guess: guessed.plate ?? null,
+            booking_reference_guess: guessed.reference ?? null,
+            parse_status: "parsed",
+            parse_error: null,
+            parsed_at: new Date().toISOString(),
+          },
+          { onConflict: "ingest_email_id" }
+        );
+        if (parseRowErr) {
+          console.error(`[ingest-email] ingest_email_parses upsert failed:`, parseRowErr.message);
+        } else {
+          console.log(`[ingest-email] Wrote ingest_email_parses for email ${data.id}`);
+        }
+      } catch (receiptErr: unknown) {
+        console.error(`[ingest-email] Forward receipt extract failed (non-fatal):`, receiptErr);
       }
     }
 
