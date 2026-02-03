@@ -61,6 +61,7 @@ export async function POST(req: Request) {
 
   const productName = `Parking (${reference ?? 'new'})`;
   const descName = customer_name ? `Customer: ${customer_name}` : undefined;
+  const ref = reference ?? 'new';
 
   const session = await stripe.checkout.sessions.create(
     {
@@ -73,11 +74,17 @@ export async function POST(req: Request) {
         },
         quantity: 1,
       }],
+      metadata: {
+        tenant_id: tenantId,
+        temp_booking_id: booking_id ?? '',
+        reference: ref,
+      },
       payment_intent_data: {
         application_fee_amount: Number(application_fee_cents) || 0,
         metadata: {
           tenant_id: tenantId,
-          booking_id: booking_id ?? '',
+          temp_booking_id: booking_id ?? '',
+          reference: ref,
         },
       },
       success_url: `${ROOT_URL}/admin/bookings?paid=1`,

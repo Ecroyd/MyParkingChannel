@@ -1,5 +1,6 @@
 // app/api/stripe/webhook/route.ts
 import { NextResponse } from 'next/server';
+import Stripe from 'stripe';
 import { stripe } from '@/lib/stripe';
 import { headers } from 'next/headers';
 import { createClient } from '@supabase/supabase-js';
@@ -58,59 +59,86 @@ export async function POST(req: Request) {
 }
 
 // Webhook handler functions
-async function handleCheckoutSessionCompleted(session: any) {
+async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) {
   try {
     const admin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // Get the payment intent to get the amount
-    const paymentIntent = await stripe.paymentIntents.retrieve(session.payment_intent);
-    
-    // Extract tenant ID from success URL
-    const successUrl = session.success_url;
-    const tenantMatch = successUrl.match(/tenant=([^&]+)/);
-    const referenceMatch = successUrl.match(/reference=([^&]+)/);
-    
-    if (!tenantMatch || !referenceMatch) {
-      console.error('Could not extract tenant ID or reference from success URL:', successUrl);
+    const tenantId = session.metadata?.tenant_id;
+    const tempId = session.metadata?.temp_booking_id;
+    const reference = session.metadata?.reference;
+
+    if (!tenantId || !reference) {
+      console.error('Checkout session missing metadata: tenant_id or reference', { tenantId, reference });
       return;
     }
-    
-    const tenantId = tenantMatch[1];
-    const bookingReference = referenceMatch[1];
 
-    // Get customer data from session
+    const paymentIntentId = typeof session.payment_intent === 'string'
+      ? session.payment_intent
+      : session.payment_intent?.id;
+    if (!paymentIntentId) {
+      console.error('Checkout session has no payment_intent');
+      return;
+    }
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    const piMetadata = paymentIntent.metadata || {};
+
+    // Extension payment: update booking_extensions, do not create a booking
+    if (piMetadata.kind === 'extension' && tempId) {
+      const { error: extError } = await admin
+        .from('booking_extensions')
+        .update({
+          stripe_payment_intent_id: paymentIntentId,
+          stripe_payment_status: 'succeeded',
+          charged_amount_cents: paymentIntent.amount,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('tenant_id', tenantId)
+        .eq('booking_id', tempId)
+        .eq('stripe_payment_status', 'pending');
+      if (extError) console.error('Failed to update booking_extensions:', extError);
+      return;
+    }
+
+    // Idempotency: if we already have a booking for this payment intent, skip (Stripe retries)
+    const { data: existingByPi } = await admin
+      .from('bookings')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('stripe_payment_intent_id', paymentIntentId)
+      .maybeSingle();
+
+    if (existingByPi) {
+      console.log('Booking already exists for this payment intent (idempotent), skipping', paymentIntentId);
+      return;
+    }
+
     const customerName = session.customer_details?.name || 'Customer';
     const customerEmail = session.customer_email || session.customer_details?.email || '';
     const customerPhone = session.customer_details?.phone || null;
-    
-    // Get metadata from payment intent (contains booking data)
-    const metadata = paymentIntent.metadata || {};
-    
-    // Try to get stored booking data from temp-store
-    let storedBookingData = null;
+
+    let storedBookingData: Record<string, unknown> | null = null;
     try {
-      const tempBookingResponse = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3002'}/api/bookings/temp-store?tenantId=${tenantId}&reference=${bookingReference}`);
+      const tempBookingResponse = await fetch(`${process.env.NEXT_PUBLIC_ROOT_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3002'}/api/bookings/temp-store?tenantId=${tenantId}&reference=${reference}`);
       if (tempBookingResponse.ok) {
         const tempData = await tempBookingResponse.json();
-        storedBookingData = tempData.data;
+        storedBookingData = tempData.data ?? null;
       }
     } catch (error) {
       console.error('Failed to retrieve stored booking data:', error);
     }
 
-    // Use stored data, then fallback to Stripe metadata, then session data
-    const plate = storedBookingData?.plate || metadata.plate || 'UNKNOWN';
-    const flightNumber = storedBookingData?.flightNumber || null;
-    const startAt = storedBookingData?.startAt || metadata.start_at || new Date().toISOString();
-    const endAt = storedBookingData?.endAt || metadata.end_at || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const finalCustomerName = storedBookingData?.customerName || metadata.customer_name || customerName;
-    const finalCustomerEmail = storedBookingData?.customerEmail || metadata.customer_email || customerEmail;
-    const finalCustomerPhone = storedBookingData?.customerPhone || metadata.customer_phone || customerPhone;
+    const plate = (storedBookingData?.plate as string) || piMetadata.plate || 'UNKNOWN';
+    const flightNumber = (storedBookingData?.flightNumber as string) || (piMetadata.flight_number as string) || null;
+    const startAt = (storedBookingData?.startAt as string) || (piMetadata.start_at as string) || new Date().toISOString();
+    const endAt = (storedBookingData?.endAt as string) || (piMetadata.end_at as string) || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const finalCustomerName = (storedBookingData?.customerName as string) || (piMetadata.customer_name as string) || customerName;
+    const finalCustomerEmail = (storedBookingData?.customerEmail as string) || (piMetadata.customer_email as string) || customerEmail;
+    const finalCustomerPhone = (storedBookingData?.customerPhone as string) || (piMetadata.customer_phone as string) || customerPhone;
 
-    // Create the booking with payment information
     const bookingData = {
       tenant_id: tenantId,
       customer_name: finalCustomerName,
@@ -122,23 +150,11 @@ async function handleCheckoutSessionCompleted(session: any) {
       end_at: endAt,
       status: 'reserved',
       source: 'direct',
-      money_received: paymentIntent.amount / 100, // Convert from cents
+      money_received: paymentIntent.amount / 100,
       money_charged: paymentIntent.amount / 100,
-      reference: bookingReference // Use the reference from the URL
+      reference: reference,
+      stripe_payment_intent_id: paymentIntentId,
     };
-
-    // Check if booking already exists before creating
-    const { data: existingBooking } = await admin
-      .from('bookings')
-      .select('id')
-      .eq('tenant_id', tenantId)
-      .eq('reference', bookingReference)
-      .single();
-
-    if (existingBooking) {
-      console.log('Booking already exists, skipping creation');
-      return;
-    }
 
     const { data: booking, error } = await admin
       .from('bookings')
@@ -196,7 +212,7 @@ async function handlePaymentIntentSucceeded(paymentIntent: any) {
   // This is handled by checkout.session.completed, but we can add additional logic here if needed
 }
 
-async function handlePaymentIntentFailed(paymentIntent: any) {
+async function handlePaymentIntentFailed(paymentIntent: Stripe.PaymentIntent) {
   try {
     const admin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -204,14 +220,14 @@ async function handlePaymentIntentFailed(paymentIntent: any) {
     );
 
     const tenantId = paymentIntent.metadata?.tenant_id;
-    const bookingReference = paymentIntent.metadata?.booking_reference;
-    
-    if (!tenantId || !bookingReference) {
+    const reference = paymentIntent.metadata?.reference ?? paymentIntent.metadata?.booking_reference;
+
+    if (!tenantId || !reference) {
       console.error('Missing metadata for failed payment');
       return;
     }
 
-    // Update booking status to cancelled due to payment failure
+    // Update booking status to cancelled due to payment failure (only if booking exists)
     const { error } = await admin
       .from('bookings')
       .update({
@@ -219,7 +235,7 @@ async function handlePaymentIntentFailed(paymentIntent: any) {
         updated_at: new Date().toISOString()
       })
       .eq('tenant_id', tenantId)
-      .eq('reference', bookingReference);
+      .eq('reference', reference);
 
     if (error) {
       console.error('Failed to update booking status for failed payment:', error);

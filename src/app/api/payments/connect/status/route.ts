@@ -143,6 +143,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       connected: isConnected,
       id: acc.id,
+      accountId: acc.id, // alias for UI compatibility
       charges_enabled: acc.charges_enabled,
       payouts_enabled: acc.payouts_enabled,
       details_submitted: acc.details_submitted,

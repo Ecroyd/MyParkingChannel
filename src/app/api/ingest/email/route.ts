@@ -11,6 +11,75 @@ import {
 
 export const runtime = "nodejs";
 
+function match1(text: string, re: RegExp) {
+  return text.match(re)?.[1]?.trim() ?? null;
+}
+
+function toUtcFromUkDateTime(d: string, t: string) {
+  // d: DD/MM/YYYY, t: HH:MM
+  const m = d.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return null;
+  const dd = m[1],
+    mm = m[2],
+    yyyy = m[3];
+  return new Date(`${yyyy}-${mm}-${dd}T${t}:00Z`).toISOString();
+}
+
+async function upsertBookingFromFlyparksParse(
+  supabaseAdmin: ReturnType<typeof getServiceSupabase>,
+  opts: {
+    tenantId: string;
+    reference: string;
+    plate: string | null;
+    forwardedText: string;
+  }
+) {
+  const text = opts.forwardedText;
+
+  const depDate = match1(text, /Departure date:\s*(\d{2}\/\d{2}\/\d{4})/i);
+  const arrTime = match1(text, /Arrival time:\s*(\d{2}:\d{2})/i);
+  const retDate = match1(text, /Return date:\s*(\d{2}\/\d{2}\/\d{4})/i);
+  const retTime = match1(text, /Return time:\s*(\d{2}:\d{2})/i);
+
+  if (!depDate || !arrTime || !retDate || !retTime) {
+    console.warn("[ingest-email] Flyparks parse missing dates/times");
+    return;
+  }
+
+  const startAt = toUtcFromUkDateTime(depDate, arrTime);
+  const endAt = toUtcFromUkDateTime(retDate, retTime);
+  if (!startAt || !endAt) return;
+
+  const email = match1(text, /\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})\b/i);
+  const phone = match1(text, /(\+?\d[\d\s]{8,})/);
+
+  const name =
+    match1(text, /Your details:\s*([\s\S]{0,60})\n/i)?.split("\n")[0]?.trim() ||
+    "Flyparks Customer";
+
+  const { error } = await supabaseAdmin
+    .from("bookings")
+    .upsert(
+      {
+        tenant_id: opts.tenantId,
+        reference: opts.reference,
+        plate: opts.plate,
+        customer_name: name,
+        customer_email: email,
+        customer_phone: phone,
+        start_at: startAt,
+        end_at: endAt,
+        source: "web",
+        status: "reserved",
+      },
+      { onConflict: "tenant_id,reference" }
+    );
+
+  if (error) {
+    console.error("[ingest-email] booking upsert failed", error);
+  }
+}
+
 // Map email addresses/domains to tenant IDs
 // Set via environment variable: EMAIL_TENANT_MAP='{"from@example.com":"tenant-uuid","domain.com":"tenant-uuid"}'
 // Or configure in code below
@@ -322,6 +391,21 @@ export async function POST(req: Request) {
       );
     }
 
+    // Lookup tenant_id from to_address (tenant_inbound_inboxes)
+    const toAddress = body.to ?? null;
+    let tenantIdFromInbox: string | null = null;
+    if (toAddress) {
+      const { data: inboxRow, error: inboxErr } = await supabase
+        .from("tenant_inbound_inboxes")
+        .select("tenant_id")
+        .eq("to_address", toAddress)
+        .maybeSingle();
+      if (inboxErr) {
+        console.error("[ingest-email] tenant inbox lookup failed", inboxErr);
+      }
+      tenantIdFromInbox = inboxRow?.tenant_id ?? null;
+    }
+
     // Ingest canary: if subject is [CANARY] with token=, mark run as received (proof of Email Routing + Worker + ingest)
     const subject = body.subject || "";
     if (subject.includes("[CANARY]") && subject.includes("token=")) {
@@ -374,6 +458,15 @@ export async function POST(req: Request) {
           console.error(`[ingest-email] ingest_email_parses upsert failed:`, parseRowErr.message);
         } else {
           console.log(`[ingest-email] Wrote ingest_email_parses for email ${data.id}`);
+        }
+
+        if (tenantIdFromInbox && guessed?.reference) {
+          await upsertBookingFromFlyparksParse(supabase, {
+            tenantId: tenantIdFromInbox,
+            reference: String(guessed.reference),
+            plate: guessed.plate ?? null,
+            forwardedText: forwarded_text ?? "",
+          });
         }
       } catch (receiptErr: unknown) {
         console.error(`[ingest-email] Forward receipt extract failed (non-fatal):`, receiptErr);

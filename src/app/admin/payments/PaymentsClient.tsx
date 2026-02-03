@@ -152,7 +152,7 @@ export default function PaymentsClient({}: PaymentsClientProps) {
             </span>
           </div>
           <div className="space-y-1 text-sm text-gray-600">
-            <div>Account ID: <b>{status.accountId}</b></div>
+            <div>Account ID: <b>{status.accountId ?? status.id}</b></div>
             <div>Charges enabled: <b>{String(status.charges_enabled)}</b></div>
             <div>Payouts enabled: <b>{String(status.payouts_enabled)}</b></div>
             <div>Details submitted: <b>{String(status.details_submitted)}</b></div>

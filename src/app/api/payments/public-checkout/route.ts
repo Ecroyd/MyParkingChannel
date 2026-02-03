@@ -113,6 +113,7 @@ export async function POST(req: Request) {
     };
 
     const bookingReference = reference || generateReference();
+    const tempBookingId = `${tenant_id}_${bookingReference}`;
     const productName = `Parking (${bookingReference})`;
     const descName = customer_name ? `Customer: ${customer_name}` : undefined;
 
@@ -150,11 +151,17 @@ export async function POST(req: Request) {
           },
           quantity: 1,
         }],
+        metadata: {
+          tenant_id: tenant_id,
+          temp_booking_id: tempBookingId,
+          reference: bookingReference,
+        },
         payment_intent_data: {
           application_fee_amount: Number(application_fee_cents) || 0,
           metadata: {
             tenant_id: tenant_id,
-            booking_reference: reference ?? '',
+            temp_booking_id: tempBookingId,
+            reference: bookingReference,
             customer_name: customer_name || '',
             customer_email: customer_email || '',
             customer_phone: customer_phone || '',

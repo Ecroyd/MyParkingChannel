@@ -51,9 +51,19 @@ export async function POST(req: Request) {
         },
         quantity: 1,
       }],
+      metadata: {
+        tenant_id: tenantId,
+        temp_booking_id: booking_id,
+        reference: b.reference,
+      },
       payment_intent_data: {
         application_fee_amount: Number(application_fee_cents) || 0,
-        metadata: { tenant_id: tenantId, booking_id: booking_id, kind: 'extension' },
+        metadata: {
+          tenant_id: tenantId,
+          temp_booking_id: booking_id,
+          reference: b.reference,
+          kind: 'extension',
+        },
       },
       success_url: `${ROOT_URL}/admin/bookings/${booking_id}?extended=1`,
       cancel_url: `${ROOT_URL}/admin/bookings/${booking_id}?cancelled=1`,
