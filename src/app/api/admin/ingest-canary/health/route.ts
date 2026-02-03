@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Health for ingest canary (Cloudflare Email Routing + Worker + /api/ingest/email).
- * Reads from view ingest_canary_health: DOWN when received_at missing or > 20 min; Last OK = last_received_at.
+ * Reads from view ingest_canary_health (thresholds defined in DB view only).
  * Auth: same as other admin health (tenant admin/owner session).
  */
 export async function GET(req: NextRequest) {
@@ -16,35 +16,42 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const supabase = createAdminClient();
-    const { data, error } = await supabase
+    const supabaseAdmin = createAdminClient();
+    const { data, error } = await supabaseAdmin
       .from('ingest_canary_health')
       .select('*')
       .single();
 
-    if (error || !data) {
+    if (error) throw error;
+    if (!data) {
       return NextResponse.json({
         status: 'unknown',
-        lastSentAt: null,
-        lastReceivedAt: null,
+        lastOk: null,
+        ingestDown: true,
         lastError: null,
         token: null,
+        processingDown: true,
+        lastProcessedOk: null,
       });
     }
 
-    const ingestDown = data.ingest_down === true;
-    const processingDown = (data as { processing_down?: boolean }).processing_down === true;
+    const ingestDown = data.ingest_down;
+    const lastOk = data.last_received_at;
+
+    const processingDown = data.processing_down;
+    const lastProcessedOk = data.last_processed_at;
+
     const hasAnyRun = data.has_any_run === true;
     const status: 'ok' | 'down' | 'unknown' = !hasAnyRun ? 'unknown' : ingestDown ? 'down' : 'ok';
 
     return NextResponse.json({
       status,
-      lastSentAt: null,
-      lastReceivedAt: data.last_received_at ?? null,
+      lastOk: lastOk ?? null,
+      ingestDown: ingestDown === true,
       lastError: data.last_error ?? null,
       token: data.token ?? null,
-      processingDown: processingDown ?? false,
-      lastProcessedAt: (data as { last_processed_at?: string | null }).last_processed_at ?? null,
+      processingDown: processingDown === true,
+      lastProcessedOk: lastProcessedOk ?? null,
     });
   } catch (err: any) {
     console.error('[INGEST CANARY HEALTH] error', err);

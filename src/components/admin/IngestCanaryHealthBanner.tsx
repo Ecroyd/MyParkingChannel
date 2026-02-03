@@ -7,11 +7,12 @@ import { Button } from '@/components/ui/button';
 interface IngestCanaryHealthResponse {
   ok?: boolean;
   status: 'ok' | 'down' | 'unknown';
-  lastSentAt: string | null;
-  lastReceivedAt: string | null;
+  lastOk: string | null;
+  ingestDown: boolean;
   lastError: string | null;
-  processingDown?: boolean;
-  lastProcessedAt?: string | null;
+  token: string | null;
+  processingDown: boolean;
+  lastProcessedOk: string | null;
 }
 
 interface IngestCanaryHealthBannerProps {
@@ -86,13 +87,13 @@ export function IngestCanaryHealthBanner({ isPlatformAdmin = false }: IngestCana
   // status === 'down': red banner(s)
   if (!isVisible) return null;
 
-  const lastOk = formatDate(data.lastReceivedAt) || 'never';
-  const lastProcessedOk = formatDate(data.lastProcessedAt ?? null) || 'never';
+  const lastOkDisplay = data.lastOk ? formatDate(data.lastOk) || 'never' : 'never';
+  const lastProcessedOkDisplay = data.lastProcessedOk ? formatDate(data.lastProcessedOk) || 'never' : 'never';
 
   return (
     <div className="space-y-3 mb-4">
-      {/* Ingest DOWN = received_at missing or too old (Cloudflare) */}
-      {data.status === 'down' && (
+      {/* Ingest DOWN = from view ingest_down (Cloudflare) */}
+      {data.ingestDown && (
       <div className="bg-red-50 border-l-4 border-red-500 rounded-lg p-4 shadow-lg">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-3 flex-1">
@@ -102,7 +103,7 @@ export function IngestCanaryHealthBanner({ isPlatformAdmin = false }: IngestCana
                 Booking email ingest appears DOWN (Cloudflare)
               </h3>
               <p className="text-sm text-red-800 mt-1">
-                Forwarded booking emails may not be processed. Last OK: {lastOk}.
+                Forwarded booking emails may not be processed. Last OK: {lastOkDisplay}.
                 {data.lastError && (
                   <span className="block mt-1 text-red-700 text-xs">{data.lastError}</span>
                 )}
@@ -132,7 +133,7 @@ export function IngestCanaryHealthBanner({ isPlatformAdmin = false }: IngestCana
                   Booking email processing appears DOWN (Parser/DB)
                 </h3>
                 <p className="text-sm text-amber-800 mt-1">
-                  Emails are received but parsing/DB may be failing. Last processed OK: {lastProcessedOk}.
+                  Emails are received but parsing/DB may be failing. Last processed OK: {lastProcessedOkDisplay}.
                 </p>
               </div>
             </div>
