@@ -87,7 +87,7 @@ export function IngestCanaryHealthBanner({ isPlatformAdmin = false }: IngestCana
   if (!isVisible) return null;
 
   const lastOk = formatDate(data.lastReceivedAt) || 'never';
-  const lastProcessedOk = formatDate(data.lastProcessedAt) || 'never';
+  const lastProcessedOk = formatDate(data.lastProcessedAt ?? null) || 'never';
 
   return (
     <div className="space-y-3 mb-4">
