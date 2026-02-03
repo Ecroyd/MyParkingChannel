@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { simpleParser } from "mailparser";
 import { detectAndMapFromAttachment, mapFlyparksEmailText } from "@/lib/importers/canonical/mappers";
+import { getParsableBodyForDirectBooking } from "@/lib/email/forwarded";
 import type { CanonicalBooking } from "@/lib/importers/canonical/types";
 import { isImageFile } from "@/lib/ingest/fileTypeUtils";
 
@@ -137,9 +138,22 @@ export async function POST(req: NextRequest) {
   }
 
   // 4) If no attachments mapped, try mapping from email text itself (Flyparks style)
-  const bodyText = parsed.text || "";
-  if (mapped.length === 0 && (bodyText.includes("Booking Confirmation") || bodyText.includes("Departure date:"))) {
-    mapped.push(...mapFlyparksEmailText(bodyText));
+  const parsableBodyText = getParsableBodyForDirectBooking({
+    subject: parsed.subject ?? undefined,
+    text: parsed.text ?? "",
+    html: parsed.html ?? undefined,
+  });
+  const looksLikeOnlySignatureOrQr =
+    !parsableBodyText ||
+    parsableBodyText.length < 80 ||
+    (/qr code/i.test(parsableBodyText) &&
+      !/booking|vehicle|registration|arrival|departure|date|time/i.test(parsableBodyText));
+  if (
+    mapped.length === 0 &&
+    !looksLikeOnlySignatureOrQr &&
+    (parsableBodyText.includes("Booking Confirmation") || parsableBodyText.includes("Departure date"))
+  ) {
+    mapped.push(...mapFlyparksEmailText(parsableBodyText));
   }
 
   // 5) Insert mapped rows into staging

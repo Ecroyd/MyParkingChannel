@@ -3,6 +3,7 @@ import { getServiceSupabase } from "@/lib/supabase/service";
 // @ts-ignore - mailparser types may not be fully compatible
 import { simpleParser } from "mailparser";
 import { isImageFile } from "@/lib/ingest/fileTypeUtils";
+import { getParsableBodyForDirectBooking } from "@/lib/email/forwarded";
 
 export const runtime = "nodejs";
 
@@ -203,6 +204,7 @@ export async function POST(req: Request) {
     // Parse attachments from raw email if not provided by Worker
     let extractedAttachments: Attachment[] = [];
     let emailBodyText: string | null = null;
+    let parsedHtml: string | null = null;
     if (!body.attachments || body.attachments.length === 0) {
       // Worker didn't extract attachments, parse them server-side
       try {
@@ -216,6 +218,7 @@ export async function POST(req: Request) {
         if (!emailBodyText && parsed.html) {
           emailBodyText = parsed.html;
         }
+        parsedHtml = parsed.html ?? null;
         
         if (parsed.attachments && parsed.attachments.length > 0) {
           console.log(`[ingest-email] Extracting ${parsed.attachments.length} attachments from raw email`);
@@ -239,6 +242,16 @@ export async function POST(req: Request) {
         // Continue without attachments
       }
     }
+
+    // Forward-aware body: for FW:/Fwd: Flyparks Payment Successful, use only forwarded region and strip signatures
+    const parsableBodyText =
+      emailBodyText != null
+        ? getParsableBodyForDirectBooking({
+            subject: body.subject,
+            text: emailBodyText,
+            html: parsedHtml,
+          })
+        : null;
 
     // Use Worker-provided attachments or server-extracted ones
     const allAttachments = body.attachments && body.attachments.length > 0 
@@ -316,6 +329,9 @@ export async function POST(req: Request) {
               received_at: new Date().toISOString(),
               status: "received",
               last_error: null,
+              processed_at: new Date().toISOString(),
+              processed_status: "ok",
+              processed_error: null,
             })
             .eq("token", token);
           if (canaryError) {
@@ -414,20 +430,30 @@ export async function POST(req: Request) {
     }
 
     // If no attachments, check email body text for Flyparks bookings
-    if (fileIds.length === 0 && emailBodyText && data) {
-      const { mapFlyparksEmailText } = await import("@/lib/importers/canonical/mappers");
-      
-      // Check if email body looks like a Flyparks booking confirmation
-      if (emailBodyText.includes("Departure date") || 
-          emailBodyText.includes("Booking Confirmation") ||
-          emailBodyText.includes("Reference:") && emailBodyText.includes("Vehicle registration")) {
-        console.log(`[ingest-email] Detected Flyparks booking in email body, creating virtual file`);
+    if (fileIds.length === 0 && parsableBodyText && data) {
+      // Guard: don't create a booking from signature/QR-only content
+      const looksLikeOnlySignatureOrQr =
+        !parsableBodyText ||
+        parsableBodyText.length < 80 ||
+        (/qr code/i.test(parsableBodyText) &&
+          !/booking|vehicle|registration|arrival|departure|date|time/i.test(parsableBodyText));
+
+      if (!looksLikeOnlySignatureOrQr) {
+        const { mapFlyparksEmailText } = await import("@/lib/importers/canonical/mappers");
         
-        try {
-          // Create a "virtual file" entry for the email body text
-          const timestamp = Date.now();
-          const storagePath = `${data.id}/${timestamp}-email-body.txt`;
-          const bodyBuffer = Buffer.from(emailBodyText, "utf-8");
+        // Check if email body looks like a Flyparks booking confirmation
+        if (
+          parsableBodyText.includes("Departure date") ||
+          parsableBodyText.includes("Booking Confirmation") ||
+          (parsableBodyText.includes("Reference:") && parsableBodyText.includes("Vehicle registration"))
+        ) {
+          console.log(`[ingest-email] Detected Flyparks booking in email body, creating virtual file`);
+          
+          try {
+            // Create a "virtual file" entry for the email body text (parsable = forward-stripped)
+            const timestamp = Date.now();
+            const storagePath = `${data.id}/${timestamp}-email-body.txt`;
+            const bodyBuffer = Buffer.from(parsableBodyText, "utf-8");
           
           // Store file metadata (email body is booking-capable)
           const { data: fileData, error: fileError } = await supabase
@@ -462,9 +488,12 @@ export async function POST(req: Request) {
               console.log(`[ingest-email] Stored email body as virtual file for Flyparks parsing`);
             }
           }
-        } catch (bodyErr: any) {
-          console.error(`[ingest-email] Error processing email body:`, bodyErr);
+          } catch (bodyErr: any) {
+            console.error(`[ingest-email] Error processing email body:`, bodyErr);
+          }
         }
+      } else {
+        console.log(`[ingest-email] Skipping email body: signature_or_qr_noise (not creating virtual file)`);
       }
     }
 

@@ -4,13 +4,10 @@ import { createAdminClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
-const OK_RECEIVED_WITHIN_HOURS = 2;
-const SENT_DOWN_AFTER_MINUTES = 15;
-
 /**
  * Health for ingest canary (Cloudflare Email Routing + Worker + /api/ingest/email).
+ * Reads from view ingest_canary_health: DOWN when received_at missing or > 20 min; Last OK = last_received_at.
  * Auth: same as other admin health (tenant admin/owner session).
- * Uses service role to read ingest_canary_runs (no RLS policy for tenant admins).
  */
 export async function GET(req: NextRequest) {
   try {
@@ -20,14 +17,12 @@ export async function GET(req: NextRequest) {
     }
 
     const supabase = createAdminClient();
-    const { data: latest } = await supabase
-      .from('ingest_canary_runs')
-      .select('token, status, sent_at, received_at, last_error')
-      .order('sent_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data, error } = await supabase
+      .from('ingest_canary_health')
+      .select('*')
+      .single();
 
-    if (!latest) {
+    if (error || !data) {
       return NextResponse.json({
         status: 'unknown',
         lastSentAt: null,
@@ -37,30 +32,19 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const now = Date.now();
-    const twoHoursAgo = now - OK_RECEIVED_WITHIN_HOURS * 60 * 60 * 1000;
-    const fifteenMinutesAgo = now - SENT_DOWN_AFTER_MINUTES * 60 * 1000;
-    const lastReceivedAt = latest.received_at ? new Date(latest.received_at).getTime() : null;
-    const receivedWithinTwoHours = lastReceivedAt !== null && lastReceivedAt >= twoHoursAgo;
-    const sentAt = latest.sent_at ? new Date(latest.sent_at).getTime() : 0;
-    const sentOlderThan15Min = sentAt < fifteenMinutesAgo;
-
-    let status: 'ok' | 'down' | 'unknown' = 'unknown';
-    if (latest.status === 'received' && receivedWithinTwoHours) {
-      status = 'ok';
-    } else if (latest.status === 'down' || (latest.status === 'sent' && sentOlderThan15Min)) {
-      status = 'down';
-    } else {
-      // status === 'sent' and sent within 15 min: still waiting → down (not yet confirmed)
-      status = 'down';
-    }
+    const ingestDown = data.ingest_down === true;
+    const processingDown = (data as { processing_down?: boolean }).processing_down === true;
+    const hasAnyRun = data.has_any_run === true;
+    const status: 'ok' | 'down' | 'unknown' = !hasAnyRun ? 'unknown' : ingestDown ? 'down' : 'ok';
 
     return NextResponse.json({
       status,
-      lastSentAt: latest.sent_at,
-      lastReceivedAt: latest.received_at,
-      lastError: latest.last_error,
-      token: latest.token,
+      lastSentAt: null,
+      lastReceivedAt: data.last_received_at ?? null,
+      lastError: data.last_error ?? null,
+      token: data.token ?? null,
+      processingDown: processingDown ?? false,
+      lastProcessedAt: (data as { last_processed_at?: string | null }).last_processed_at ?? null,
     });
   } catch (err: any) {
     console.error('[INGEST CANARY HEALTH] error', err);
