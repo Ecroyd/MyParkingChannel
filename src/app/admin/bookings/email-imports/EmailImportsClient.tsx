@@ -35,8 +35,18 @@ interface ParseHealthStatus {
   };
 }
 
+interface RecentImport {
+  email_id: string;
+  from_address: string | null;
+  subject: string | null;
+  received_at: string;
+  success: boolean;
+  pipeline_status: string;
+}
+
 export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
   const [status, setStatus] = useState<ParseHealthStatus | null>(null);
+  const [recentImports, setRecentImports] = useState<RecentImport[]>([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState<Set<string>>(new Set());
 
@@ -65,10 +75,25 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
     }
   };
 
+  const fetchRecentImports = async () => {
+    try {
+      const res = await fetch('/api/admin/ingest/recent');
+      const data = await res.json();
+      if (res.ok && data.ok && Array.isArray(data.emails)) {
+        setRecentImports(data.emails);
+      }
+    } catch (err) {
+      console.error('[EMAIL IMPORTS] Failed to fetch recent imports:', err);
+    }
+  };
+
   useEffect(() => {
     fetchStatus();
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchStatus, 30000);
+    fetchRecentImports();
+    const interval = setInterval(() => {
+      fetchStatus();
+      fetchRecentImports();
+    }, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -100,6 +125,7 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
         
         console.log('[EMAIL IMPORTS] Refreshing status...');
         await fetchStatus();
+        await fetchRecentImports();
         console.log('[EMAIL IMPORTS] Status refreshed');
       } else {
         console.error('[EMAIL IMPORTS] Retry failed:', result);
@@ -133,7 +159,8 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
       const result = await res.json();
       if (res.ok) {
         alert('✅ File deleted successfully');
-        await fetchStatus(); // Refresh
+        await fetchStatus();
+        await fetchRecentImports();
       } else {
         alert(`❌ Delete failed: ${result.error || 'Unknown error'}`);
       }
@@ -204,11 +231,56 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
             Manage failed, stuck, or empty email imports
           </p>
         </div>
-        <Button onClick={fetchStatus} variant="outline" disabled={loading}>
+        <Button
+          onClick={() => {
+            fetchStatus();
+            fetchRecentImports();
+          }}
+          variant="outline"
+          disabled={loading}
+        >
           <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
       </div>
+
+      {/* Last 10 emails imported — tick when successful */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Recent imports</CardTitle>
+          <CardDescription>
+            Last 10 emails that were imported. A tick indicates the import was successful.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {recentImports.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No recent imports yet.</p>
+          ) : (
+            <ul className="space-y-2">
+              {recentImports.map((item) => (
+                <li
+                  key={item.email_id}
+                  className="flex items-center gap-3 py-2 border-b border-border/50 last:border-0"
+                >
+                  {item.success ? (
+                    <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" aria-label="Success" />
+                  ) : (
+                    <span className="w-5 h-5 flex-shrink-0" aria-hidden />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate">
+                      {item.subject || '(no subject)'}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      From: {item.from_address || '—'} · {formatDate(item.received_at)}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -305,6 +377,7 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
                     
                     alert(`✅ Deleted ${deleted} file(s)\n${failed > 0 ? `❌ Failed to delete ${failed} file(s)` : ''}`);
                     await fetchStatus();
+                    await fetchRecentImports();
                   }}
                   disabled={processing.size > 0}
                 >
