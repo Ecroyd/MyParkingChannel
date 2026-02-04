@@ -1,14 +1,13 @@
 'use client';
 
-import { ReactNode } from 'react';
+import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { Menu, X } from 'lucide-react';
 import { DynamicPricingBadge } from './admin/DynamicPricingBadge';
 import { CavuSyncHealthBanner } from './admin/CavuSyncHealthBanner';
 import { EmailParseFailureBanner } from './admin/EmailParseFailureBanner';
-import { IngestCanaryHealthBanner } from './admin/IngestCanaryHealthBanner';
+import { IngestCanaryHealthBanner, type IngestCanaryHealthResult } from './admin/IngestCanaryHealthBanner';
 import Sidebar from '@/components/admin/Sidebar';
 import MobileSidebar from '@/components/admin/MobileSidebar';
 import InstallPWAButton from '@/components/InstallPWAButton';
@@ -20,23 +19,106 @@ const supabase = createBrowserClient(
 
 import type { UserRole } from '@/lib/auth/permissions';
 
+const FRESH_MS = 60_000;   // initialData considered fresh for 60s (skip mount fetch)
+const STALE_MS = 120_000;  // on visibility change, only refetch if data older than 120s
+
+export interface InitialHealthData {
+  canary: unknown;
+  emailParse: unknown;
+  cavu: unknown;
+  updatedAt: string;
+}
+
 interface AdminShellClientProps {
   children: ReactNode;
   user: any;
   tenant: any;
   isPlatformAdmin: boolean;
   userRole: UserRole;
+  initialHealthData?: InitialHealthData | null;
 }
 
-export default function AdminShellClient({ 
-  children, 
-  user, 
-  tenant, 
+export default function AdminShellClient({
+  children,
+  user,
+  tenant,
   isPlatformAdmin,
-  userRole
+  userRole,
+  initialHealthData = null,
 }: AdminShellClientProps) {
   const router = useRouter();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [healthSnapshot, setHealthSnapshot] = useState<{ canary: unknown; emailParse: unknown; cavu: unknown } | null>(() => {
+    if (!initialHealthData?.updatedAt) return null;
+    const age = Date.now() - new Date(initialHealthData.updatedAt).getTime();
+    if (age < FRESH_MS) {
+      return { canary: initialHealthData.canary, emailParse: initialHealthData.emailParse, cavu: initialHealthData.cavu };
+    }
+    return null;
+  });
+  const [healthLoading, setHealthLoading] = useState(() => {
+    if (initialHealthData?.updatedAt) {
+      const age = Date.now() - new Date(initialHealthData.updatedAt).getTime();
+      if (age < FRESH_MS) return false;
+    }
+    return true;
+  });
+  const lastFetchedAtRef = useRef<string | null>(initialHealthData?.updatedAt ?? null);
+
+  const fetchHealthSnapshot = useCallback(async () => {
+    const res = await fetch('/api/admin/health-snapshot');
+    if (!res.ok) throw new Error('Health snapshot failed');
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || 'Health snapshot failed');
+    return json;
+  }, []);
+
+  const refetchHealth = useCallback(async () => {
+    setHealthLoading(true);
+    try {
+      const data = await fetchHealthSnapshot();
+      setHealthSnapshot({ canary: data.canary, emailParse: data.emailParse, cavu: data.cavu });
+      lastFetchedAtRef.current = new Date().toISOString();
+    } catch (err) {
+      console.error('[HEALTH] refetch failed', err);
+    } finally {
+      setHealthLoading(false);
+    }
+  }, [fetchHealthSnapshot]);
+
+  // Mount: only fetch if no fresh initialData (skip when we already have snapshot and not loading)
+  useEffect(() => {
+    if (healthSnapshot !== null && !healthLoading) return; // already have fresh initial
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchHealthSnapshot();
+        if (!cancelled) {
+          setHealthSnapshot({ canary: data.canary, emailParse: data.emailParse, cavu: data.cavu });
+          lastFetchedAtRef.current = new Date().toISOString();
+        }
+      } catch (err) {
+        if (!cancelled) console.error('[HEALTH] mount fetch failed', err);
+      } finally {
+        if (!cancelled) setHealthLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- run once on mount
+
+  // Visibility: only refetch if data is stale (older than STALE_MS)
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (typeof document === 'undefined' || document.visibilityState !== 'visible') return;
+      const last = lastFetchedAtRef.current;
+      if (!last) return;
+      const age = Date.now() - new Date(last).getTime();
+      if (age < STALE_MS) return;
+      refetchHealth();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [refetchHealth]);
 
   // Listen for storage events to refresh logo when updated
   useEffect(() => {
@@ -108,9 +190,22 @@ export default function AdminShellClient({
 
         <main className="flex-1 min-h-0 min-h-[50vh] overflow-y-auto overflow-x-hidden p-4 md:p-6 bg-[#f9fafb]">
           <div className="space-y-4">
-            <IngestCanaryHealthBanner isPlatformAdmin={isPlatformAdmin} />
-            <EmailParseFailureBanner />
-            <CavuSyncHealthBanner />
+            <IngestCanaryHealthBanner
+              isPlatformAdmin={isPlatformAdmin}
+              canary={(healthSnapshot?.canary ?? null) as IngestCanaryHealthResult | null}
+              isLoading={healthLoading}
+              onRefetch={refetchHealth}
+            />
+            <EmailParseFailureBanner
+              emailParse={(healthSnapshot?.emailParse ?? null) as Parameters<typeof EmailParseFailureBanner>[0]['emailParse']}
+              isLoading={healthLoading}
+              onRefetch={refetchHealth}
+            />
+            <CavuSyncHealthBanner
+              cavu={(healthSnapshot?.cavu ?? null) as Parameters<typeof CavuSyncHealthBanner>[0]['cavu']}
+              isLoading={healthLoading}
+              onRefetch={refetchHealth}
+            />
           </div>
           <div className="pt-4 min-h-0">
             {children}

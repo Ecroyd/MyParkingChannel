@@ -1,7 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import { AlertCircle, XCircle, RefreshCw, FileX, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -34,34 +33,14 @@ interface ParseHealthStatus {
   };
 }
 
-export function EmailParseFailureBanner() {
-  const router = useRouter();
-  const [status, setStatus] = useState<ParseHealthStatus | null>(null);
-  const [loading, setLoading] = useState(true);
+interface EmailParseFailureBannerProps {
+  emailParse: ParseHealthStatus | null;
+  isLoading: boolean;
+  onRefetch: () => Promise<void>;
+}
+
+export function EmailParseFailureBanner({ emailParse, isLoading, onRefetch }: EmailParseFailureBannerProps) {
   const [isVisible, setIsVisible] = useState(true);
-
-  const fetchStatus = async () => {
-    try {
-      const res = await fetch('/api/admin/email-parse/health');
-      const data = await res.json();
-      if (data.ok) {
-        setStatus(data);
-        // Always show banner if there are issues
-        setIsVisible(data.hasIssues);
-      }
-    } catch (err) {
-      console.error('[EMAIL PARSE HEALTH] Failed to fetch', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchStatus();
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchStatus, 30000);
-    return () => clearInterval(interval);
-  }, []);
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'Never';
@@ -75,17 +54,11 @@ export function EmailParseFailureBanner() {
     });
   };
 
-  if (loading) {
-    return null; // Don't show anything while loading
-  }
+  if (isLoading) return null;
+  if (!emailParse || !emailParse.hasIssues || !isVisible) return null;
 
-  if (!status || !status.hasIssues || !isVisible) {
-    return null; // No issues, don't show banner
-  }
-
+  const status = emailParse;
   const totalIssues = status.summary.failedCount + status.summary.stuckPendingCount + status.summary.emptyParsedCount;
-
-  // Show most recent failures
   const recentFailures = status.failedFiles.slice(0, 3);
   const recentStuck = status.pendingFiles.slice(0, 2);
   const recentEmpty = status.emptyParsedFiles.slice(0, 2);
@@ -97,9 +70,7 @@ export function EmailParseFailureBanner() {
           <XCircle className="h-6 w-6 text-red-600 mt-0.5 flex-shrink-0" />
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-2">
-              <h3 className="font-semibold text-red-900">
-                ⚠️ Email Parsing Issues Detected
-              </h3>
+              <h3 className="font-semibold text-red-900">⚠️ Email Parsing Issues Detected</h3>
               <span className="text-sm text-red-700 bg-red-100 px-2 py-0.5 rounded">
                 {totalIssues} issue{totalIssues !== 1 ? 's' : ''}
               </span>
@@ -122,15 +93,11 @@ export function EmailParseFailureBanner() {
                             {file.parse_error.length > 80 ? '...' : ''}
                           </span>
                         )}
-                        <span className="text-red-500 ml-2">
-                          ({formatDate(file.created_at)})
-                        </span>
+                        <span className="text-red-500 ml-2">({formatDate(file.created_at)})</span>
                       </li>
                     ))}
                     {status.summary.failedCount > 3 && (
-                      <li className="text-xs text-red-600 italic">
-                        ... and {status.summary.failedCount - 3} more
-                      </li>
+                      <li className="text-xs text-red-600 italic">... and {status.summary.failedCount - 3} more</li>
                     )}
                   </ul>
                 </div>
@@ -146,9 +113,7 @@ export function EmailParseFailureBanner() {
                     {recentStuck.map((file) => (
                       <li key={file.id} className="text-xs">
                         <span className="font-medium">{file.filename}</span>
-                        <span className="text-red-500 ml-2">
-                          (waiting since {formatDate(file.created_at)})
-                        </span>
+                        <span className="text-red-500 ml-2">(waiting since {formatDate(file.created_at)})</span>
                       </li>
                     ))}
                   </ul>
@@ -176,10 +141,7 @@ export function EmailParseFailureBanner() {
             </div>
 
             <div className="mt-3 flex items-center gap-3">
-              <Link
-                href="/admin/bookings/email-imports"
-                className="text-sm font-medium text-red-700 underline hover:text-red-900"
-              >
+              <Link href="/admin/bookings/email-imports" className="text-sm font-medium text-red-700 underline hover:text-red-900">
                 View & Manage Issues →
               </Link>
               <Button
@@ -187,7 +149,6 @@ export function EmailParseFailureBanner() {
                 size="sm"
                 onClick={() => {
                   setIsVisible(false);
-                  // Auto-show again after 5 minutes
                   setTimeout(() => setIsVisible(true), 5 * 60 * 1000);
                 }}
                 className="text-xs"
@@ -198,20 +159,10 @@ export function EmailParseFailureBanner() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={fetchStatus}
-            className="text-red-700 hover:text-red-900"
-          >
+          <Button variant="ghost" size="sm" onClick={() => onRefetch()} className="text-red-700 hover:text-red-900" aria-label="Refresh">
             <RefreshCw className="h-4 w-4" />
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setIsVisible(false)}
-            className="text-red-700 hover:text-red-900"
-          >
+          <Button variant="ghost" size="sm" onClick={() => setIsVisible(false)} className="text-red-700 hover:text-red-900">
             ×
           </Button>
         </div>

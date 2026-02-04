@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { createAdminClient } from "@/lib/supabase/server-admin";
 
 const EventSchema = z
   .object({
@@ -36,6 +31,17 @@ function pickEventAt(e: any) {
 }
 
 export async function POST(req: NextRequest) {
+  let supabase;
+  try {
+    supabase = createAdminClient();
+  } catch (e) {
+    console.error("[ANPR EVENTS] Supabase not configured:", e);
+    return NextResponse.json(
+      { error: "Supabase not configured" },
+      { status: 500 }
+    );
+  }
+
   const text = await req.text();
 
   let json: unknown;

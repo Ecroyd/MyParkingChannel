@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
+import { getCurrentTenantContext } from '@/lib/auth/current-tenant-context';
 import { syncCavuEventsForTenant } from '@/lib/suppliers/cavuEventsSync';
 import { createSyncAlert, getAlertRoutes } from '@/lib/suppliers/alerting';
 import { deliverAlert } from '@/lib/suppliers/alertDelivery';
+import { logRequestAttribution, validateJobSecret } from '@/lib/jobSecret';
+import { getCavuSyncHealth } from '@/lib/health/cavu';
+import { writeHealthStatus } from '@/lib/health/writeHealthStatus';
 
 /**
  * Calculate hours to sync based on last_synced_at.
@@ -425,6 +429,17 @@ async function runCavuCron(req?: NextRequest) {
     }
   }
 
+  // Write cavu health per tenant to system_health_status so UI can read from Supabase (revalidate: 60)
+  const tenantIds = (configs ?? []).map((c: { tenant_id: string }) => c.tenant_id);
+  for (const tenantId of tenantIds) {
+    try {
+      const cavuHealth = await getCavuSyncHealth(tenantId);
+      await writeHealthStatus(tenantId, 'cavu', cavuHealth as unknown as Record<string, unknown>);
+    } catch (e) {
+      console.warn('[CAVU CRON] Failed to write health status for tenant', tenantId, e);
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     tenantsProcessed: configs?.length ?? 0,
@@ -436,9 +451,20 @@ async function runCavuCron(req?: NextRequest) {
 
 // Allow both GET and POST so it's easy to test + works with QStash
 export async function GET(req: NextRequest) {
+  logRequestAttribution(req, '/api/internal/suppliers/cavu/cron');
+  if (!validateJobSecret(req)) {
+    return new NextResponse('Forbidden', { status: 403 });
+  }
   return runCavuCron(req);
 }
 
 export async function POST(req: NextRequest) {
+  logRequestAttribution(req, '/api/internal/suppliers/cavu/cron');
+  const hasSecret = validateJobSecret(req);
+  const ctx = await getCurrentTenantContext();
+  const hasAdminSession = ctx && (ctx.role === 'admin' || ctx.role === 'owner');
+  if (!hasSecret && !hasAdminSession) {
+    return new NextResponse('Forbidden', { status: 403 });
+  }
   return runCavuCron(req);
 }

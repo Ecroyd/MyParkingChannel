@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback } from 'react';
 import { RefreshCw, CheckCircle2, XCircle, Clock, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useVisibilityRefetch } from '@/hooks/useVisibilityRefetch';
 
 interface SyncStatusProps {
   tenantId: string;
@@ -28,37 +29,15 @@ interface SyncStatusData {
   lastSyncedAt: string | null;
 }
 
-export function CavuSyncStatus({ tenantId }: SyncStatusProps) {
-  const [status, setStatus] = useState<SyncStatusData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const fetchStatus = async () => {
-    try {
-      const res = await fetch('/api/admin/cavu/sync-status');
-      const data = await res.json();
-      if (data.ok) {
-        setStatus(data);
-      }
-    } catch (err) {
-      console.error('[CAVU SYNC STATUS] Failed to fetch', err);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchStatus();
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchStatus, 30000);
-    return () => clearInterval(interval);
+export function CavuSyncStatus({ tenantId: _tenantId }: SyncStatusProps) {
+  const fetchStatus = useCallback(async (): Promise<SyncStatusData | null> => {
+    const res = await fetch('/api/admin/cavu/sync-status');
+    const data = await res.json();
+    if (data.ok) return data;
+    return null;
   }, []);
 
-  const handleRefresh = () => {
-    setRefreshing(true);
-    fetchStatus();
-  };
+  const { data: status, isLoading: loading, refetch } = useVisibilityRefetch(fetchStatus);
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'Never';
@@ -109,11 +88,11 @@ export function CavuSyncStatus({ tenantId }: SyncStatusProps) {
         <Button
           variant="outline"
           size="sm"
-          onClick={handleRefresh}
-          disabled={refreshing}
+          onClick={() => refetch()}
           className="inline-flex items-center gap-2"
+          aria-label="Refresh"
         >
-          <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+          <RefreshCw className="h-4 w-4" />
           Refresh
         </Button>
       </div>

@@ -92,12 +92,38 @@ export default async function AdminShellServer({ children }: AdminShellServerPro
   
   const isPlatformAdmin = !!platformAdmin;
 
+  // Load health from system_health_status (primary source); client only hits API if stale/missing
+  let initialHealthData: { canary: unknown; emailParse: unknown; cavu: unknown; updatedAt: string } | null = null;
+  try {
+    const [canaryRes, tenantRes] = await Promise.all([
+      adminClient.from('system_health_status').select('payload, updated_at').is('tenant_id', null).eq('key', 'canary').maybeSingle(),
+      adminClient.from('system_health_status').select('key, payload, updated_at').eq('tenant_id', ctx.tenantId).in('key', ['cavu', 'email_parse']),
+    ]);
+    const canaryRow = canaryRes.data;
+    const tenantRows = tenantRes.data ?? [];
+    const cavuRow = tenantRows.find((r: { key: string }) => r.key === 'cavu');
+    const emailParseRow = tenantRows.find((r: { key: string }) => r.key === 'email_parse');
+    const dates: string[] = [canaryRow?.updated_at, cavuRow?.updated_at, emailParseRow?.updated_at].filter(Boolean) as string[];
+    if (dates.length > 0 || canaryRow || cavuRow || emailParseRow) {
+      const updatedAt = dates.length ? dates.sort().reverse()[0]! : new Date().toISOString();
+      initialHealthData = {
+        canary: canaryRow?.payload ?? null,
+        emailParse: emailParseRow?.payload ?? null,
+        cavu: cavuRow?.payload ?? null,
+        updatedAt,
+      };
+    }
+  } catch {
+    // Table may not exist; client will use API
+  }
+
   return (
     <AdminShellClient 
       user={user} 
       tenant={tenant} 
       isPlatformAdmin={isPlatformAdmin}
       userRole={ctx.role}
+      initialHealthData={initialHealthData}
     >
       {children}
     </AdminShellClient>

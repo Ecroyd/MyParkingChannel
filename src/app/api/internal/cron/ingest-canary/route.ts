@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { createAdminClient } from '@/lib/supabase/server';
 import { queueEmail, sendDueEmails } from '@/lib/email/emailService';
+import { logRequestAttribution, validateJobSecret } from '@/lib/jobSecret';
+import { getCanaryHealth } from '@/lib/health/canary';
+import { writeHealthStatus } from '@/lib/health/writeHealthStatus';
 
 const CANARY_TO_EMAIL = 'canary-bookings@myparkingchannel.app';
 const STALE_MINUTES = 10;
@@ -11,6 +14,10 @@ const TOKEN_RANDOM_BYTES = 4; // 6 chars base64url
  * GET: Test run / ping. cron-job.org "test run" may use GET; return 200 so it succeeds.
  */
 export async function GET(req: NextRequest) {
+  logRequestAttribution(req, '/api/internal/cron/ingest-canary');
+  if (!validateJobSecret(req)) {
+    return new NextResponse('Forbidden', { status: 403 });
+  }
   console.log('[INGEST CANARY] GET /api/internal/cron/ingest-canary called');
   return NextResponse.json({
     ok: true,
@@ -20,32 +27,35 @@ export async function GET(req: NextRequest) {
 
 /**
  * Internal cron: evaluate previous ingest canary and send next one.
- * Auth: Authorization: Bearer INTERNAL_CRON_KEY
- * External scheduler (e.g. cron-job.org) calls POST /api/internal/cron/ingest-canary with header.
+ * Auth: x-job-secret (JOB_SECRET) or Authorization: Bearer INTERNAL_CRON_KEY or x-internal-cron-key.
+ * External scheduler (e.g. cron-job.org) calls POST with one of these headers.
  */
 export async function POST(req: NextRequest) {
-  console.log('[INGEST CANARY] POST /api/internal/cron/ingest-canary called');
+  logRequestAttribution(req, '/api/internal/cron/ingest-canary');
   try {
     const envKey = process.env.INTERNAL_CRON_KEY?.trim();
     const auth = req.headers.get('authorization') ?? '';
     const xKey = req.headers.get('x-internal-cron-key')?.trim() ?? '';
+    const jobSecretValid = validateJobSecret(req);
 
-    if (!envKey) {
-      console.error('[INGEST CANARY] INTERNAL_CRON_KEY not configured');
+    if (jobSecretValid) {
+      // x-job-secret matches JOB_SECRET
+    } else if (envKey) {
+      let bearerToken = '';
+      const m = auth.match(/^Bearer\s+(.+)$/i);
+      if (m) bearerToken = m[1].trim();
+      const valid = bearerToken === envKey || xKey === envKey;
+      if (!valid) {
+        return NextResponse.json(
+          { ok: false, reason: 'invalid token', hasAuth: !!auth, hasXInternal: !!xKey },
+          { status: 401 }
+        );
+      }
+    } else {
       return NextResponse.json({ ok: false, error: 'Cron key not configured' }, { status: 500 });
     }
 
-    let bearerToken = '';
-    const m = auth.match(/^Bearer\s+(.+)$/i);
-    if (m) bearerToken = m[1].trim();
-
-    const valid = bearerToken === envKey || xKey === envKey;
-    if (!valid) {
-      return NextResponse.json(
-        { ok: false, reason: 'invalid token', hasAuth: !!auth, hasXInternal: !!xKey },
-        { status: 401 }
-      );
-    }
+    console.log('[INGEST CANARY] POST /api/internal/cron/ingest-canary called');
     console.log('[INGEST CANARY] step=auth_ok');
 
     const supabase = createAdminClient();
@@ -124,6 +134,14 @@ export async function POST(req: NextRequest) {
     // Send immediately so canary email goes out in this request
     await sendDueEmails(5);
     console.log('[INGEST CANARY] step=send_done');
+
+    // Write canary health to system_health_status so UI can read from Supabase (revalidate: 60)
+    try {
+      const canaryHealth = await getCanaryHealth();
+      await writeHealthStatus(null, 'canary', canaryHealth as unknown as Record<string, unknown>);
+    } catch (e) {
+      console.warn('[INGEST CANARY] Failed to write health status', e);
+    }
 
     return NextResponse.json({ ok: true, token, previousMarkedDown: previousDown });
   } catch (err: any) {
