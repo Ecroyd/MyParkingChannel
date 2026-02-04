@@ -60,14 +60,12 @@ export default async function DashboardServerPage() {
   }
 
   // Get user's tenants
-  console.log('🔍 Dashboard: Checking user_tenants for user:', user.id)
   const { data: userTenants, error: userTenantsError } = await adminClient
     .from('user_tenants')
     .select('tenant_id, role, is_default')
     .eq('user_id', user.id);
 
   if (userTenantsError) {
-    console.log('❌ Dashboard: Error fetching user tenants:', userTenantsError)
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -77,13 +75,10 @@ export default async function DashboardServerPage() {
     );
   }
 
-  console.log('📊 Dashboard: User tenants found:', userTenants?.length || 0, userTenants)
-
   // Find the default tenant or use the first one
   const userTenant = userTenants?.find(ut => ut.is_default) || userTenants?.[0];
 
   if (!userTenant?.tenant_id) {
-    console.log('ℹ️ Dashboard: No tenant found for user')
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -92,8 +87,6 @@ export default async function DashboardServerPage() {
       </div>
     );
   }
-
-  console.log('✅ Dashboard: Using tenant:', userTenant.tenant_id)
 
   // Get tenant details
   const { data: tenant } = await adminClient

@@ -35,6 +35,26 @@ export default function BookingModalBanner({ slug, tenantId, open, onClose }: Bo
   const today = useMemo(() => getCurrentDateTimeLocal(), []);
   const tomorrow = useMemo(() => getTomorrowDateTimeLocal(), []);
 
+  // 15-minute time options for drop-off/pick-up selectors only (backend accepts any time)
+  const timeOptions15 = useMemo(() => {
+    const opts: string[] = [];
+    for (let h = 0; h < 24; h++) {
+      for (let m = 0; m < 60; m += 15) {
+        opts.push(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
+      }
+    }
+    return opts;
+  }, []);
+
+  const roundTimeTo15 = (hhmm: string) => {
+    const [h, m] = hhmm.split(":").map(Number);
+    const totalMins = (h ?? 0) * 60 + (m ?? 0);
+    const rounded = Math.round(totalMins / 15) * 15;
+    const rh = Math.floor(rounded / 60) % 24;
+    const rm = rounded % 60;
+    return `${String(rh).padStart(2, "0")}:${String(rm).padStart(2, "0")}`;
+  };
+
   const [start, setStart] = useState(today);
   const [end, setEnd] = useState(tomorrow);
   const [email, setEmail] = useState("");
@@ -176,19 +196,22 @@ export default function BookingModalBanner({ slug, tenantId, open, onClose }: Bo
               />
             </div>
 
-            {/* Drop-off Time */}
+            {/* Drop-off Time – native <select> with 15-min options only (no input type="time") */}
             <div className="md:col-span-1">
               <label className="block text-sm font-medium mb-1">Drop-off time</label>
-              <input 
-                type="time" 
-                value={start.includes('T') ? start.split('T')[1] : '00:00'} 
+              <select
+                data-time-select="15min"
+                value={roundTimeTo15(start.includes("T") ? start.split("T")[1] ?? "00:00" : "00:00")}
                 onChange={(e) => {
-                  const date = start.includes('T') ? start.split('T')[0] : start;
+                  const date = start.includes("T") ? start.split("T")[0] : start;
                   setStart(`${date}T${e.target.value}`);
                 }}
-                step="900"
-                className="w-full rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-              />
+                className="w-full rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white"
+              >
+                {timeOptions15.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
             </div>
 
             {/* Pick-up Date */}
@@ -206,19 +229,22 @@ export default function BookingModalBanner({ slug, tenantId, open, onClose }: Bo
               />
             </div>
 
-            {/* Pick-up Time */}
+            {/* Pick-up Time – native <select> with 15-min options only (no input type="time") */}
             <div className="md:col-span-1">
               <label className="block text-sm font-medium mb-1">Pick-up time</label>
-              <input 
-                type="time" 
-                value={end.includes('T') ? end.split('T')[1] : '00:00'} 
+              <select
+                data-time-select="15min"
+                value={roundTimeTo15(end.includes("T") ? end.split("T")[1] ?? "00:00" : "00:00")}
                 onChange={(e) => {
-                  const date = end.includes('T') ? end.split('T')[0] : end;
+                  const date = end.includes("T") ? end.split("T")[0] : end;
                   setEnd(`${date}T${e.target.value}`);
                 }}
-                step="900"
-                className="w-full rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-              />
+                className="w-full rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white"
+              >
+                {timeOptions15.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
             </div>
 
             {/* Search button */}

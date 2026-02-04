@@ -3,8 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { makeImportDedupeKey } from "@/lib/bookings/dedupe";
 import { mapAphCsvLike, detectAndMapFromAttachment } from "@/lib/importers/canonical/mappers";
 import { isImageFile } from "@/lib/ingest/fileTypeUtils";
-import { isExtz10File, overrideStartToMidnight } from "@/lib/datetime/parse";
-import { channelToParserKey, getAttribution, assertAttribution, type ParserKey } from "@/lib/importAttribution";
+import { channelToParserKey, getAttribution, type ParserKey } from "@/lib/importAttribution";
 
 /**
  * Parse file using canonical mappers (supports APH, CAVU, etc.)
@@ -21,9 +20,11 @@ function parseFileWithCanonicalMappers(buffer: Buffer, filename: string) {
 
   // Convert canonical format to internal row format
   const parsedRows = canonicalBookings.map((canonical) => {
-    // Extract external_status from raw data if available (Holiday Extras stores it there)
-    const external_status = canonical.raw?.external_status || null;
-    
+    // Extract external_status from raw data (APH/Holiday Extras store it there)
+    const external_status = canonical.raw?.external_status != null
+      ? String(canonical.raw.external_status).trim()
+      : null;
+    const isCancel = external_status != null && /cancel/i.test(external_status);
     return {
       channel: canonical.channel, // Keep original channel (CAVU, APH, FLYPARKS_EMAIL, HOLIDAY_EXTRAS) for source mapping
       source: canonical.channel.toLowerCase(), // For dedupe key
@@ -42,18 +43,18 @@ function parseFileWithCanonicalMappers(buffer: Buffer, filename: string) {
       vehicle_model: canonical.vehicle_model,
       flight_number: canonical.return_flight_number || canonical.outbound_flight_number,
       phone: canonical.customer_phone,
-      status: "reserved",
+      status: isCancel ? "cancelled" : "reserved",
       price: canonical.total_price || 0,
       money_received: 0,
       notes: null,
       // Additional fields
       external_reference: canonical.third_party_reference || canonical.booking_reference,
-      external_status: external_status,
+      external_status: isCancel ? "cancelled" : external_status,
       return_flight_no: canonical.return_flight_number,
       product_code: null,
       currency: canonical.currency || "GBP",
       total_price: canonical.total_price,
-      raw_fields: canonical.raw,
+      raw_fields: canonical.raw ?? {},
     };
   });
 
@@ -234,10 +235,25 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     throw new Error("No valid rows found in file");
   }
 
-  // 5. Insert into staging table (APH-specific format)
-  console.log(`[parseEmailFile] Inserting ${parsedData.rows.length} rows into staging, tenant ${tenantId}`);
+  // 5. Create import run first so we can set run_id on staging rows
   const adminSupabase = supabaseAdmin();
-  
+  const { data: run, error: runErr } = await adminSupabase
+    .from("import_runs")
+    .insert({
+      tenant_id: tenantId,
+      profile_name: `Email import: ${file.filename}`,
+    })
+    .select("id")
+    .single();
+
+  if (runErr || !run) {
+    console.error(`[parseEmailFile] Failed to create import run:`, runErr);
+  } else {
+    console.log(`[parseEmailFile] Created import run: ${run.id}`);
+  }
+
+  // 6. Insert into staging table (with run_id for apply_import_run)
+  console.log(`[parseEmailFile] Inserting ${parsedData.rows.length} rows into staging, tenant ${tenantId}`);
   const email = (file as any).ingest_emails;
   const emailId = email?.id || null;
 
@@ -250,7 +266,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     detectedSource: attribution.detectedSource,
   });
 
-  // Prepare staging inserts
+  // Prepare staging inserts (run_id links to import_runs for apply_import_run RPC)
   const stagingInserts = parsedData.rows.map((raw) => {
     const channel = (raw as any).channel || "APH";
 
@@ -266,6 +282,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
 
     return {
       tenant_id: tenantId,
+      run_id: run?.id ?? null,
       source: attribution.bookingSource, // Use attribution from parser
       source_email_id: emailId,
       source_filename: file.filename,
@@ -294,11 +311,11 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       money_received: raw.money_received || 0,
       notes: null,
       dedupe_key: dedupe_key, // Required field
-      // Store raw data for debugging
+      // Store raw data for debugging (never null – required for cancellation detection)
       raw_json: {
         mapping: channel === "CAVU" ? "cavuV1" : channel === "FLYPARKS_EMAIL" ? "flyparksV1" : "aphV1",
         channel: channel,
-        raw_fields: raw.raw_fields || [],
+        raw_fields: raw.raw_fields ?? [],
         external_reference: raw.external_reference,
         external_status: raw.external_status,
       },
@@ -378,227 +395,35 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     console.log(`[parseEmailFile] ✅ Inserted ${stagedData.length} rows into staging`);
   }
 
-  // 6. Auto-promote from staging to bookings (optional - you can remove this to require manual finalize)
-  // For now, we'll auto-promote to match existing behavior
-  let successCount = 0;
-  let errorCount = 0;
+  // 7. Apply import run: upsert staging into bookings and apply cancellations (RPC)
   const errors: any[] = [];
-  
-  // Get tenant timezone (default to Europe/London)
-  const { data: tenantData } = await adminSupabase
-    .from("tenants")
-    .select("timezone")
-    .eq("id", tenantId)
-    .single();
-  const tz = tenantData?.timezone || 'Europe/London';
-  
-  // Check if this is an EXTZ10 file (hotel+parking bundle - parking starts at midnight)
-  const isExtz10 = isExtz10File(file.filename);
-
-  // Create import run
-  const { data: run, error: runErr } = await adminSupabase
-    .from("import_runs")
-    .insert({ 
-      tenant_id: tenantId, 
-      profile_name: `Email import: ${file.filename}`,
-    })
-    .select("id")
-    .single();
-  
-  if (runErr || !run) {
-    console.error(`[parseEmailFile] Failed to create import run:`, runErr);
-    // Don't fail - staging is done, import run is optional
-  } else {
-    console.log(`[parseEmailFile] Created import run: ${run.id}`);
-  }
-
-  // Process staging rows and promote to bookings
-  for (let i = 0; i < parsedData.rows.length; i++) {
-    const raw = parsedData.rows[i];
-    try {
-      const startAtRaw = raw.start_at;
-      const endAtRaw = raw.end_at;
-      
-      if (!startAtRaw || !endAtRaw) {
-        console.log(`[parseEmailFile] ⚠️ Skipping row ${i + 1}: Missing dates`, {
-          start_at: startAtRaw,
-          end_at: endAtRaw,
-          reference: raw.reference,
-          channel: (raw as any).channel,
-          raw_data: raw,
-        });
-        errors.push({ rowIndex: i + 1, reason: `Missing dates (start: ${startAtRaw}, end: ${endAtRaw})`, rowData: raw });
-        errorCount++;
-        continue;
-      }
-
-      // Parse dates using Postgres RPC
-      let startAtParsed: string | null = null;
-      let endAtParsed: string | null = null;
-      
-      const { data: parsed, error: parseErr } = await adminSupabase
-        .rpc('normalise_booking_times', {
-          p_start: startAtRaw,
-          p_end: endAtRaw,
-          p_tz: tz
-        });
-      
-      if (!parseErr && parsed && parsed.length > 0) {
-        startAtParsed = parsed[0].start_utc || null;
-        endAtParsed = parsed[0].end_utc || null;
-      }
-
-      if (!startAtParsed || !endAtParsed) {
-        errors.push({ rowIndex: i + 1, reason: "Invalid dates", rowData: raw });
-        errorCount++;
-        continue;
-      }
-
-      // EXTZ10 override: hotel+parking bundle - parking access starts at midnight on start_date
-      if (isExtz10 && startAtParsed) {
-        startAtParsed = overrideStartToMidnight(startAtParsed, tz);
-        console.log(`[parseEmailFile] Applied EXTZ10 midnight override for row ${i + 1}:`, {
-          original: parsed[0].start_utc,
-          overridden: startAtParsed,
-          filename: file.filename,
-        });
-      }
-
-      const dedupe_key = makeImportDedupeKey({
-        source: raw.source || "aph",
-        reference: raw.reference || raw.external_reference || "UNKNOWN",
-        vehicle_reg: raw.vehicle_reg || "UNKNOWN",
-        start_utc: startAtParsed
-      });
-
-      // Check for existing booking (by dedupe_key)
-      const { data: existing } = await adminSupabase
-        .from("bookings")
-        .select("id")
-        .eq("tenant_id", tenantId)
-        .eq("dedupe_key", dedupe_key)
-        .maybeSingle();
-      
-      // Also check by reference + vehicle + dates as fallback
-      let existingByRef = null;
-      if (!existing && raw.reference && raw.vehicle_reg && startAtParsed) {
-        const { data: refMatch } = await adminSupabase
-          .from("bookings")
-          .select("id")
-          .eq("tenant_id", tenantId)
-          .eq("reference", raw.reference)
-          .eq("plate", raw.vehicle_reg)
-          .eq("start_at", startAtParsed)
-          .maybeSingle();
-        existingByRef = refMatch;
-      }
-      
-      const existingBooking = existing || existingByRef;
-
-      if (existingBooking) {
-        // Update existing booking
-        console.log(`[parseEmailFile] Updating existing booking: ${existingBooking.id}`);
-        const { error: updateErr } = await adminSupabase
-          .from("bookings")
-          .update({
-            customer_name: raw.customer_name,
-            customer_phone: raw.phone || null,
-            start_at: startAtParsed,
-            end_at: endAtParsed,
-            plate: raw.vehicle_reg || null,
-            car_color: raw.vehicle_colour || null,
-            car_make: raw.vehicle_make || null,
-            car_model: raw.vehicle_model || null,
-            money_charged: raw.price || raw.total_price || 0,
-            money_received: raw.money_received || 0,
-            notes: raw.notes || null,
-          })
-          .eq("id", existingBooking.id);
-        
-        if (updateErr) {
-          errors.push({ rowIndex: i + 1, reason: updateErr.message, rowData: raw });
-          errorCount++;
-        } else {
-          successCount++;
-        }
-      } else {
-        // Use attribution from winning parser (single source of truth)
-        const bookingSource = attribution.bookingSource;
-        const externalSource = attribution.externalSource;
-
-        // Validate attribution before inserting
-        assertAttribution(winningParserKey, bookingSource, externalSource);
-
-        // Skip if vehicle_reg is missing (required for bookings table)
-        if (!raw.vehicle_reg || raw.vehicle_reg.trim() === "" || raw.vehicle_reg === "-") {
-          console.log(`[parseEmailFile] ⚠️ Skipping row ${i + 1}: Missing vehicle registration`, {
-            reference: raw.reference,
-            channel: (raw as any).channel,
-          });
-          errors.push({ rowIndex: i + 1, reason: "Missing vehicle registration (required field)", rowData: raw });
-          errorCount++;
-          continue;
-        }
-
-        // Insert new
-        const { error: insertErr } = await adminSupabase
-          .from("bookings")
-          .insert({
-            tenant_id: tenantId,
-            source: bookingSource, // Valid enum: 'direct', 'parkvia', 'holidayextras', 'manual', 'other', 'cavu', 'supplier_api'
-            external_source: externalSource, // Store channel identifier here
-            reference: raw.reference,
-            customer_name: raw.customer_name,
-            customer_email: "", // APH CSV doesn't provide email, use empty string (required field)
-            customer_phone: raw.phone || null,
-            start_at: startAtParsed,
-            end_at: endAtParsed,
-            plate: raw.vehicle_reg, // Already validated as non-null above
-            car_color: raw.vehicle_colour || null,
-            car_make: raw.vehicle_make || null,
-            car_model: raw.vehicle_model || null,
-            money_charged: raw.price || raw.total_price || 0,
-            money_received: raw.money_received || 0,
-            notes: raw.notes || null,
-            dedupe_key,
-            status: raw.status || "reserved",
-          });
-        
-        if (insertErr) {
-          errors.push({ rowIndex: i + 1, reason: insertErr.message, rowData: raw });
-          errorCount++;
-        } else {
-          successCount++;
-        }
-      }
-    } catch (rowErr: any) {
-      errors.push({ rowIndex: i + 1, reason: rowErr.message, rowData: raw });
-      errorCount++;
+  let upsertedCount = 0;
+  let cancelledCount = 0;
+  if (run?.id && stagedData.length > 0) {
+    const { data: applyResult, error: applyErr } = await adminSupabase
+      .rpc("apply_import_run", { p_run_id: run.id });
+    if (applyErr) {
+      console.error(`[parseEmailFile] apply_import_run failed:`, applyErr);
+      errors.push({ rowIndex: 0, reason: applyErr.message, rowData: null });
+    } else if (applyResult?.[0]) {
+      upsertedCount = applyResult[0].upserted_count ?? 0;
+      cancelledCount = applyResult[0].cancelled_count ?? 0;
+      console.log(`[parseEmailFile] apply_import_run: upserted=${upsertedCount}, cancelled=${cancelledCount}`);
     }
   }
 
-  // Update import run with results
-  if (run) {
+  // Update import run with RPC result counts
+  if (run?.id) {
     await adminSupabase
       .from("import_runs")
-      .update({ 
-        inserted_count: successCount, 
-        error_count: errorCount 
+      .update({
+        inserted_count: upsertedCount,
+        error_count: errors.length,
+        meta: { cancelled_count: cancelledCount },
       })
       .eq("id", run.id);
   }
 
-  // Update file status to parsed with attribution
-  console.log(`[parseEmailFile] Updating file status to parsed: ${fileId}`);
-  console.log(`[parseEmailFile] Results summary:`, {
-    rowsParsed: parsedData.rows.length,
-    stagedCount: stagedData?.length || 0,
-    successCount,
-    errorCount,
-    parserKey: winningParserKey,
-    attribution: attribution,
-  });
-  
   const { error: updateError, data: updatedFile } = await supabase
     .from("ingest_email_files")
     .update({ 
@@ -635,8 +460,9 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     stagedCount: stagedData?.length || 0,
     importResult: {
       runId: run?.id || null,
-      successCount,
-      errorCount,
+      successCount: upsertedCount,
+      errorCount: errors.length,
+      cancelledCount,
       errors: errors.slice(0, 10),
     },
   };

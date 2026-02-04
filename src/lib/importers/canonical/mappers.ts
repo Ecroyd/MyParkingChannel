@@ -79,7 +79,9 @@ export function mapAphCsvLike(csvText: string): CanonicalBooking[] {
   const rows = parsed.data as unknown as string[][];
   return rows.map((fields) => {
     const f = fields.map((x) => (x ?? "").trim());
-    // Based on APH sample: field[2] = ref, field[4] = start date, field[11] = start time, etc.
+    // Based on APH sample: field[1] = external_status (Cancelled/Amended/etc), field[2] = ref, field[4] = start date, etc.
+    const externalStatusRaw = (f[1] ?? "").trim();
+    const isCancellation = /cancel/i.test(externalStatusRaw);
     const bookingRef = f[2] || null;
     const startAt = f[4] && f[11] ? toIsoFromDMY_HM(f[4], f[11]) : null;
     const endAt = f[15] && f[16] ? toIsoFromDMY_HM(f[15], f[16]) : null;
@@ -102,7 +104,10 @@ export function mapAphCsvLike(csvText: string): CanonicalBooking[] {
       return_flight_number: f[17] || null,
       total_price: f[13] ? parseMoney(f[13]) : null,
       currency: "GBP",
-      raw: { fields: f },
+      raw: {
+        fields: f,
+        external_status: externalStatusRaw || undefined,
+      },
     };
   });
 }

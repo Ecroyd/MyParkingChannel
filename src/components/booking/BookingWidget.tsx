@@ -427,7 +427,6 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
                   clearError('startDate');
                 }}
                 min={minDateTime}
-                step={900}
                 required
                 className={`text-sm ${errors.startDate ? 'border-red-500 focus:border-red-500' : ''}`}
               />
@@ -449,7 +448,6 @@ export default function BookingWidget({ tenantSlug, tenantId }: BookingWidgetPro
                   clearError('endDate');
                 }}
                 min={startDate || minDateTime}
-                step={900}
                 required
                 className={`text-sm ${errors.endDate ? 'border-red-500 focus:border-red-500' : ''}`}
               />

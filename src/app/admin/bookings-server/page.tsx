@@ -1,4 +1,5 @@
 // src/app/admin/bookings-server/page.tsx
+export const dynamic = 'force-dynamic';
 import { createServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
 import BookingsServerClient from './BookingsServerClient';

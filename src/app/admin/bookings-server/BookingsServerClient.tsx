@@ -29,7 +29,7 @@ export default function BookingsServerClient({ user, tenant, bookings: initialBo
   const [customEndDate, setCustomEndDate] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortOrder, setSortOrder] = useState<'closest' | 'most_recent'>('closest');
-  const [showFinishedBookings, setShowFinishedBookings] = useState(false);
+  const [showFinishedBookings, setShowFinishedBookings] = useState(true);
   const [showCancelledBookings, setShowCancelledBookings] = useState(false);
   const [channelFilter, setChannelFilter] = useState<string>('all');
   const [selectedBookings, setSelectedBookings] = useState<Set<string>>(new Set());

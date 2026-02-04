@@ -126,6 +126,40 @@ function detectTenantFromEmail(email: {
   return null;
 }
 
+/** True when the email has at least one attachment that looks like a booking file (CSV, PDF, Excel). Inline images/signatures are ignored. */
+function hasBookingFileAttachment(atts: any[] | undefined | null): boolean {
+  const list = atts ?? [];
+  return list.some((a) => {
+    const ct = String(a?.contentType ?? "").toLowerCase();
+    const cd = String(a?.contentDisposition ?? "").toLowerCase();
+    const fn = String(a?.filename ?? "").toLowerCase();
+
+    // Ignore inline signature/images
+    if (cd === "inline") return false;
+    if (ct.startsWith("image/")) return false;
+
+    // Booking files we care about
+    if (fn.endsWith(".csv") || fn.endsWith(".pdf") || fn.endsWith(".xls") || fn.endsWith(".xlsx")) return true;
+    if (ct.includes("csv") || ct.includes("pdf") || ct.includes("excel") || ct.includes("spreadsheet")) return true;
+
+    return false;
+  });
+}
+
+/** True when subject/text look like a Flyparks receipt (so we should try text→staging when no booking file). */
+function looksLikeFlyparksReceipt(subject: string | null | undefined, text: string | null | undefined): boolean {
+  const s = (subject ?? "").toLowerCase();
+  const t = (text ?? "").toLowerCase();
+
+  if (s.includes("flyparks") && (s.includes("payment") || s.includes("booking") || s.includes("successful"))) return true;
+  if (t.includes("booking receipt")) return true;
+  if (t.includes("your transaction has been completed")) return true;
+  if (t.includes("reference:")) return true;
+  if (t.includes("vehicle registration:")) return true;
+
+  return false;
+}
+
 // Async function to parse files
 async function parseFilesAsync(fileIds: string[], tenantId: string, emailId: string) {
   console.log(`[ingest-email] 🔄 Starting async parse for ${fileIds.length} files, tenant ${tenantId}`);
@@ -211,9 +245,12 @@ export async function POST(req: Request) {
     let parsedHtml: string | null = null;
     /** Set when simpleParser succeeds; used to write ingest_email_parses so parser runs automatically */
     let parsedForReceipt: { subject: string; text: string } | null = null;
+    /** Parsed MIME result (for attachment summary / booking-file gate); set when simpleParser succeeds */
+    let parsedEmail: Awaited<ReturnType<typeof simpleParser>> | null = null;
     try {
       const rawEmailBuffer = Buffer.from(raw, "base64");
       const parsed = await simpleParser(rawEmailBuffer);
+      parsedEmail = parsed;
       const subject = parsed.subject ?? body.subject ?? "";
       const text = parsed.text ?? "";
       parsedForReceipt = { subject, text };
@@ -391,19 +428,30 @@ export async function POST(req: Request) {
           console.log(`[ingest-email] Wrote ingest_email_parses for email ${data.id}`);
         }
 
-        // Text-only Flyparks: staging → bookings (same pipeline as attachments). Only when NO attachments.
-        const isTextOnly = !allAttachments || allAttachments.length === 0;
-        const subjectLower = (parsedForReceipt?.subject ?? "").toLowerCase();
-        const textLower = (forwarded_text ?? "").toLowerCase();
-        const looksLikeFlyparksReceipt =
-          subjectLower.includes("flyparks") ||
-          subjectLower.includes("payment successful") ||
-          subjectLower.includes("booking confirmation") ||
-          textLower.includes("booking receipt") ||
-          textLower.includes("reference:") ||
-          (body.from && /flyparksexeter|flyparks\.com/i.test(body.from));
+        // Text-only Flyparks: staging → bookings when there is no "booking file" attachment. Inline logos/images are ignored.
+        const parsedAttachments = parsedEmail?.attachments ?? [];
+        console.log("[ingest] attachment summary", {
+          emailId: data.id,
+          attachmentsCount: parsedAttachments.length,
+          attachmentTypes: parsedAttachments.slice(0, 10).map((a: { contentType?: string; contentDisposition?: string; filename?: string; size?: number }) => ({
+            ct: a.contentType,
+            cd: a.contentDisposition,
+            fn: a.filename,
+            size: a.size,
+          })),
+        });
 
-        if (isTextOnly && looksLikeFlyparksReceipt) {
+        const bookingFilePresent = hasBookingFileAttachment(parsedEmail?.attachments);
+        const looksLikeFlyparks = looksLikeFlyparksReceipt(parsedForReceipt?.subject ?? null, forwarded_text ?? null);
+        const shouldTryTextPromote = !bookingFilePresent && looksLikeFlyparks;
+
+        if (!shouldTryTextPromote) {
+          console.log("[ingest] skip text-promote", {
+            emailId: data.id,
+            bookingFilePresent,
+            looksLikeFlyparks,
+          });
+        } else {
           try {
             // Resolve tenant: inbox first, then from/subject/raw (forwarded Flyparks)
             const tenantId =
@@ -481,6 +529,9 @@ export async function POST(req: Request) {
                 }
 
                 console.log("[ingest] promoted to booking", { emailId: data.id, bookingId: promoteResult.bookingId });
+
+                // Mark email parsed so it doesn't sit in 'received' forever
+                await supabase.from("ingest_emails").update({ status: "parsed", error: null }).eq("id", data.id);
               } else {
                 console.warn("[ingest-email] Flyparks text-only: no reference extracted (staging.reference and guessed.reference both null), skipping staging");
               }
@@ -500,10 +551,6 @@ export async function POST(req: Request) {
               .update({ parse_status: "parsed", parse_error: errorStr })
               .eq("ingest_email_id", data.id);
           }
-        } else if (isTextOnly && !looksLikeFlyparksReceipt) {
-          // Not a Flyparks receipt, nothing to stage
-        } else if (!isTextOnly) {
-          // Has attachments; staging will come from parseEmailFile, not from text
         }
       } catch (receiptErr: unknown) {
         console.error(`[ingest-email] Forward receipt extract failed (non-fatal):`, receiptErr);

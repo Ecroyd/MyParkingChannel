@@ -49,10 +49,18 @@ export async function promoteStagingRowToBooking(
     return { ok: false, error: parseErr?.message ?? "Invalid dates" };
   }
 
-  const startAtParsed = parsed[0].start_utc ?? null;
-  const endAtParsed = parsed[0].end_utc ?? null;
+  let startAtParsed = parsed[0].start_utc ?? null;
+  let endAtParsed = parsed[0].end_utc ?? null;
   if (!startAtParsed || !endAtParsed) {
     return { ok: false, error: "normalise_booking_times returned null" };
+  }
+
+  // bookings_time_window requires end_at > start_at
+  const startMs = new Date(startAtParsed).getTime();
+  const endMs = new Date(endAtParsed).getTime();
+  if (endMs <= startMs) {
+    const oneHour = 60 * 60 * 1000;
+    endAtParsed = new Date(startMs + oneHour).toISOString();
   }
 
   const mapped = mapStagingToBookings(stagingRow);
@@ -109,8 +117,11 @@ export async function promoteStagingRowToBooking(
     return { ok: true, updated: true, bookingId: byRef.id };
   }
 
-  // Skip insert if vehicle_reg is required and missing (match parseEmailFile behavior)
-  if (!stagingRow.vehicle_reg || String(stagingRow.vehicle_reg).trim() === "" || stagingRow.vehicle_reg === "-") {
+  // Skip insert if vehicle_reg is required and missing (match parseEmailFile behavior).
+  // Allow Flyparks text emails to create bookings without a reg.
+  const isFlyparksText = stagingRow.raw_json?.kind === "flyparks_text_email";
+  const hasReg = stagingRow.vehicle_reg && String(stagingRow.vehicle_reg).trim() !== "" && stagingRow.vehicle_reg !== "-";
+  if (!isFlyparksText && !hasReg) {
     return { ok: false, error: "Missing vehicle registration (required for new booking)" };
   }
 

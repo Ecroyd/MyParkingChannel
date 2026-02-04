@@ -129,7 +129,6 @@ export default function DemandCurve({
           throw new Error(`HTTP error! status: ${response.status}`);
         }
         const result = await response.json();
-        console.log('DemandCurve: Fetched bookings:', result.bookings?.length || 0, result.bookings);
         setBookings(result.bookings || []);
       } catch (error) {
         console.error("Error fetching bookings:", error);
@@ -204,15 +203,6 @@ export default function DemandCurve({
     const effectiveCapacityByDate = capacityByDate || fetchedCapacityByDate;
     const defaultCapacity = capacity ?? 100;
 
-    console.log('DemandCurve: Processing', bookings.length, 'bookings for', days.length, 'days');
-    if (bookings.length > 0) {
-      console.log('DemandCurve: Sample booking:', {
-        start: bookings[0].start_at,
-        end: bookings[0].end_at,
-        source: bookings[0].source
-      });
-    }
-
     for (const day of days) {
       const dayStr = format(day, "yyyy-MM-dd");
       // Get capacity for this day from capacityByDate, or use default
@@ -240,11 +230,6 @@ export default function DemandCurve({
         }
       }
 
-      if (row.total > 0) {
-        console.log(`DemandCurve: Day ${dayStr} has ${row.total} active bookings (cumulative occupancy):`, row);
-      } else {
-        console.log(`DemandCurve: Day ${dayStr} has 0 active bookings`);
-      }
       rows.push(row);
     }
 
