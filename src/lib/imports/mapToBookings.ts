@@ -15,7 +15,7 @@ export function mapStagingToBookings(stagingRecord: any) {
     tenant_id: stagingRecord.tenant_id,
     reference: stagingRecord.reference,
     customer_name: stagingRecord.customer_name,
-    customer_email: '', // Default empty, can be populated later
+    customer_email: stagingRecord.customer_email ?? '', // From staging when present (e.g. Flyparks text)
     customer_phone: stagingRecord.phone || null,
     plate: stagingRecord.vehicle_reg,
     car_make: stagingRecord.vehicle_make,
@@ -24,8 +24,8 @@ export function mapStagingToBookings(stagingRecord: any) {
     start_at: stagingRecord.start_at,
     end_at: stagingRecord.end_at,
     status: mapStatusToEnum(stagingRecord.status),
-    money_charged: stagingRecord.price || 0,
-    money_received: stagingRecord.money_received || 0,
+    money_charged: stagingRecord.price ?? stagingRecord.total_price ?? 0,
+    money_received: stagingRecord.money_received ?? stagingRecord.total_price ?? 0,
     notes: stagingRecord.notes || '',
     source: stagingRecord.source, // Source is already mapped in the UI
     flight_number: stagingRecord.flight_number,

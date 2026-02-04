@@ -49,6 +49,11 @@ export async function middleware(req: NextRequest) {
   const rawHost = req.headers.get("host");
   const normalizedHost = normalizeHost(rawHost);
 
+  // In development, do not serve the service worker (stale precache causes 404s for chunks like app-pages-internals.js)
+  if (process.env.NODE_ENV === "development" && (url.pathname === "/sw.js" || url.pathname.startsWith("/workbox-") || url.pathname.startsWith("/fallback-"))) {
+    return new NextResponse(null, { status: 404 });
+  }
+
   // 🔴 Do NOT rewrite API routes, PWA assets, manifest, or static files
   // These should always go to root paths, not tenant-specific paths
   // Decode URL to handle encoded filenames (e.g., parking%20favicon.png)

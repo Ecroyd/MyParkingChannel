@@ -22,6 +22,7 @@ export default function BookingEntry({ slug, tenantId, site }: BookingEntryProps
     return (
       <BookingPageClient
         slug={slug}
+        tenantId={tenantId}
         bookingModalStyle="banner"
       />
     );

@@ -1,11 +1,12 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 
 interface BookingBannerHeroProps {
   slug: string;
+  tenantId?: string;
 }
 
-export default function BookingBannerHero({ slug }: BookingBannerHeroProps) {
+export default function BookingBannerHero({ slug, tenantId }: BookingBannerHeroProps) {
   // Get current datetime in local format for datetime-local input
   const getCurrentDateTimeLocal = () => {
     const now = new Date();
@@ -38,6 +39,44 @@ export default function BookingBannerHero({ slug }: BookingBannerHeroProps) {
   const [plate, setPlate] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
+  const [calculatingPrice, setCalculatingPrice] = useState(false);
+
+  // Fetch quote when dates change (same as card – price appears once dates are set)
+  useEffect(() => {
+    if (!tenantId || !start || !end) {
+      setCalculatedPrice(null);
+      setCalculatingPrice(false);
+      return;
+    }
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    if (startDate >= endDate) {
+      setCalculatedPrice(null);
+      setCalculatingPrice(false);
+      return;
+    }
+    setCalculatingPrice(true);
+    fetch("/api/pricing/public-quote", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tenantId,
+        startAt: startDate.toISOString(),
+        endAt: endDate.toISOString(),
+      }),
+    })
+      .then((res) => res.ok ? res.json() : Promise.reject(new Error("Quote failed")))
+      .then((result) => {
+        if (result?.success && result?.data?.amount != null) {
+          setCalculatedPrice(result.data.amount);
+        } else {
+          setCalculatedPrice(null);
+        }
+      })
+      .catch(() => setCalculatedPrice(null))
+      .finally(() => setCalculatingPrice(false));
+  }, [tenantId, start, end]);
 
   async function continueToBackend() {
     setError(null); 
@@ -99,6 +138,7 @@ export default function BookingBannerHero({ slug }: BookingBannerHeroProps) {
                 const date = start.includes('T') ? start.split('T')[0] : start;
                 setStart(`${date}T${e.target.value}`);
               }}
+              step="900"
               className="w-full rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
             />
           </div>
@@ -128,6 +168,7 @@ export default function BookingBannerHero({ slug }: BookingBannerHeroProps) {
                 const date = end.includes('T') ? end.split('T')[0] : end;
                 setEnd(`${date}T${e.target.value}`);
               }}
+              step="900"
               className="w-full rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
             />
           </div>
@@ -142,6 +183,20 @@ export default function BookingBannerHero({ slug }: BookingBannerHeroProps) {
               {loading ? "Searching…" : "Search"}
             </button>
           </div>
+
+          {/* Price – shown as soon as dates are set (same as card modal) */}
+          {tenantId && (
+            <div className="col-span-full md:col-span-6 flex items-center gap-2 min-h-[2.5rem]">
+              {calculatingPrice && (
+                <span className="text-sm text-slate-600">Calculating price…</span>
+              )}
+              {!calculatingPrice && calculatedPrice != null && calculatedPrice > 0 && (
+                <span className="text-sm font-semibold text-slate-900">
+                  Total: £{calculatedPrice.toFixed(2)}
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Error message - spans full width */}
           {error && (

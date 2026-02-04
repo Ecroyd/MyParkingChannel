@@ -65,11 +65,11 @@ export default function BookingModal({ slug }: { slug: string }) {
       <div className="grid sm:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium mb-1">Arrival Date & Time</label>
-          <input type="datetime-local" value={start} onChange={e=>setStart(e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" />
+          <input type="datetime-local" value={start} onChange={e=>setStart(e.target.value)} step="900" className="w-full rounded-xl border border-slate-300 px-3 py-2" />
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Departure Date & Time</label>
-          <input type="datetime-local" value={end} onChange={e=>setEnd(e.target.value)} min={start} className="w-full rounded-xl border border-slate-300 px-3 py-2" />
+          <input type="datetime-local" value={end} onChange={e=>setEnd(e.target.value)} min={start} step="900" className="w-full rounded-xl border border-slate-300 px-3 py-2" />
           <p className="text-xs text-gray-500 italic mt-1">
             If unsure, please use your return flight time
           </p>

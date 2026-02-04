@@ -19,7 +19,7 @@ export default function BookingHero({ slug, tenantId, site, businessName, taglin
   if (style === "banner") {
     return (
       <section className="w-full bg-white border-b">
-        <BookingBannerHero slug={slug} />
+        <BookingBannerHero slug={slug} tenantId={tenantId} />
       </section>
     );
   }

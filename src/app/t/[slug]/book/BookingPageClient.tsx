@@ -5,10 +5,11 @@ import BookingModalBanner from "@/components/tenant/BookingModalBanner";
 
 interface BookingPageClientProps {
   slug: string;
+  tenantId?: string;
   bookingModalStyle?: 'card' | 'banner' | null;
 }
 
-export default function BookingPageClient({ slug, bookingModalStyle = 'card' }: BookingPageClientProps) {
+export default function BookingPageClient({ slug, tenantId, bookingModalStyle = 'card' }: BookingPageClientProps) {
   console.log("[BOOKING_PAGE_CLIENT] Received bookingModalStyle:", bookingModalStyle);
   
   const [bannerModalOpen, setBannerModalOpen] = useState(false);
@@ -28,6 +29,7 @@ export default function BookingPageClient({ slug, bookingModalStyle = 'card' }: 
     return (
       <BookingModalBanner 
         slug={slug} 
+        tenantId={tenantId}
         open={bannerModalOpen} 
         onClose={() => setBannerModalOpen(false)} 
       />

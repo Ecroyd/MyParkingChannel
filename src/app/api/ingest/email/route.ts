@@ -8,7 +8,6 @@ import {
   extractFlyparksReceiptFromForward,
   guessFlyparksFields,
 } from "@/lib/email/flyparksForward";
-import { upsertBookingFromFlyparksParse } from "@/lib/ingest/flyparksBookingUpsert";
 
 export const runtime = "nodejs";
 
@@ -392,16 +391,119 @@ export async function POST(req: Request) {
           console.log(`[ingest-email] Wrote ingest_email_parses for email ${data.id}`);
         }
 
-        if (tenantIdFromInbox && guessed?.reference) {
-          const result = await upsertBookingFromFlyparksParse(supabase, {
-            tenantId: tenantIdFromInbox,
-            reference: String(guessed.reference),
-            plate: guessed.plate ?? null,
-            forwardedText: forwarded_text ?? "",
-          });
-          if (!result.ok) {
-            console.error("[ingest-email] booking upsert failed", result.error);
+        // Text-only Flyparks: staging → bookings (same pipeline as attachments). Only when NO attachments.
+        const isTextOnly = !allAttachments || allAttachments.length === 0;
+        const subjectLower = (parsedForReceipt?.subject ?? "").toLowerCase();
+        const textLower = (forwarded_text ?? "").toLowerCase();
+        const looksLikeFlyparksReceipt =
+          subjectLower.includes("flyparks") ||
+          subjectLower.includes("payment successful") ||
+          subjectLower.includes("booking confirmation") ||
+          textLower.includes("booking receipt") ||
+          textLower.includes("reference:") ||
+          (body.from && /flyparksexeter|flyparks\.com/i.test(body.from));
+
+        if (isTextOnly && looksLikeFlyparksReceipt) {
+          try {
+            // Resolve tenant: inbox first, then from/subject/raw (forwarded Flyparks)
+            const tenantId =
+              tenantIdFromInbox ??
+              detectTenantFromEmail({
+                from_address: body.from,
+                subject: parsedForReceipt.subject,
+                raw_rfc822_base64: raw,
+              });
+
+            console.log("[ingest] tenant resolved", { emailId: data.id, to: toAddress, tenantId });
+
+            if (!tenantId) {
+              console.warn("[ingest-email] Flyparks text-only: no tenant (to_address not in tenant_inbound_inboxes and detectTenantFromEmail returned null)");
+            } else {
+              const { flyparksTextToStaging } = await import("@/lib/ingest/flyparksTextToStaging");
+              const { promoteStagingRowToBooking } = await import("@/lib/ingest/promoteStagingToBooking");
+              const staging = flyparksTextToStaging(forwarded_text ?? "");
+              console.log("[ingest] flyparks text staging extracted", { emailId: data.id, reference: staging.reference, plate: staging.vehicle_reg, total: staging.total_price });
+
+              const reference = staging.reference ?? guessed?.reference ?? null;
+              if (reference) {
+                const dedupe_key = `${tenantId}|flyparks_text|${reference}`;
+                const { data: stagingUpserted, error: stagingErr } = await supabase
+                  .from("booking_import_staging")
+                  .upsert(
+                    {
+                      tenant_id: tenantId,
+                      source: "direct",
+                      source_email_id: data.id,
+                      source_filename: "flyparks_text",
+                      reference,
+                      external_reference: reference,
+                      external_status: null,
+                      start_at: staging.start_at,
+                      end_at: staging.end_at,
+                      vehicle_reg: staging.vehicle_reg,
+                      vehicle_make: staging.vehicle_make,
+                      vehicle_model: staging.vehicle_model,
+                      vehicle_colour: staging.vehicle_colour,
+                      customer_title: null,
+                      customer_firstname: null,
+                      customer_lastname: null,
+                      customer_name: staging.customer_name,
+                      phone: staging.customer_phone,
+                      flight_number: staging.flight_number,
+                      return_flight_no: staging.flight_number,
+                      product_code: staging.product_code,
+                      currency: staging.currency ?? "GBP",
+                      total_price: staging.total_price,
+                      price: staging.total_price ?? staging.money_charged ?? 0,
+                      status: "reserved",
+                      money_received: staging.money_received ?? staging.total_price ?? 0,
+                      notes: null,
+                      dedupe_key,
+                      raw_json: staging.raw_json,
+                    },
+                    { onConflict: "dedupe_key" }
+                  )
+                  .select("id")
+                  .maybeSingle();
+
+                if (stagingErr) {
+                  console.error("[ingest-email] booking_import_staging upsert failed:", stagingErr.message);
+                  throw stagingErr;
+                }
+
+                const stagingId = stagingUpserted?.id ?? null;
+                console.log("[ingest] staging upserted", { emailId: data.id, stagingId });
+
+                const promoteResult = await promoteStagingRowToBooking(supabase, tenantId, dedupe_key);
+                if (!promoteResult.ok) {
+                  console.error("[ingest-email] promote staging → booking failed:", promoteResult.error);
+                  throw new Error(promoteResult.error);
+                }
+
+                console.log("[ingest] promoted to booking", { emailId: data.id, bookingId: promoteResult.bookingId });
+              } else {
+                console.warn("[ingest-email] Flyparks text-only: no reference extracted (staging.reference and guessed.reference both null), skipping staging");
+              }
+            }
+          } catch (textOnlyErr: unknown) {
+            const err = textOnlyErr instanceof Error ? textOnlyErr : new Error(String(textOnlyErr));
+            console.error("[ingest] text-only flyparks promote failed", { emailId: data.id, err: err.message, stack: err.stack });
+
+            const errorStr = err.message ?? String(textOnlyErr);
+            await supabase
+              .from("ingest_emails")
+              .update({ status: "failed", error: errorStr })
+              .eq("id", data.id);
+
+            await supabase
+              .from("ingest_email_parses")
+              .update({ parse_status: "parsed", parse_error: errorStr })
+              .eq("ingest_email_id", data.id);
           }
+        } else if (isTextOnly && !looksLikeFlyparksReceipt) {
+          // Not a Flyparks receipt, nothing to stage
+        } else if (!isTextOnly) {
+          // Has attachments; staging will come from parseEmailFile, not from text
         }
       } catch (receiptErr: unknown) {
         console.error(`[ingest-email] Forward receipt extract failed (non-fatal):`, receiptErr);
