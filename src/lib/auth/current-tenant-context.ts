@@ -60,7 +60,6 @@ export async function getCurrentTenantContext(): Promise<CurrentTenantContext | 
   } else {
     // Fallback: get user's default tenant from user_tenants
     // Use admin client to bypass RLS (user might have just joined)
-    console.log('🔍 [TENANT CONTEXT] No tenant from request, checking user_tenants for user:', user.id);
     const { data: userTenant, error: userTenantError } = await adminClient
       .from('user_tenants')
       .select('tenant_id, role, is_default, tenants!inner(id, slug)')
@@ -68,20 +67,12 @@ export async function getCurrentTenantContext(): Promise<CurrentTenantContext | 
       .eq('is_default', true)
       .maybeSingle();
 
-    console.log('🔍 [TENANT CONTEXT] Default tenant query:', { 
-      hasData: !!userTenant, 
-      error: userTenantError?.message,
-      tenantId: userTenant?.tenant_id 
-    });
-
     if (!userTenantError && userTenant) {
       const tenantData = Array.isArray(userTenant.tenants) ? userTenant.tenants[0] : userTenant.tenants;
       tenantId = tenantData.id;
       tenantSlug = tenantData.slug;
-      console.log('✅ [TENANT CONTEXT] Found default tenant:', { tenantId, tenantSlug });
     } else {
       // If no default, try to get any tenant
-      console.log('🔍 [TENANT CONTEXT] No default tenant, checking for any tenant...');
       const { data: anyTenant, error: anyTenantError } = await adminClient
         .from('user_tenants')
         .select('tenant_id, role, tenants!inner(id, slug)')
@@ -89,19 +80,10 @@ export async function getCurrentTenantContext(): Promise<CurrentTenantContext | 
         .limit(1)
         .maybeSingle();
 
-      console.log('🔍 [TENANT CONTEXT] Any tenant query:', { 
-        hasData: !!anyTenant, 
-        error: anyTenantError?.message,
-        tenantId: anyTenant?.tenant_id 
-      });
-
       if (!anyTenantError && anyTenant) {
         const tenantData = Array.isArray(anyTenant.tenants) ? anyTenant.tenants[0] : anyTenant.tenants;
         tenantId = tenantData.id;
         tenantSlug = tenantData.slug;
-        console.log('✅ [TENANT CONTEXT] Found any tenant:', { tenantId, tenantSlug });
-      } else {
-        console.log('❌ [TENANT CONTEXT] No tenants found for user');
       }
     }
   }
@@ -115,12 +97,6 @@ export async function getCurrentTenantContext(): Promise<CurrentTenantContext | 
     .eq('tenant_id', tenantId)
     .eq('user_id', user.id)
     .maybeSingle();
-
-  console.log('🔍 [TENANT CONTEXT] Membership query:', { 
-    hasData: !!membership, 
-    error: membershipError?.message,
-    role: membership?.role 
-  });
 
   if (membershipError || !membership) return null;
 

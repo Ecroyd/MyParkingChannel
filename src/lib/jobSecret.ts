@@ -17,23 +17,16 @@ export function validateJobSecret(req: Request): boolean {
 }
 
 /**
- * Log request attribution for cron/health routes so Vercel logs show
- * user-agent, referer, IP, cf-ray (Cloudflare). Use to identify what's
- * hammering at 8am (monitoring, bots, browser tabs).
+ * Log request attribution for cron/health routes (optional). No-op by default;
+ * set DEBUG_HIT=1 in env to enable logging for debugging.
  */
-export function logRequestAttribution(req: Request, pathOverride?: string): void {
-  const url = req.url;
-  const path = pathOverride ?? (url ? new URL(url).pathname : '');
-  const ua = req.headers.get('user-agent') ?? '';
-  const referer = req.headers.get('referer') ?? '';
-  const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '';
-  const cf = req.headers.get('cf-ray') ?? '';
-  console.log('[HIT]', {
-    path,
-    ua,
-    referer,
-    ip,
-    cf,
-    at: new Date().toISOString(),
-  });
+export function logRequestAttribution(_req: Request, _pathOverride?: string): void {
+  if (process.env.DEBUG_HIT !== '1') return;
+  const url = _req.url;
+  const path = _pathOverride ?? (url ? new URL(url).pathname : '');
+  const ua = _req.headers.get('user-agent') ?? '';
+  const referer = _req.headers.get('referer') ?? '';
+  const ip = _req.headers.get('x-forwarded-for') ?? _req.headers.get('x-real-ip') ?? '';
+  const cf = _req.headers.get('cf-ray') ?? '';
+  console.log('[HIT]', { path, ua, referer, ip, cf, at: new Date().toISOString() });
 }

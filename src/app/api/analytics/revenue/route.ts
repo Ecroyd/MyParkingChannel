@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSupabase } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
+import { getSourceLabel } from '@/lib/supplier/labels';
 import { stringify } from "csv-stringify/sync";
 
 export async function GET(req: NextRequest) {
@@ -53,33 +54,25 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Process the data to match the expected format
-    const channelData = new Map();
-    
-    // Get supplier name: prefer external_source, fallback to source
-    const getSupplierName = (booking: any): string => {
-      if (booking.external_source && booking.external_source.trim().length > 0) {
-        return booking.external_source.trim();
-      }
-      return booking.source || 'Unknown';
-    };
-    
+    // Group by source only (never external_source); map to display label at response time
+    const channelData = new Map<string, { channel: string; bookings_count: number; booking_revenue: number; extension_revenue: number; total_revenue: number }>();
+
     bookings?.forEach(booking => {
-      const channel = getSupplierName(booking);
-      if (!channelData.has(channel)) {
-        channelData.set(channel, {
-          channel,
+      const sourceKey = (booking.source ?? "other").toLowerCase();
+      if (!channelData.has(sourceKey)) {
+        channelData.set(sourceKey, {
+          channel: getSourceLabel(booking.source),
           bookings_count: 0,
           booking_revenue: 0,
           extension_revenue: 0,
           total_revenue: 0
         });
       }
-      
-      const data = channelData.get(channel);
+
+      const data = channelData.get(sourceKey)!;
       data.bookings_count++;
       data.booking_revenue += booking.money_received || 0;
-      data.extension_revenue += 0; // No extension_revenue column exists
+      data.extension_revenue += 0;
       data.total_revenue = data.booking_revenue + data.extension_revenue;
     });
 

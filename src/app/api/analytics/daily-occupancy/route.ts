@@ -80,16 +80,8 @@ export async function GET(req: Request) {
   const rows: Row[] = data ?? [];
   const days = daysBetween(start, end);
 
-  // Aggregate per day per channel
+  // Aggregate per day per channel — group by source only (never external_source)
   const out: { day: string; channel: string; occupancy: number }[] = [];
-  
-  // Get supplier name: prefer external_source, fallback to source
-  const getSupplierName = (r: Row): string => {
-    if (r.external_source && r.external_source.trim().length > 0) {
-      return r.external_source.trim();
-    }
-    return r.source || "other";
-  };
 
   for (const day of days) {
     const dayISO = day.toISOString().slice(0, 10);
@@ -98,8 +90,8 @@ export async function GET(req: Request) {
     for (const r of rows) {
       const book = { start: new Date(r.start_at), end: new Date(r.end_at) };
       if (!overlapsDay(book, day)) continue;
-      const key = getSupplierName(r);
-      byChannel.set(key, (byChannel.get(key) ?? 0) + 1);
+      const sourceKey = (r.source ?? "other").toLowerCase();
+      byChannel.set(sourceKey, (byChannel.get(sourceKey) ?? 0) + 1);
     }
 
     // Even if empty, return [] for that day (UI can handle empties)

@@ -16,13 +16,13 @@ import { format, eachDayOfInterval } from "date-fns";
 import DateRangeModal from '@/components/admin/DateRangeModal';
 import { useDateRangeModal } from '@/hooks/useDateRangeModal';
 import { Calendar } from 'lucide-react';
-import { getSupplierLabel } from '@/lib/supplier/labels';
+import { getSourceLabel } from '@/lib/supplier/labels';
 
 type Booking = {
   start_at: string;  // timestamptz
   end_at: string;    // timestamptz
-  source: string | null; // channel enum
-  external_source: string | null; // supplier name (e.g. "CAVU TEST")
+  source: string | null; // channel enum — group by this only, never external_source
+  external_source?: string | null;
   tenant_id?: string;
 };
 
@@ -35,9 +35,10 @@ type DayRow = {
 };
 
 
-/** Stable, readable keys for recharts from any source string */
-function keyFromSource(src: string) {
-  return src.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+/** Stable key for recharts: use source enum only (never external_source). */
+function keyFromSource(source: string | null): string {
+  const s = (source ?? "other").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "other";
+  return s;
 }
 
 /** Deterministic colour per key (keeps palette stable across renders/tenants) */
@@ -208,8 +209,7 @@ export default function DemandCurve({
       console.log('DemandCurve: Sample booking:', {
         start: bookings[0].start_at,
         end: bookings[0].end_at,
-        source: bookings[0].source,
-        external_source: bookings[0].external_source
+        source: bookings[0].source
       });
     }
 
@@ -230,19 +230,12 @@ export default function DemandCurve({
         dayEnd.setHours(23, 59, 59, 999);
 
         // A booking is active on this day if it overlaps with this day
-        // This means: booking started before end of day AND booking ends after start of day
-        // This gives us cumulative occupancy (cars parked on this day)
         if (s <= dayEnd && e >= dayStart) {
-          // Use external_source for display, fallback to source
-          const supplierName = getSupplierLabel({
-            external_source: b.external_source,
-            source: b.source
-          });
-          const name = keyFromSource(supplierName);
-          chSet.add(name);
-          // Store the mapping from normalized key to display name
-          nameMap.set(name, supplierName);
-          row[name] = (row[name] as number | undefined ?? 0) + 1;
+          // Group by source only (never external_source)
+          const sourceKey = keyFromSource(b.source);
+          chSet.add(sourceKey);
+          nameMap.set(sourceKey, getSourceLabel(b.source));
+          row[sourceKey] = (row[sourceKey] as number | undefined ?? 0) + 1;
           row.total += 1;
         }
       }

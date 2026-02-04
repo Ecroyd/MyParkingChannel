@@ -48,10 +48,64 @@ export async function middleware(req: NextRequest) {
   const url = req.nextUrl.clone();
   const rawHost = req.headers.get("host");
   const normalizedHost = normalizeHost(rawHost);
+  const isDev = process.env.NODE_ENV === "development";
 
   // In development, do not serve the service worker (stale precache causes 404s for chunks like app-pages-internals.js)
-  if (process.env.NODE_ENV === "development" && (url.pathname === "/sw.js" || url.pathname.startsWith("/workbox-") || url.pathname.startsWith("/fallback-"))) {
+  if (isDev && (url.pathname === "/sw.js" || url.pathname.startsWith("/workbox-") || url.pathname.startsWith("/fallback-"))) {
     return new NextResponse(null, { status: 404 });
+  }
+
+  // In development on platform hosts: serve a one-time bootstrap page that unregisters any
+  // service worker and clears caches, then redirects. This fixes stale SW returning cached HTML
+  // that references old chunk URLs (main-app.js, app-pages-internals.js) which 404 in dev.
+  const accept = req.headers.get("accept") ?? "";
+  const isDocRequest =
+    req.method === "GET" &&
+    accept.includes("text/html") &&
+    !url.pathname.startsWith("/api") &&
+    !url.pathname.startsWith("/_next");
+  const alreadyBypassed = url.searchParams.get("_dev_sw") === "1";
+  const isPlatform = !normalizedHost || isPlatformHost(rawHost, normalizedHost);
+  // Force bootstrap via dedicated URL or query param (SW often never cached these, so request hits server)
+  const forceBootstrap =
+    isDev &&
+    isPlatform &&
+    req.method === "GET" &&
+    (url.pathname === "/dev-clear-sw" || url.searchParams.get("__clear_sw") === "1");
+  const willServeBootstrap =
+    isDev &&
+    isPlatform &&
+    (forceBootstrap || (isDocRequest && !alreadyBypassed));
+
+  if (willServeBootstrap) {
+    // Redirect target: if they hit /dev-clear-sw, send them to home; else same path with _dev_sw=1
+    const nextParams = new URLSearchParams(url.searchParams);
+    nextParams.delete("__clear_sw");
+    nextParams.set("_dev_sw", "1");
+    const redirectPath =
+      url.pathname === "/dev-clear-sw"
+        ? "/?_dev_sw=1"
+        : url.pathname + "?" + nextParams.toString();
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Loading...</title></head><body><p>Clearing service worker for dev...</p><script>
+(function() {
+  var redirect = "${redirectPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}";
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.getRegistrations().then(function(regs) {
+      return Promise.all(regs.map(function(r) { return r.unregister(); }));
+    }).then(function() {
+      if (typeof caches !== "undefined") {
+        return caches.keys().then(function(keys) { return Promise.all(keys.map(function(k) { return caches.delete(k); })); });
+      }
+    }).then(function() { location.replace(redirect); }, function() { location.replace(redirect); });
+  } else {
+    location.replace(redirect);
+  }
+})();
+</script></body></html>`;
+    return new NextResponse(html, {
+      status: 200,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
   }
 
   // 🔴 Do NOT rewrite API routes, PWA assets, manifest, or static files
@@ -72,7 +126,6 @@ export async function middleware(req: NextRequest) {
     decodedPath.includes("file.svg") ||
     decodedPath.includes("parking") && decodedPath.includes("favicon")
   ) {
-    console.log("[TENANT_RESOLVE] Skipping rewrite for:", url.pathname);
     return NextResponse.next();
   }
 
@@ -88,7 +141,6 @@ export async function middleware(req: NextRequest) {
     const baseHost = "myparkingchannel.app";
     if (normalizedHost.endsWith("." + baseHost)) {
       slug = normalizedHost.slice(0, -(baseHost.length + 1));
-      console.log("[TENANT_RESOLVE] Extracted slug from subdomain:", slug);
     }
 
     // If not a subdomain, look up in tenant_domains table
@@ -108,13 +160,6 @@ export async function middleware(req: NextRequest) {
         (domainRow as any)?.slug ??
         null;
     }
-
-    console.log("[TENANT_RESOLVE]", {
-      rawHost,
-      normalizedHost,
-      slug,
-      isSubdomain: normalizedHost.endsWith("." + baseHost),
-    });
 
     if (!slug) {
       // Unknown domain → DO NOT fall back to platform site, show a specific page

@@ -1,47 +1,53 @@
 /**
+ * Display labels for bookings.source (enum) only.
+ * Used at display time for analytics/demand curve. Never store these in the database.
+ */
+export const SOURCE_LABELS: Record<string, string> = {
+  aph: "APH Email Import",
+  cavu: "CAVU",
+  holidayextras: "Holiday Extras",
+  direct: "Direct",
+  manual: "Manual",
+  other: "Other",
+  parkvia: "ParkVia",
+  supplier_api: "Supplier API",
+};
+
+/**
+ * Get display label for a booking source (enum value).
+ * For analytics/demand curve: group by source only, then use this for display.
+ */
+export function getSourceLabel(source: string | null | undefined): string {
+  if (source == null || source === "") return SOURCE_LABELS.other ?? "Other";
+  const key = source.toLowerCase();
+  if (SOURCE_LABELS[key]) return SOURCE_LABELS[key];
+  return source
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+/**
  * Helper function to get a user-friendly supplier/channel label from booking data.
- * 
+ * Use for non-analytics UI (e.g. booking list) where showing external_source is desired.
+ *
  * Priority:
- * 1. external_source (if present and non-empty) - e.g. "CAVU TEST", "Holiday Extras"
- * 2. source enum formatted nicely - e.g. "supplier_api" -> "Supplier API", "manual" -> "Manual"
- * 3. "Unknown supplier" as fallback
+ * 1. supplier_name if provided (from analytics queries that already grouped by source)
+ * 2. external_source (if present and non-empty) - e.g. "CAVU TEST", "Holiday Extras"
+ * 3. source enum via getSourceLabel()
  */
 export function getSupplierLabel(row: {
   supplier_name?: string | null;
   external_source?: string | null;
   source?: string | null;
 }): string {
-  // Priority 1: Use supplier_name if provided (from analytics queries)
   if (row.supplier_name && row.supplier_name.trim().length > 0) {
     return row.supplier_name.trim();
   }
-
-  // Priority 2: Use external_source if available
   if (row.external_source && row.external_source.trim().length > 0) {
     return row.external_source.trim();
   }
-
-  // Priority 3: Format the enum source nicely
-  if (row.source) {
-    switch (row.source) {
-      case 'manual':
-        return 'Manual';
-      case 'supplier_api':
-        return 'Supplier API';
-      case 'direct':
-        return 'Direct';
-      case 'agent':
-        return 'Agent';
-      default:
-        // Convert snake_case to Title Case
-        return row.source
-          .split('_')
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-          .join(' ');
-    }
-  }
-
-  return 'Unknown supplier';
+  return getSourceLabel(row.source);
 }
 
 /**

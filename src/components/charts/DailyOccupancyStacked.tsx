@@ -13,7 +13,7 @@ import {
 } from 'recharts';
 import { createBrowserClient } from '@supabase/ssr';
 import { format, eachDayOfInterval } from 'date-fns';
-import { getSupplierLabel } from '@/lib/supplier/labels';
+import { getSourceLabel } from '@/lib/supplier/labels';
 
 type Row = { day: string; channel: string; occupancy: number };
 
@@ -86,12 +86,9 @@ export default function DailyOccupancyStacked({ tenantId, start, end, tz = 'UTC'
             
             // Check if booking overlaps with this day
             if (startDate <= day && endDate >= day) {
-              // Use external_source for display, fallback to source
-              const channel = getSupplierLabel({
-                external_source: booking.external_source,
-                source: booking.source
-              });
-              channelCounts[channel] = (channelCounts[channel] || 0) + 1;
+              // Group by source only (never external_source)
+              const sourceKey = (booking.source ?? "other").toLowerCase();
+              channelCounts[sourceKey] = (channelCounts[sourceKey] || 0) + 1;
             }
           }
 
@@ -184,7 +181,7 @@ export default function DailyOccupancyStacked({ tenantId, start, end, tz = 'UTC'
               dataKey={ch} 
               stackId="a" 
               fill={channelColors[ch] || '#6b7280'}
-              name={ch.charAt(0).toUpperCase() + ch.slice(1)}
+              name={getSourceLabel(ch)}
             />
           ))}
         </BarChart>
