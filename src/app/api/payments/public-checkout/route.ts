@@ -170,7 +170,7 @@ export async function POST(req: Request) {
             end_at: end_at,
           },
         },
-        success_url: `${ROOT_URL}/success?tenant=${tenant_id}&reference=${bookingReference}&amount=${amount_cents / 100}`,
+        success_url: `${ROOT_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${siteUrlForTenantSlug(tenant.slug)}?cancelled=1`,
       },
       useConnected(accountId),

@@ -79,7 +79,7 @@ const STRIPE_API_VERSION = process.env.STRIPE_API_VERSION ?? STRIPE_API_VERSION_
 // Create Stripe instance - use dummy key during builds if no real key is available
 const stripeKey = STRIPE_SECRET_KEY || 'sk_test_dummy_key_for_build';
 
-console.log('[STRIPE] API version =', STRIPE_API_VERSION);
+console.log('Stripe API version =', STRIPE_API_VERSION);
 console.log('🔍 [STRIPE] Final key being used:', {
   hasRealKey: !!STRIPE_SECRET_KEY,
   keyPrefix: stripeKey.substring(0, 12),

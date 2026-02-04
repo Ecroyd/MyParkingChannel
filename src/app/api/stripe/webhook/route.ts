@@ -59,6 +59,8 @@ export async function POST(req: Request) {
 }
 
 // Webhook handler functions
+// We read tenant_id, temp_booking_id, reference from session.metadata only (never from success URL).
+// Checkout routes set metadata + payment_intent_data.metadata so we never need to scrape URLs.
 async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) {
   try {
     const admin = createClient(
@@ -154,6 +156,7 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
       money_charged: paymentIntent.amount / 100,
       reference: reference,
       stripe_payment_intent_id: paymentIntentId,
+      stripe_checkout_session_id: session.id,
     };
 
     const { data: booking, error } = await admin

@@ -5,6 +5,18 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import BackButton from '@/components/success/BackButton';
 import BookingProcessor from '@/components/success/BookingProcessor';
+import PollForSession from '@/components/success/PollForSession';
+import { createAdminClient } from '@/lib/supabase/admin';
+
+async function getBookingByCheckoutSessionId(sessionId: string) {
+  const admin = createAdminClient();
+  const { data: booking } = await admin
+    .from('bookings')
+    .select('*')
+    .eq('stripe_checkout_session_id', sessionId)
+    .maybeSingle();
+  return booking ?? null;
+}
 
 async function getBookingDetails(tenantId: string, reference?: string) {
   const cookieStore = await cookies();
@@ -69,11 +81,28 @@ async function getTenantDetails(tenantId: string) {
   return tenant;
 }
 
-async function SuccessContent({ searchParams }: { searchParams: Promise<{ tenant?: string; reference?: string }> }) {
+async function SuccessContent({ searchParams }: { searchParams: Promise<{ session_id?: string; tenant?: string; reference?: string }> }) {
   const resolvedSearchParams = await searchParams;
+  const sessionId = resolvedSearchParams.session_id;
   const tenantId = resolvedSearchParams.tenant;
   const reference = resolvedSearchParams.reference;
-  
+
+  // Prefer session_id (no tenant/reference in URL); webhook sets stripe_checkout_session_id on booking
+  if (sessionId && sessionId.startsWith('cs_')) {
+    const booking = await getBookingByCheckoutSessionId(sessionId);
+    if (booking) {
+      const tenant = await getTenantDetails(booking.tenant_id);
+      return (
+        <SuccessView
+          booking={booking}
+          tenantId={booking.tenant_id}
+          tenant={tenant}
+        />
+      );
+    }
+    return <PollForSession sessionId={sessionId} />;
+  }
+
   if (!tenantId) {
     redirect('/');
   }
@@ -84,22 +113,38 @@ async function SuccessContent({ searchParams }: { searchParams: Promise<{ tenant
   ]);
 
   if (!booking) {
-    // If no booking found, it might be because the webhook hasn't run yet
-    // Show the booking processor component that will poll for the booking
     return <BookingProcessor tenantId={tenantId} reference={reference || ''} />;
   }
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString('en-GB', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
+  return (
+    <SuccessView
+      booking={booking}
+      tenantId={tenantId}
+      tenant={tenant}
+    />
+  );
+}
 
+function formatDate(dateString: string) {
+  return new Date(dateString).toLocaleString('en-GB', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+function SuccessView({
+  booking,
+  tenantId,
+  tenant,
+}: {
+  booking: { reference: string; customer_name: string; customer_email: string; plate: string; start_at: string; end_at: string; money_charged: number | null; status: string };
+  tenantId: string;
+  tenant: { name?: string; slug?: string } | null;
+}) {
   return (
     <main className="mx-auto max-w-2xl p-6">
       <div className="text-center mb-8">
@@ -147,7 +192,7 @@ async function SuccessContent({ searchParams }: { searchParams: Promise<{ tenant
           </div>
           <div>
             <p className="text-sm text-gray-500">Total Amount</p>
-            <p className="font-semibold text-lg">£{(booking.money_charged / 100).toFixed(2)}</p>
+            <p className="font-semibold text-lg">£{(booking.money_charged ?? 0).toFixed(2)}</p>
           </div>
           <div>
             <p className="text-sm text-gray-500">Status</p>
@@ -173,7 +218,7 @@ async function SuccessContent({ searchParams }: { searchParams: Promise<{ tenant
   );
 }
 
-export default function Success({ searchParams }: { searchParams: Promise<{ tenant?: string; reference?: string }> }) {
+export default function Success({ searchParams }: { searchParams: Promise<{ session_id?: string; tenant?: string; reference?: string }> }) {
   return (
     <Suspense fallback={
       <main className="mx-auto max-w-xl p-6">

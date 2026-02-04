@@ -21,11 +21,12 @@ function getPlatformStripeKeys(): TenantStripeKeys {
   return { secretKey: secretKey ?? undefined, publishableKey: publishableKey ?? undefined };
 }
 
+// Rule set: Public/booking checkout always uses platform Stripe + Connect destination.
+// Refunds use platform Stripe with stripeAccount (useConnected). Manual tenant keys only for legacy tenants where Connect isn't connected.
 export async function getTenantStripeKeys(tenantId: string): Promise<TenantStripeKeys> {
   const sb = supabaseAdmin();
   const forceTestMode = process.env.STRIPE_MODE === 'test';
 
-  // 1) Connect: tenant_stripe.connected + stripe_account_id → always use platform key (checkout uses platform + useConnected(accountId))
   if (!forceTestMode) {
     const { data: stripeRow, error: stripeError } = await sb
       .from('tenant_stripe')
@@ -33,14 +34,15 @@ export async function getTenantStripeKeys(tenantId: string): Promise<TenantStrip
       .eq('tenant_id', tenantId)
       .maybeSingle();
 
-    if (!stripeError && stripeRow?.connected && stripeRow?.stripe_account_id) {
+    // 1) Connected → always use platform key (caller passes useConnected(accountId) for Connect operations)
+    if (!stripeError && stripeRow?.connected === true && stripeRow?.stripe_account_id) {
       const platform = getPlatformStripeKeys();
-      console.log('[TENANT STRIPE] Using Connect (platform key) for tenant:', tenantId);
+      console.log('[TENANT STRIPE] path=Connect (platform key) tenant=', tenantId);
       return platform;
     }
-    // 2) Legacy: tenant_stripe has own secret key (manual keys stored on row)
+    // 2) Legacy: tenant_stripe has own keys (manual/legacy; feature-flag in UI)
     if (!stripeError && stripeRow?.stripe_secret_key) {
-      console.log('[TENANT STRIPE] Using legacy tenant keys (tenant_stripe) for tenant:', tenantId);
+      console.log('[TENANT STRIPE] path=legacy tenant_stripe tenant=', tenantId);
       return {
         secretKey: stripeRow.stripe_secret_key,
         publishableKey: stripeRow.stripe_publishable_key ?? undefined,
@@ -61,14 +63,14 @@ export async function getTenantStripeKeys(tenantId: string): Promise<TenantStrip
       if (row.key === 'stripe.publishable_key') out.publishableKey = row.value_ciphertext;
     });
     if (out.secretKey || out.publishableKey) {
-      console.log('[TENANT STRIPE] Using legacy tenant keys (tenant_secrets) for tenant:', tenantId);
+      console.log('[TENANT STRIPE] path=legacy tenant_secrets tenant=', tenantId);
       return out;
     }
   }
 
   // 4) Platform fallback
   const platform = getPlatformStripeKeys();
-  console.log('[TENANT STRIPE] Using platform fallback for tenant:', tenantId);
+  console.log('[TENANT STRIPE] path=platform fallback tenant=', tenantId);
   return platform;
 }
 

@@ -25,6 +25,7 @@ export interface Booking {
   flight_number: string | null;
   notes: string | null;
   stripe_payment_intent_id?: string | null;
+  stripe_checkout_session_id?: string | null;
   payment_status?: string | null;
   checked_in_at?: string | null;
   checked_out_at?: string | null;
