@@ -690,8 +690,8 @@ export default function TodayServerClient({
               <span>£{booking.money_charged || 0}</span>
             </div>
             <Select value={displayGateStatus === '' ? undefined : displayGateStatus} onValueChange={handleGateStatusChange} disabled={isPending}>
-              <SelectTrigger className="h-7 px-1 py-0 bg-transparent border-0 shadow-none gap-1 cursor-pointer focus:ring-0 focus:ring-offset-0 min-w-0 w-auto [&>svg]:shrink-0">
-                <SelectValue className="sr-only" />
+              <SelectTrigger className="h-7 px-1 py-0 bg-transparent border-0 shadow-none gap-1 cursor-pointer focus:ring-0 focus:ring-offset-0 min-w-0 w-auto [&>svg]:shrink-0 [&>span:first-of-type]:sr-only">
+                <SelectValue />
                 <span className={cn('inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium leading-none', gateStatusPillClass(displayGateStatus))}>
                   {gateStatusLabel(displayGateStatus)}
                 </span>

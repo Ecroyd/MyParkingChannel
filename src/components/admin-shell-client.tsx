@@ -67,8 +67,11 @@ export default function AdminShellClient({
 
   const fetchHealthSnapshot = useCallback(async () => {
     const res = await fetch('/api/admin/health-snapshot');
-    if (!res.ok) throw new Error('Health snapshot failed');
-    const json = await res.json();
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = json?.error ?? res.statusText ?? 'Health snapshot failed';
+      throw new Error(`${res.status}: ${msg}`);
+    }
     if (!json.ok) throw new Error(json.error || 'Health snapshot failed');
     return json;
   }, []);
