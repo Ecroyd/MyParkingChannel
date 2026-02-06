@@ -47,16 +47,16 @@ export default async function TodayServerPage() {
     // Get today's arrivals (bookings starting today)
     const { data: arrivals, error: arrivalsError } = await adminClient
       .from('bookings')
-      .select('id, tenant_id, reference, customer_name, customer_email, customer_phone, plate, car_make, car_model, car_color, start_at, end_at, status, money_received, money_charged, source, flight_number, notes, stripe_payment_intent_id, payment_status, checked_in_at, checked_out_at, gate_status, highlight_code')
+      .select('id, tenant_id, reference, customer_name, customer_email, customer_phone, plate, car_make, car_model, car_color, start_at, end_at, status, money_received, money_charged, source, flight_number, notes, stripe_payment_intent_id, payment_status, checked_in_at, checked_out_at, gate_status, highlight_code, ops_status, ops_hidden, ops_hidden_reason')
       .eq('tenant_id', tenantId)
       .gte('start_at', startOfDayUTC.toISOString())
       .lt('start_at', endOfDayUTC.toISOString())
       .order('start_at', { ascending: false });
 
-    // Get today's departures (bookings ending today)
+    // Get today's departures (bookings ending today) — include all; hidden (departed/no_show) are filtered in UI with "Show hidden"
     const { data: departures, error: departuresError } = await adminClient
       .from('bookings')
-      .select('id, tenant_id, reference, customer_name, customer_email, customer_phone, plate, car_make, car_model, car_color, start_at, end_at, status, money_received, money_charged, source, flight_number, notes, stripe_payment_intent_id, payment_status, checked_in_at, checked_out_at, gate_status, highlight_code')
+      .select('id, tenant_id, reference, customer_name, customer_email, customer_phone, plate, car_make, car_model, car_color, start_at, end_at, status, money_received, money_charged, source, flight_number, notes, stripe_payment_intent_id, payment_status, checked_in_at, checked_out_at, gate_status, highlight_code, ops_status, ops_hidden, ops_hidden_reason')
       .eq('tenant_id', tenantId)
       .gte('end_at', startOfDayUTC.toISOString())
       .lt('end_at', endOfDayUTC.toISOString())
@@ -67,7 +67,7 @@ export default async function TodayServerPage() {
     // Include all bookings that are meant to be in the car park (not cancelled)
     const { data: currentlyParked, error: currentlyParkedError } = await adminClient
       .from('bookings')
-      .select('id, tenant_id, reference, customer_name, customer_email, customer_phone, plate, car_make, car_model, car_color, start_at, end_at, status, money_received, money_charged, source, flight_number, notes, stripe_payment_intent_id, payment_status, checked_in_at, checked_out_at, gate_status, highlight_code')
+      .select('id, tenant_id, reference, customer_name, customer_email, customer_phone, plate, car_make, car_model, car_color, start_at, end_at, status, money_received, money_charged, source, flight_number, notes, stripe_payment_intent_id, payment_status, checked_in_at, checked_out_at, gate_status, highlight_code, ops_status, ops_hidden, ops_hidden_reason')
       .eq('tenant_id', tenantId)
       .lt('start_at', endOfDayUTC.toISOString())
       .gt('end_at', startOfDayUTC.toISOString())

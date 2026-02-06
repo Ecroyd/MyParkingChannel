@@ -139,16 +139,22 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
+  // Soft-hide: set ops_hidden so row stays in DB but is filtered in UI (no hard delete)
   const { error } = await supabase
     .from('bookings')
-    .delete()
+    .update({
+      ops_hidden: true,
+      ops_hidden_at: new Date().toISOString(),
+      ops_hidden_by: userId,
+      ops_hidden_reason: 'hidden_by_user',
+    })
     .eq('id', id)
 
   if (error) {
-    console.error('Booking delete error:', error)
+    console.error('Booking hide error:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
-  
+
   return NextResponse.json({ success: true })
 }
 

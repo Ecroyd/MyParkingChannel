@@ -23,6 +23,10 @@ export type CanonicalBooking = {
   return_flight_number: string | null;
 
   total_price: number | null;
+  /** Optional: left money column (e.g. Holiday Extras net/received). */
+  money_received?: number | null;
+  /** Optional: right money column (e.g. Holiday Extras gross/charged). */
+  money_charged?: number | null;
   currency: string | null;
 
   raw: any; // keep original fields

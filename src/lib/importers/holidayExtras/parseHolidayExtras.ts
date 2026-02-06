@@ -21,10 +21,12 @@ function toIsoFromDMY6_HM(dmy6: string, hm: string) {
   return `${d.yyyy}-${d.mm}-${d.dd}T${t.padStart(5, "0")}:00.000Z`;
 }
 
-function parseMoney(x: string) {
-  const v = trim(x);
-  if (!v) return null;
-  const n = Number(v);
+/** Safe money parser: strips non-numeric chars, returns null for empty/invalid. */
+function parseMoney(v: string | number | null | undefined): number | null {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  const n = Number(s.replace(/[^0-9.-]/g, ""));
   return Number.isFinite(n) ? n : null;
 }
 
@@ -54,8 +56,8 @@ export function parseHolidayExtrasText(text: string): CanonicalBooking[] {
     // 8: arrival date "190126"
     // 9: ??? (003)
     // 10: status (*FIRM*/*AMND*/*CANX*)
-    // 11: net? (87.50)
-    // 12: gross? (125 / 63.99 etc)
+    // 11: money_received (left amount, e.g. 64.40)
+    // 12: money_charged (right amount, e.g. 79.12)
     // 13: return date (280126)
     // 14: return time (17:30)
     // 15: vehicle reg (MF18UFU) - CAN BE EMPTY!
@@ -77,10 +79,16 @@ export function parseHolidayExtrasText(text: string): CanonicalBooking[] {
     const surname = trim(f[3]) || null;
     const firstInitial = trim(f[5]) || null;
 
-    // Use gross (index 12) if present, else net (11)
-    const price = parseMoney(f[12]) ?? parseMoney(f[11]);
+    // Left column (11) = money_received; right column (12) = money_charged
+    const money_received = parseMoney(f[11]);
+    const money_charged = parseMoney(f[12]);
+    const total_price = money_charged ?? money_received;
 
-    const status = trim(f[10]) || null;
+    // Field 10: *FIRM* | *AMND* | *CANX* — normalize to FIRM/AMND/CANX for external_status
+    const statusToken = trim(f[10]) || null;
+    const rawStatus = statusToken
+      ? statusToken.replace(/\*/g, "").trim().toUpperCase()
+      : null;
 
     // Phones sometimes include country codes and quoting
     const phone = trim(f[21]) || trim(f[22]) || null;
@@ -123,9 +131,11 @@ export function parseHolidayExtrasText(text: string): CanonicalBooking[] {
       customer_phone: phone,
       outbound_flight_number: outboundFlight,
       return_flight_number: returnFlight,
-      total_price: price,
+      total_price,
+      money_received,
+      money_charged,
       currency: "GBP",
-      raw: { fields: f, external_status: status },
+      raw: { fields: f, external_status: rawStatus ?? statusToken },
     };
   }).filter((r): r is NonNullable<typeof r> => r !== null); // Filter out nulls (rows without vehicle_reg)
 }

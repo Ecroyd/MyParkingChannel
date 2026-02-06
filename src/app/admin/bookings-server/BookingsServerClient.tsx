@@ -310,13 +310,13 @@ export default function BookingsServerClient({ user, tenant, bookings: initialBo
       });
 
       if (response.ok) {
-        toast.success(`Successfully deleted ${selectedBookings.size} booking(s)`);
+        toast.success(`Successfully hidden ${selectedBookings.size} booking(s)`);
         setSelectedBookings(new Set());
         // Refresh bookings from API
         await fetchBookings();
       } else {
         const error = await response.json();
-        toast.error(error.message || 'Failed to delete bookings');
+        toast.error(error.message || 'Failed to hide bookings');
       }
     } catch (error) {
       toast.error('Failed to delete bookings');

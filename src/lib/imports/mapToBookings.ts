@@ -24,6 +24,7 @@ export function mapStagingToBookings(stagingRecord: any) {
     start_at: stagingRecord.start_at,
     end_at: stagingRecord.end_at,
     status: mapStatusToEnum(stagingRecord.status),
+    external_status: stagingRecord.external_status ?? null,
     money_charged: stagingRecord.price ?? stagingRecord.total_price ?? 0,
     money_received: stagingRecord.money_received ?? stagingRecord.total_price ?? 0,
     notes: stagingRecord.notes || '',

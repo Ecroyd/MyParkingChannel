@@ -67,9 +67,8 @@ export async function GET(request: NextRequest) {
       .gte('start_at', startOfDayUTC.toISOString())
       .lte('start_at', endOfDayUTC.toISOString())
       .order('start_at', { ascending: false });
-    
 
-    // Get departures (bookings ENDING in the date range)
+    // Get departures (bookings ENDING in the date range) — include all; hidden filtered in UI
     const { data: departures, error: departuresError } = await adminClient
       .from('bookings')
       .select('*')

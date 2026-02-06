@@ -64,80 +64,48 @@ export async function promoteStagingRowToBooking(
   }
 
   const mapped = mapStagingToBookings(stagingRow);
-  const payload = {
+  const source = stagingRow.source ?? "direct";
+  const externalSource =
+    stagingRow.raw_json?.kind === "flyparks_text_email"
+      ? "flyparks_email_text"
+      : stagingRow.raw_json?.channel === "APH"
+        ? "aph"
+        : null;
+
+  const bookingRow = {
     ...mapped,
+    tenant_id: tenantId,
+    source,
+    reference: stagingRow.reference,
     start_at: startAtParsed,
     end_at: endAtParsed,
-    // Flyparks text email: pass through email from raw_json when present
+    status: mapped.status,
+    external_status: mapped.external_status ?? null,
+    external_source: externalSource,
+    updated_at: new Date().toISOString(),
     ...(stagingRow.raw_json?.extracted?.email
       ? { customer_email: stagingRow.raw_json.extracted.email }
       : {}),
   };
 
-  const { data: existing, error: probeErr } = await supabase
-    .from("bookings")
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .eq("dedupe_key", stagingRow.dedupe_key)
-    .maybeSingle();
-
-  if (probeErr) {
-    return { ok: false, error: probeErr.message };
-  }
-
-  if (existing) {
-    const { error: updateErr } = await supabase
-      .from("bookings")
-      .update(payload)
-      .eq("id", existing.id)
-      .eq("tenant_id", tenantId);
-    if (updateErr) {
-      return { ok: false, error: updateErr.message };
-    }
-    return { ok: true, updated: true, bookingId: existing.id };
-  }
-
-  // Fallback: check by reference
-  const { data: byRef } = await supabase
-    .from("bookings")
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .eq("reference", stagingRow.reference)
-    .maybeSingle();
-
-  if (byRef) {
-    const { error: updateErr } = await supabase
-      .from("bookings")
-      .update(payload)
-      .eq("id", byRef.id)
-      .eq("tenant_id", tenantId);
-    if (updateErr) {
-      return { ok: false, error: updateErr.message };
-    }
-    return { ok: true, updated: true, bookingId: byRef.id };
-  }
-
-  // Skip insert if vehicle_reg is required and missing (match parseEmailFile behavior).
-  // Allow Flyparks text emails to create bookings without a reg.
+  // Skip insert/upsert if vehicle_reg is required and missing (match parseEmailFile behavior).
   const isFlyparksText = stagingRow.raw_json?.kind === "flyparks_text_email";
   const hasReg = stagingRow.vehicle_reg && String(stagingRow.vehicle_reg).trim() !== "" && stagingRow.vehicle_reg !== "-";
   if (!isFlyparksText && !hasReg) {
     return { ok: false, error: "Missing vehicle registration (required for new booking)" };
   }
 
-  const { data: inserted, error: insertErr } = await supabase
+  const { data: upserted, error: upsertErr } = await supabase
     .from("bookings")
-    .insert({
-      ...payload,
-      tenant_id: tenantId,
-      source: stagingRow.source ?? "direct",
-      external_source: stagingRow.raw_json?.kind === "flyparks_text_email" ? "flyparks_email_text" : null,
+    .upsert(bookingRow, {
+      onConflict: "tenant_id,source,reference",
+      ignoreDuplicates: false,
     })
     .select("id")
     .single();
 
-  if (insertErr) {
-    return { ok: false, error: insertErr.message };
+  if (upsertErr) {
+    return { ok: false, error: upsertErr.message };
   }
-  return { ok: true, bookingId: inserted?.id };
+  return { ok: true, updated: true, bookingId: upserted?.id };
 }

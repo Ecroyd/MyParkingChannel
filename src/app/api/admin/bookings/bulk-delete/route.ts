@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
+import { getServerSupabase } from '@/lib/supabase/server';
 
 export async function POST(req: Request) {
   try {
@@ -14,6 +15,9 @@ export async function POST(req: Request) {
     }
 
     const adminClient = await createAdminClient();
+    const supabase = await getServerSupabase();
+    const { data: auth } = await supabase.auth.getUser();
+    const userId = auth?.user?.id ?? null;
 
     // Verify all bookings belong to the tenant
     const { data: bookings, error: fetchError } = await adminClient
@@ -29,25 +33,30 @@ export async function POST(req: Request) {
     // Check if all bookings belong to the tenant
     const invalidBookings = bookings?.filter(booking => booking.tenant_id !== tenantId);
     if (invalidBookings && invalidBookings.length > 0) {
-      return NextResponse.json({ 
-        error: 'Some bookings do not belong to this tenant' 
+      return NextResponse.json({
+        error: 'Some bookings do not belong to this tenant'
       }, { status: 403 });
     }
 
-    // Delete the bookings
-    const { error: deleteError } = await adminClient
+    // Soft-hide: set ops_hidden so rows stay in DB but are filtered in UI (no hard delete)
+    const { error: updateError } = await adminClient
       .from('bookings')
-      .delete()
+      .update({
+        ops_hidden: true,
+        ops_hidden_at: new Date().toISOString(),
+        ops_hidden_by: userId,
+        ops_hidden_reason: 'bulk_hidden',
+      })
       .in('id', bookingIds);
 
-    if (deleteError) {
-      console.error('Error deleting bookings:', deleteError);
-      return NextResponse.json({ error: 'Failed to delete bookings' }, { status: 500 });
+    if (updateError) {
+      console.error('Error hiding bookings:', updateError);
+      return NextResponse.json({ error: 'Failed to hide bookings' }, { status: 500 });
     }
 
-    return NextResponse.json({ 
-      success: true, 
-      deletedCount: bookingIds.length 
+    return NextResponse.json({
+      success: true,
+      hiddenCount: bookingIds.length,
     });
 
   } catch (error) {

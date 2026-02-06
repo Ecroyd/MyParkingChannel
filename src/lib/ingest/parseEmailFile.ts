@@ -24,7 +24,10 @@ function parseFileWithCanonicalMappers(buffer: Buffer, filename: string) {
     const external_status = canonical.raw?.external_status != null
       ? String(canonical.raw.external_status).trim()
       : null;
-    const isCancel = external_status != null && /cancel/i.test(external_status);
+    // CANX (from *CANX*) and cancel* both map to cancelled
+    const isCancel =
+      external_status != null &&
+      (/cancel/i.test(external_status) || external_status.toUpperCase().trim() === "CANX");
     return {
       channel: canonical.channel, // Keep original channel (CAVU, APH, FLYPARKS_EMAIL, HOLIDAY_EXTRAS) for source mapping
       source: canonical.channel.toLowerCase(), // For dedupe key
@@ -44,12 +47,12 @@ function parseFileWithCanonicalMappers(buffer: Buffer, filename: string) {
       flight_number: canonical.return_flight_number || canonical.outbound_flight_number,
       phone: canonical.customer_phone,
       status: isCancel ? "cancelled" : "reserved",
-      price: canonical.total_price || 0,
-      money_received: 0,
+      price: canonical.money_charged ?? canonical.total_price ?? 0,
+      money_received: canonical.money_received ?? 0,
       notes: null,
       // Additional fields
       external_reference: canonical.third_party_reference || canonical.booking_reference,
-      external_status: isCancel ? "cancelled" : external_status,
+      external_status, // Keep raw token (e.g. "CANX") for audit; status is "cancelled" when isCancel
       return_flight_no: canonical.return_flight_number,
       product_code: null,
       currency: canonical.currency || "GBP",

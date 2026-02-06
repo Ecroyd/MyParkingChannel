@@ -2,12 +2,11 @@
 
 import React, { useState, useEffect, useMemo, useTransition, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { LogIn, LogOut, Car, DollarSign, ArrowUpDown, ChevronDown, ChevronUp } from 'lucide-react';
+import { LogIn, LogOut, Car, DollarSign, ArrowUpDown, ChevronDown, ChevronUp, KeyRound } from 'lucide-react';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
 import DateRangeSelector from '@/components/admin/DateRangeSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { GateStatus } from '@/lib/bookings/gateStatus';
 import { cn } from '@/lib/utils';
 import { useToast, toast as toastFn } from '@/hooks/use-toast';
 import { BookingHighlightIcon } from '@/components/bookings/BookingHighlightIcon';
@@ -19,8 +18,27 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  GATE_STATUS,
+  GATE_STATUS_OPTIONS,
+  gateStatusLabel,
+  gateStatusPillClass,
+} from '@/lib/gateStatus';
 
 import { BookingHighlightCode } from '@/types/bookings';
+
+/** Parse response as JSON; throw a clear error if server returned HTML (e.g. 404/500 page). */
+async function parseJsonFromResponse(res: Response): Promise<unknown> {
+  const text = await res.text();
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch (e) {
+    if (text.trimStart().startsWith('<')) {
+      throw new Error('Server returned an HTML page instead of JSON. The API may be missing or returned an error.');
+    }
+    throw e;
+  }
+}
 
 interface Booking {
   id: string;
@@ -47,6 +65,8 @@ interface Booking {
   checked_out_at: string | null;
   gate_status?: string | null;
   highlight_code: BookingHighlightCode;
+  ops_hidden?: boolean;
+  ops_hidden_reason?: string | null;
 }
 
 interface Tenant {
@@ -81,6 +101,8 @@ export default function TodayServerClient({
   currentlyParked: initialCurrentlyParked 
 }: TodayServerClientProps) {
   const router = useRouter();
+  const { toast } = useToast();
+  const [, startTransition] = useTransition();
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [kpis, setKpis] = useState(initialKpis);
@@ -93,6 +115,9 @@ export default function TodayServerClient({
   const [highlightMode, setHighlightMode] = useState(false);
   const [updatingHighlightId, setUpdatingHighlightId] = useState<string | null>(null);
   const [arrivalsDeparturesCollapsed, setArrivalsDeparturesCollapsed] = useState(false);
+  const [showHidden, setShowHidden] = useState(false); // show departed/no_show rows so you can unhide
+  const [filterKeysTaken, setFilterKeysTaken] = useState(false);
+  const [filterArrivedKeyTaken, setFilterArrivedKeyTaken] = useState(false);
   const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
   const [collapsedParkedDates, setCollapsedParkedDates] = useState<Set<string>>(new Set());
   // Initialize date range to today
@@ -106,6 +131,30 @@ export default function TodayServerClient({
 
   const handleBookingUpdated = () => {
     router.refresh();
+  };
+
+  const handleUnhide = (booking: Booking) => {
+    startTransition(async () => {
+      try {
+        const res = await fetch(`/api/admin/bookings/${booking.id}/unhide`, { method: 'PATCH' });
+        const data = (await parseJsonFromResponse(res)) as { booking?: { ops_hidden?: boolean; ops_hidden_reason?: string | null }; error?: string };
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to unhide');
+        }
+        const updated = { ...booking, ops_hidden: false, ops_hidden_reason: null };
+        if (data.booking) {
+          Object.assign(updated, { ops_hidden: data.booking.ops_hidden ?? false, ops_hidden_reason: data.booking.ops_hidden_reason ?? null });
+        }
+        setArrivals(prev => prev.map(b => b.id === booking.id ? updated : b));
+        setDepartures(prev => prev.map(b => b.id === booking.id ? updated : b));
+        setCurrentlyParked(prev => prev.map(b => b.id === booking.id ? updated : b));
+        toast({ title: 'Booking unhidden' });
+        handleBookingUpdated();
+        setTimeout(() => router.refresh(), 300);
+      } catch (err: unknown) {
+        toast({ title: 'Error', description: err instanceof Error ? err.message : 'Could not unhide', variant: 'destructive' });
+      }
+    });
   };
 
   const updateHighlight = async (bookingId: string, highlightCode: BookingHighlightCode) => {
@@ -122,8 +171,8 @@ export default function TodayServerClient({
         }),
       });
 
+      const json = (await parseJsonFromResponse(res)) as { error?: string };
       if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
         throw new Error(json.error || 'Failed to update highlight');
       }
 
@@ -163,10 +212,10 @@ export default function TodayServerClient({
       const response = await fetch(`/api/admin/today?from=${from}&to=${to}`, { 
         cache: "no-store" 
       });
+      const data = (await parseJsonFromResponse(response)) as { kpis?: KPIs; arrivals?: Booking[]; departures?: Booking[]; currentlyParked?: Booking[] };
       if (!response.ok) {
         throw new Error('Failed to fetch data');
       }
-      const data = await response.json();
       
       setKpis(data.kpis);
       setArrivals(data.arrivals);
@@ -208,6 +257,45 @@ export default function TodayServerClient({
   const sortedDepartures = useMemo(() => {
     return sortBookings(departures, departuresSort, 'end_at');
   }, [departures, departuresSort]);
+
+  // One central filter: hidden (Show hidden), cancelled, then Keys Taken / Arrived & Key Taken.
+  // Bookings with status cancelled or ops_hidden are hidden by default; "Show hidden" reveals them.
+  function applyStatusFilters<T extends { ops_hidden?: boolean; gate_status?: string | null; status?: string }>(bookings: T[]): T[] {
+    return bookings.filter((b) => {
+      if (!showHidden && (b.ops_hidden || b.status === 'cancelled')) return false;
+      if (filterArrivedKeyTaken) return b.gate_status === 'arrived_key_taken';
+      if (filterKeysTaken) return b.gate_status === 'take_key' || b.gate_status === 'arrived_key_taken';
+      return true;
+    });
+  }
+
+  const visibleArrivals = useMemo(
+    () => applyStatusFilters(sortedArrivals),
+    [sortedArrivals, showHidden, filterKeysTaken, filterArrivedKeyTaken]
+  );
+
+  const visibleDepartures = useMemo(
+    () => applyStatusFilters(sortedDepartures),
+    [sortedDepartures, showHidden, filterKeysTaken, filterArrivedKeyTaken]
+  );
+
+  // Counts for filter buttons (among rows visible when Show hidden is considered; cancelled hidden by default)
+  const allVisibleToday = useMemo(() => {
+    const hide = (b: Booking) => b.ops_hidden || b.status === 'cancelled';
+    const a = showHidden ? sortedArrivals : sortedArrivals.filter((b) => !hide(b as Booking));
+    const d = showHidden ? sortedDepartures : sortedDepartures.filter((b) => !hide(b as Booking));
+    return [...a, ...d];
+  }, [sortedArrivals, sortedDepartures, showHidden]);
+
+  const keysTakenCount = useMemo(
+    () => allVisibleToday.filter((b) => b.gate_status === 'take_key' || b.gate_status === 'arrived_key_taken').length,
+    [allVisibleToday]
+  );
+
+  const arrivedKeyTakenCount = useMemo(
+    () => allVisibleToday.filter((b) => b.gate_status === 'arrived_key_taken').length,
+    [allVisibleToday]
+  );
 
   const sortedCurrentlyParked = useMemo(() => {
     return sortBookings(currentlyParked, parkedSort, 'start_at');
@@ -340,37 +428,23 @@ export default function TodayServerClient({
     return result;
   }, [sortedCurrentlyParked, currentDateRange]);
 
-  // Group arrivals and departures by date, showing arrivals first then departures for each day
+  // Group arrivals and departures by date (using visible lists so hidden rows stay hidden until "Show hidden")
   const groupedByDay = useMemo(() => {
-    // Get all unique dates from both arrivals and departures
     const allDates = new Set<string>();
-    
-    sortedArrivals.forEach(booking => {
-      const date = new Date(booking.start_at);
-      const dateKey = date.toISOString().split('T')[0];
-      allDates.add(dateKey);
+    visibleArrivals.forEach((booking) => {
+      allDates.add(new Date(booking.start_at).toISOString().split('T')[0]);
     });
-    
-    sortedDepartures.forEach(booking => {
-      const date = new Date(booking.end_at);
-      const dateKey = date.toISOString().split('T')[0];
-      allDates.add(dateKey);
+    visibleDepartures.forEach((booking) => {
+      allDates.add(new Date(booking.end_at).toISOString().split('T')[0]);
     });
-    
-    // Sort dates
     const sortedDates = Array.from(allDates).sort();
-    
-    return sortedDates.map(date => {
-      const arrivalsForDate = sortedArrivals.filter(booking => {
-        const bookingDate = new Date(booking.start_at).toISOString().split('T')[0];
-        return bookingDate === date;
-      });
-      
-      const departuresForDate = sortedDepartures.filter(booking => {
-        const bookingDate = new Date(booking.end_at).toISOString().split('T')[0];
-        return bookingDate === date;
-      });
-      
+    return sortedDates.map((date) => {
+      const arrivalsForDate = visibleArrivals.filter(
+        (b) => new Date(b.start_at).toISOString().split('T')[0] === date
+      );
+      const departuresForDate = visibleDepartures.filter(
+        (b) => new Date(b.end_at).toISOString().split('T')[0] === date
+      );
       return {
         date,
         displayDate: new Date(date).toLocaleDateString('en-GB', {
@@ -383,7 +457,7 @@ export default function TodayServerClient({
         departures: departuresForDate
       };
     });
-  }, [sortedArrivals, sortedDepartures]);
+  }, [visibleArrivals, visibleDepartures]);
 
   const StatCard = ({ label, value, delta, variant, rightSlot }: {
     label: string;
@@ -421,7 +495,21 @@ export default function TodayServerClient({
     );
   };
 
-  const BookingRow = ({ booking, type }: { booking: Booking; type: 'arrival' | 'departure' | 'parked' }) => {
+  const BookingRow = ({
+    booking,
+    type,
+    section,
+    onBookingUpdated,
+    showHidden,
+    onUnhide,
+  }: {
+    booking: Booking;
+    type: 'arrival' | 'departure' | 'parked';
+    section?: 'arrivals' | 'departures' | 'parked';
+    onBookingUpdated?: () => void;
+    showHidden?: boolean;
+    onUnhide?: (booking: Booking) => void;
+  }) => {
     const { toast } = useToast();
     const time = type === 'arrival' ? booking.start_at : booking.end_at;
     
@@ -434,317 +522,185 @@ export default function TodayServerClient({
       return diffDays;
     };
     
-    // Read gate_status directly from the booking, default to 'reserved' if not set
-    const initialGateStatus = (booking.gate_status as GateStatus) || 'reserved';
-
-    const [gateStatus, setGateStatus] = useState<GateStatus>(initialGateStatus);
+    const [gateStatusLocal, setGateStatusLocal] = useState<string | null>(booking.gate_status ?? null);
     const [isPending, startTransition] = useTransition();
     const lastUpdateRef = useRef<{ gate_status: string | null } | null>(null);
 
-    const handleRowClick = () => {
-      if (!highlightMode) {
-        handleBookingClick(booking);
-      }
-    };
-
-    // Sync gateStatus with booking prop changes (e.g., after router.refresh())
-    // But don't override if we just updated and the data matches our last update
     useEffect(() => {
-      const currentGateStatus = (booking.gate_status as GateStatus) || 'reserved';
-      
-      // Only update if the booking data is different from our last update
-      // This prevents reverting our change during router.refresh()
-      if (lastUpdateRef.current) {
-        const isSameAsLastUpdate = 
-          booking.gate_status === lastUpdateRef.current.gate_status;
-        
-        if (isSameAsLastUpdate && lastUpdateRef.current.gate_status) {
-          // This is likely stale data from router.refresh(), keep our current state
-          return;
-        }
-      }
-      
-      setGateStatus(currentGateStatus);
+      const next = booking.gate_status ?? null;
+      if (lastUpdateRef.current && booking.gate_status === lastUpdateRef.current.gate_status) return;
+      setGateStatusLocal(next);
     }, [booking.gate_status]);
 
-    const handleGateStatusChange = (newStatus: GateStatus) => {
-      const prev = gateStatus;
-      setGateStatus(newStatus);
+    const handleRowClick = () => {
+      if (!highlightMode) handleBookingClick(booking);
+    };
 
+    const isKeyTaken = Boolean(
+      booking.gate_status === GATE_STATUS.TAKE_KEY ||
+      booking.gate_status === GATE_STATUS.ARRIVED_KEY_TAKEN ||
+      booking.highlight_code === 'key'
+    );
+    const effectiveHighlightCode: BookingHighlightCode = isKeyTaken ? 'key' : (booking.highlight_code || 'none');
+    const displayGateStatus = gateStatusLocal ?? GATE_STATUS.NONE;
+
+    const rowClass = cn(
+      'group border-b transition-colors',
+      highlightMode && 'cursor-pointer',
+      'hover:bg-muted/30',
+      section === 'arrivals' && 'bg-blue-50/40',
+      section === 'departures' && 'bg-green-50/40'
+    );
+
+    const handleGateStatusChange = (value: string) => {
+      const next = value === GATE_STATUS.NONE ? null : value;
+      setGateStatusLocal(next);
       startTransition(async () => {
         try {
-          const res = await fetch(
-            `/api/admin/bookings/${booking.id}/gate-status`,
-            {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ gateStatus: newStatus }),
-            }
-          );
-
+          const res = await fetch(`/api/admin/bookings/${booking.id}/gate-status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ gateStatus: next }),
+          });
+          const data = (await parseJsonFromResponse(res)) as { booking?: Record<string, unknown>; error?: string };
           if (!res.ok) {
-            const body = await res.json().catch(() => ({}));
-            throw new Error(body.error || 'Failed to update gate status');
+            throw new Error(data.error || 'Failed to update gate status');
           }
-
-          const responseData = await res.json();
-          
-          toast({
-            title: 'Gate status updated',
-            description: `Booking updated to ${newStatus}`,
-          });
-
-          // Update local state with the response data
-          if (responseData.booking) {
-            const updatedGateStatus = (responseData.booking.gate_status as GateStatus) || 'reserved';
-            setGateStatus(updatedGateStatus);
-            
-            // Update the booking in the parent arrays directly
-            const updatedBooking = {
-              ...booking,
-              gate_status: responseData.booking.gate_status,
-              checked_in_at: responseData.booking.checked_in_at,
-              checked_out_at: responseData.booking.checked_out_at,
-              status: responseData.booking.status,
-            };
-            
-            // Update arrivals array
-            setArrivals(prev => prev.map(b => b.id === booking.id ? updatedBooking : b));
-            // Update departures array
-            setDepartures(prev => prev.map(b => b.id === booking.id ? updatedBooking : b));
-            // Update currentlyParked array
-            setCurrentlyParked(prev => prev.map(b => b.id === booking.id ? updatedBooking : b));
-            
-            // Store the last update to prevent reverting during router.refresh()
-            lastUpdateRef.current = {
-              gate_status: responseData.booking.gate_status,
-            };
-          } else {
-            setGateStatus(newStatus);
-            lastUpdateRef.current = { gate_status: newStatus };
-          }
-          
-          // Don't refresh immediately - let the local state update handle it
-          // Only refresh after a delay to sync with server
-          setTimeout(() => {
-            router.refresh();
-            // Clear the ref after refresh completes (allow normal syncing again)
-            setTimeout(() => {
-              lastUpdateRef.current = null;
-            }, 500);
-          }, 500);
-        } catch (err: any) {
-          console.error(err);
-          // revert on error
-          setGateStatus(prev);
+          const b = data?.booking;
+          const updated = {
+            ...booking,
+            gate_status: b?.gate_status ?? next,
+            checked_in_at: b?.checked_in_at ?? booking.checked_in_at,
+            checked_out_at: b?.checked_out_at ?? booking.checked_out_at,
+            status: b?.status ?? booking.status,
+            highlight_code: b?.highlight_code ?? booking.highlight_code,
+            ...(b && (b.ops_hidden !== undefined || b.ops_hidden_reason !== undefined)
+              ? { ops_hidden: b.ops_hidden ?? false, ops_hidden_reason: b.ops_hidden_reason ?? null }
+              : {}),
+          };
+          setArrivals((prev) => prev.map((x) => (x.id === booking.id ? updated : x)));
+          setDepartures((prev) => prev.map((x) => (x.id === booking.id ? updated : x)));
+          setCurrentlyParked((prev) => prev.map((x) => (x.id === booking.id ? updated : x)));
+          lastUpdateRef.current = { gate_status: next };
+          toast({ title: 'Gate status updated', description: gateStatusLabel(next) });
+          onBookingUpdated?.();
+          setTimeout(() => router.refresh(), 300);
+        } catch (err: unknown) {
+          setGateStatusLocal(booking.gate_status ?? null);
           lastUpdateRef.current = null;
-          toast({
-            title: 'Error',
-            description: err.message || 'Could not update gate status',
-            variant: 'destructive',
-          });
+          toast({ title: 'Error', description: err instanceof Error ? err.message : 'Could not update', variant: 'destructive' });
         }
       });
     };
 
-    const gateStatusColorMap: Record<GateStatus, string> = {
-      'reserved': 'bg-slate-100 text-slate-700',
-      'arrived': 'bg-green-100 text-green-700',
-      'departed': 'bg-blue-100 text-blue-700',
-      'cancelled': 'bg-red-100 text-red-700'
-    };
-    const gateStatusColor = gateStatusColorMap[gateStatus as GateStatus] || 'bg-gray-100 text-gray-800';
+    const gateStatusOptions = useMemo(() => {
+      if (section === 'departures') {
+        return GATE_STATUS_OPTIONS.filter((o) => o.value === GATE_STATUS.NONE || o.value === GATE_STATUS.DEPARTED);
+      }
+      return GATE_STATUS_OPTIONS;
+    }, [section]);
 
-    const gateStatusLabelMap: Record<GateStatus, string> = {
-      'reserved': 'Reserved',
-      'arrived': 'Arrived',
-      'departed': 'Departed',
-      'cancelled': 'Cancelled'
-    };
-    const gateStatusLabel = gateStatusLabelMap[gateStatus as GateStatus] || gateStatus;
-
+    // Single dropdown: gate_status only (— Status — / Arrived / No Show / Take Key / Arrived & Key Taken / Departed).
     return (
-      <tr 
-        className={cn("hover:bg-gray-50", highlightMode && "cursor-pointer")}
-      >
-        <td 
-          className="px-4 py-3 text-sm font-medium text-gray-900 cursor-pointer"
-          onClick={handleRowClick}
-        >
-          {booking.reference}
-        </td>
-        <td 
-          className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
-          onClick={handleRowClick}
-        >
-          <div className="flex items-center gap-2">
+      <tr className={rowClass}>
+        <td colSpan={3} className="px-1.5 py-1 cursor-pointer align-middle" onClick={handleRowClick}>
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm">
+            {isKeyTaken && (
+              <span className="inline-flex items-center text-amber-600" title="Key taken">
+                <KeyRound className="h-4 w-4 shrink-0" />
+              </span>
+            )}
+            <span className="font-medium">{booking.reference}</span>
             {highlightMode ? (
-              <div onClick={(e) => e.stopPropagation()} className="inline-flex">
+              <div onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} className="inline-flex">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button
                       type="button"
-                      className="inline-flex items-center justify-center focus:outline-none hover:opacity-80 transition-opacity cursor-pointer min-w-[20px] min-h-[20px]"
+                      className="inline-flex focus:outline-none hover:opacity-80 cursor-pointer min-w-[20px] min-h-[20px] rounded"
                       disabled={updatingHighlightId === booking.id}
+                      onClick={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => e.stopPropagation()}
                     >
-                      <BookingHighlightIcon highlightCode={booking.highlight_code || 'none'} />
-                      {(!booking.highlight_code || booking.highlight_code === 'none') && (
-                        <span className="w-3 h-3 border border-gray-300 rounded-full" />
-                      )}
+                      <BookingHighlightIcon highlightCode={effectiveHighlightCode} />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="z-50 bg-white border border-gray-200 shadow-lg">
-                  <DropdownMenuItem
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      updateHighlight(booking.id, 'key');
-                    }}
-                    className="flex items-center gap-2"
-                  >
-                    <BookingHighlightIcon highlightCode="key" />
-                    <span>Key icon</span>
-                    {booking.highlight_code === 'key' && <span className="ml-auto">✓</span>}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      updateHighlight(booking.id, 'dot_green');
-                    }}
-                    className="flex items-center gap-2"
-                  >
-                    <BookingHighlightIcon highlightCode="dot_green" />
-                    <span>Green dot</span>
-                    {booking.highlight_code === 'dot_green' && <span className="ml-auto">✓</span>}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      updateHighlight(booking.id, 'dot_amber');
-                    }}
-                    className="flex items-center gap-2"
-                  >
-                    <BookingHighlightIcon highlightCode="dot_amber" />
-                    <span>Amber dot</span>
-                    {booking.highlight_code === 'dot_amber' && <span className="ml-auto">✓</span>}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      updateHighlight(booking.id, 'dot_red');
-                    }}
-                    className="flex items-center gap-2"
-                  >
-                    <BookingHighlightIcon highlightCode="dot_red" />
-                    <span>Red dot</span>
-                    {booking.highlight_code === 'dot_red' && <span className="ml-auto">✓</span>}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      updateHighlight(booking.id, 'none');
-                    }}
-                    className="flex items-center gap-2"
-                  >
-                    <BookingHighlightIcon highlightCode="none" />
-                    <span>No highlight</span>
-                    {booking.highlight_code === 'none' && <span className="ml-auto">✓</span>}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                  <DropdownMenuContent align="start" className="z-[100] bg-white border border-gray-200 shadow-lg" onClick={(e) => e.stopPropagation()}>
+                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); updateHighlight(booking.id, 'key'); }} className="flex items-center gap-2">
+                      <BookingHighlightIcon highlightCode="key" /><span>Key icon</span>{(effectiveHighlightCode === 'key') && <span className="ml-auto">✓</span>}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); updateHighlight(booking.id, 'dot_green'); }} className="flex items-center gap-2">
+                      <BookingHighlightIcon highlightCode="dot_green" /><span>Green dot</span>{booking.highlight_code === 'dot_green' && <span className="ml-auto">✓</span>}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); updateHighlight(booking.id, 'dot_amber'); }} className="flex items-center gap-2">
+                      <BookingHighlightIcon highlightCode="dot_amber" /><span>Amber dot</span>{booking.highlight_code === 'dot_amber' && <span className="ml-auto">✓</span>}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); updateHighlight(booking.id, 'dot_red'); }} className="flex items-center gap-2">
+                      <BookingHighlightIcon highlightCode="dot_red" /><span>Red dot</span>{booking.highlight_code === 'dot_red' && <span className="ml-auto">✓</span>}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); updateHighlight(booking.id, 'none'); }} className="flex items-center gap-2">
+                      <BookingHighlightIcon highlightCode="none" /><span>No highlight</span>{effectiveHighlightCode === 'none' && <span className="ml-auto">✓</span>}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
-            ) : (
-              <BookingHighlightIcon highlightCode={booking.highlight_code || 'none'} />
-            )}
-            {booking.customer_name}
+            ) : !isKeyTaken ? (
+              <BookingHighlightIcon highlightCode={effectiveHighlightCode} />
+            ) : null}
+            <span>{booking.customer_name}</span>
+            <span className="text-xs text-gray-600 font-mono">{booking.plate}</span>
             {(booking as any).is_incomplete && (
-              <span className="inline-flex px-1.5 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800 rounded">
-                Incomplete
-              </span>
+              <span className="inline-flex items-center h-5 rounded-md px-1.5 py-0.5 text-xs font-medium bg-amber-50 text-amber-800">Incomplete</span>
+            )}
+            {booking.status === 'cancelled' && (
+              <span className="inline-flex items-center h-5 rounded-md px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-800">Cancelled</span>
             )}
             {(booking as any).dynamic_pricing_applied && (
-              <DynamicPricingBadge
-                applied={(booking as any).dynamic_pricing_applied}
-                multiplier={(booking as any).dynamic_pricing_multiplier}
-                occupancyPercent={(booking as any).dynamic_pricing_occupancy_percent}
-                ruleId={(booking as any).dynamic_pricing_rule_id}
-              />
+              <DynamicPricingBadge applied={(booking as any).dynamic_pricing_applied} multiplier={(booking as any).dynamic_pricing_multiplier} occupancyPercent={(booking as any).dynamic_pricing_occupancy_percent} ruleId={(booking as any).dynamic_pricing_rule_id} />
+            )}
+            {booking.ops_hidden && (
+              <span className="inline-flex items-center h-5 rounded-md px-1.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-600" title={booking.ops_hidden_reason || 'Hidden'}>
+                HIDDEN
+              </span>
+            )}
+            {booking.ops_hidden && showHidden && onUnhide && (
+              <Button type="button" variant="outline" size="sm" className="h-6 text-xs" onClick={(e) => { e.stopPropagation(); onUnhide(booking); }}>
+                Unhide
+              </Button>
             )}
           </div>
         </td>
-        <td 
-          className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
-          onClick={handleRowClick}
-        >
-          {booking.plate}
+        <td colSpan={3} className="px-1.5 py-1 cursor-pointer align-middle" onClick={handleRowClick}>
+          <span className="text-xs text-muted-foreground font-normal">
+            {new Date(booking.start_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}, {new Date(booking.start_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+          </span>
         </td>
-        <td 
-          className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
-          onClick={handleRowClick}
-        >
-          {booking.flight_number || '-'}
+        <td colSpan={3} className="px-1.5 py-1 cursor-pointer align-middle" onClick={handleRowClick}>
+          <span className="text-xs text-muted-foreground font-normal">
+            {new Date(booking.end_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}, {new Date(booking.end_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+          </span>
         </td>
-        <td 
-          className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
-          onClick={handleRowClick}
-        >
-          <div className="flex flex-col">
-            <div className="font-medium">Arrival</div>
-            <div className="text-xs text-gray-600">
-              {new Date(booking.start_at).toLocaleString('en-GB', { 
-                timeZone: 'UTC',
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-              })}
+        <td colSpan={3} className="px-1.5 py-1 align-middle" onClick={(e) => e.stopPropagation()}>
+          <div className="flex flex-col md:flex-row md:items-center md:justify-end gap-1 md:gap-2">
+            <div className="flex flex-wrap justify-end gap-1 text-sm">
+              <span>{calculateDays()}d</span>
+              <span>£{booking.money_charged || 0}</span>
             </div>
-            <div className="font-medium mt-1">Departure</div>
-            <div className="text-xs text-gray-600">
-              {new Date(booking.end_at).toLocaleString('en-GB', { 
-                timeZone: 'UTC',
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-              })}
-            </div>
-          </div>
-        </td>
-        <td 
-          className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
-          onClick={handleRowClick}
-        >
-          {calculateDays()} {calculateDays() === 1 ? 'day' : 'days'}
-        </td>
-        <td 
-          className="px-4 py-3 text-sm text-gray-900 cursor-pointer"
-          onClick={handleRowClick}
-        >
-          £{booking.money_charged || 0}
-        </td>
-        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-          <div className="inline-flex items-center gap-2">
-            <span
-              className={cn(
-                'inline-flex items-center rounded-full px-2 py-1 text-xs font-medium',
-                gateStatusColor
-              )}
-            >
-              {gateStatusLabel}
-            </span>
-            <select
-              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
-              value={gateStatus}
-              disabled={isPending}
-              onChange={(e) => handleGateStatusChange(e.target.value as GateStatus)}
-            >
-              <option value="reserved">Reserved</option>
-              <option value="arrived">Arrived</option>
-              <option value="departed">Departed</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
+            <Select value={displayGateStatus === '' ? undefined : displayGateStatus} onValueChange={handleGateStatusChange} disabled={isPending}>
+              <SelectTrigger className="h-7 px-1 py-0 bg-transparent border-0 shadow-none gap-1 cursor-pointer focus:ring-0 focus:ring-offset-0 min-w-0 w-auto [&>svg]:shrink-0">
+                <SelectValue className="sr-only" />
+                <span className={cn('inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium leading-none', gateStatusPillClass(displayGateStatus))}>
+                  {gateStatusLabel(displayGateStatus)}
+                </span>
+              </SelectTrigger>
+              <SelectContent align="end" className="z-[100]">
+                {gateStatusOptions.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </td>
       </tr>
@@ -816,19 +772,49 @@ export default function TodayServerClient({
         </div>
 
         {/* Arrivals and Departures by Day */}
-        <section className="bg-white rounded-lg border border-gray-200">
+        <section className="bg-white rounded-lg border border-gray-200 overflow-hidden">
           <div className="p-4 border-b border-gray-200">
-            <div className="flex items-center justify-between">
-              <div>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="shrink-0">
                 <h2 className="text-lg font-semibold text-gray-900">Arrivals & Departures</h2>
                 <p className="text-sm text-gray-600">Organized by day</p>
               </div>
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center gap-2 min-w-0 sm:justify-end">
+                <Button
+                  variant={showHidden ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setShowHidden((v) => !v)}
+                  className="shrink-0"
+                >
+                  {showHidden ? 'Hide hidden' : 'Show hidden'}
+                </Button>
+                <Button
+                  variant={filterKeysTaken ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => {
+                    setFilterKeysTaken((v) => !v);
+                    if (filterArrivedKeyTaken) setFilterArrivedKeyTaken(false);
+                  }}
+                  className="shrink-0"
+                >
+                  Keys Taken{keysTakenCount > 0 ? ` (${keysTakenCount})` : ''}
+                </Button>
+                <Button
+                  variant={filterArrivedKeyTaken ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => {
+                    setFilterArrivedKeyTaken((v) => !v);
+                    if (filterKeysTaken) setFilterKeysTaken(false);
+                  }}
+                  className="shrink-0"
+                >
+                  Arrived & Key Taken{arrivedKeyTakenCount > 0 ? ` (${arrivedKeyTakenCount})` : ''}
+                </Button>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => setArrivalsDeparturesCollapsed(!arrivalsDeparturesCollapsed)}
-                  className="flex items-center gap-2"
+                  className="flex items-center gap-2 shrink-0"
                 >
                   {arrivalsDeparturesCollapsed ? (
                     <>
@@ -842,8 +828,8 @@ export default function TodayServerClient({
                     </>
                   )}
                 </Button>
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="arrivalsSort" className="text-sm text-gray-600">Arrivals Sort:</Label>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Label htmlFor="arrivalsSort" className="text-sm text-gray-600 shrink-0">Arrivals Sort:</Label>
                   <Select value={arrivalsSort} onValueChange={(value: 'closest' | 'most_recent') => setArrivalsSort(value)}>
                     <SelectTrigger className="w-[140px]">
                       <div className="flex items-center gap-2">
@@ -857,8 +843,8 @@ export default function TodayServerClient({
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="departuresSort" className="text-sm text-gray-600">Departures Sort:</Label>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Label htmlFor="departuresSort" className="text-sm text-gray-600 shrink-0">Departures Sort:</Label>
                   <Select value={departuresSort} onValueChange={(value: 'closest' | 'most_recent') => setDeparturesSort(value)}>
                     <SelectTrigger className="w-[140px]">
                       <div className="flex items-center gap-2">
@@ -877,23 +863,19 @@ export default function TodayServerClient({
           </div>
           {!arrivalsDeparturesCollapsed && (
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
+              <table className="min-w-full table-fixed divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reference</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Plate</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Flight</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Arrival & Departure</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Days</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                    <th colSpan={3} className="px-1.5 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ref / Customer / Plate</th>
+                    <th colSpan={3} className="px-1.5 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Arrival</th>
+                    <th colSpan={3} className="px-1.5 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Departure</th>
+                    <th colSpan={3} className="px-1.5 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Days / Amount / Status</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {groupedByDay.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
+                      <td colSpan={12} className="px-4 py-8 text-center text-gray-500">
                         No arrivals or departures in this period
                       </td>
                     </tr>
@@ -904,7 +886,7 @@ export default function TodayServerClient({
                         <React.Fragment key={dayGroup.date}>
                           {/* Date Header */}
                           <tr className="bg-gray-100 border-t-2 border-gray-300">
-                            <td colSpan={8} className="px-4 py-3">
+                            <td colSpan={12} className="px-4 py-3">
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                   <span className="text-sm font-semibold text-gray-700">
@@ -941,29 +923,43 @@ export default function TodayServerClient({
                           </tr>
                           {!isCollapsed && (
                             <>
-                              {/* Arrivals for this date */}
+                              {/* Arrivals for this date — blue header pill + count */}
                               {dayGroup.arrivals.length > 0 && (
                                 <>
-                                  <tr className="bg-blue-50">
-                                    <td colSpan={8} className="px-4 py-2">
-                                      <span className="text-xs font-semibold text-blue-800">Arrivals</span>
+                                  <tr className="bg-blue-50/40 border-t border-blue-100">
+                                    <td colSpan={12} className="py-1">
+                                      <div className="flex items-center justify-between">
+                                        <span className="inline-flex items-center rounded-full bg-blue-600 text-white px-2 py-0.5 text-xs font-semibold uppercase">
+                                          Arrivals
+                                        </span>
+                                        <span className="rounded-full bg-blue-100 text-blue-800 text-xs font-medium px-2 py-0.5">
+                                          {dayGroup.arrivals.length}
+                                        </span>
+                                      </div>
                                     </td>
                                   </tr>
                                   {dayGroup.arrivals.map((booking) => (
-                                    <BookingRow key={`arrival-${booking.id}`} booking={booking} type="arrival" />
+                                    <BookingRow key={`arrival-${booking.id}`} booking={booking} type="arrival" section="arrivals" onBookingUpdated={handleBookingUpdated} showHidden={showHidden} onUnhide={handleUnhide} />
                                   ))}
                                 </>
                               )}
-                              {/* Departures for this date */}
+                              {/* Departures for this date — green header pill + count */}
                               {dayGroup.departures.length > 0 && (
                                 <>
-                                  <tr className="bg-red-50">
-                                    <td colSpan={8} className="px-4 py-2">
-                                      <span className="text-xs font-semibold text-red-800">Departures</span>
+                                  <tr className="bg-green-50/40 border-t border-green-100">
+                                    <td colSpan={12} className="py-1">
+                                      <div className="flex items-center justify-between">
+                                        <span className="inline-flex items-center rounded-full bg-green-600 text-white px-2 py-0.5 text-xs font-semibold uppercase">
+                                          Departures
+                                        </span>
+                                        <span className="rounded-full bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5">
+                                          {dayGroup.departures.length}
+                                        </span>
+                                      </div>
                                     </td>
                                   </tr>
                                   {dayGroup.departures.map((booking) => (
-                                    <BookingRow key={`departure-${booking.id}`} booking={booking} type="departure" />
+                                    <BookingRow key={`departure-${booking.id}`} booking={booking} type="departure" section="departures" onBookingUpdated={handleBookingUpdated} showHidden={showHidden} onUnhide={handleUnhide} />
                                   ))}
                                 </>
                               )}
@@ -1004,24 +1000,20 @@ export default function TodayServerClient({
               </div>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
+<div className="overflow-x-auto">
+            <table className="min-w-full table-fixed divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reference</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Plate</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Flight</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Arrival & Departure</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Days</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                  <th colSpan={3} className="px-1.5 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ref / Customer / Plate</th>
+                  <th colSpan={3} className="px-1.5 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Arrival</th>
+                  <th colSpan={3} className="px-1.5 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Departure</th>
+                  <th colSpan={3} className="px-1.5 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Days / Amount / Status</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {groupedCurrentlyParked.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
+                <tr>
+                  <td colSpan={12} className="px-4 py-8 text-center text-gray-500">
                       No cars currently parked
                     </td>
                   </tr>
@@ -1032,7 +1024,7 @@ export default function TodayServerClient({
                       <React.Fragment key={group.date}>
                         {/* Date Header */}
                         <tr className="bg-gray-100 border-t-2 border-gray-300">
-                          <td colSpan={8} className="px-4 py-3">
+                          <td colSpan={12} className="px-4 py-3">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-3">
                                 <span className="text-sm font-semibold text-gray-700">
@@ -1069,9 +1061,8 @@ export default function TodayServerClient({
                         </tr>
                         {!isCollapsed && (
                           <>
-                            {/* Bookings for this date */}
                             {group.bookings.map((booking) => (
-                              <BookingRow key={booking.id} booking={booking} type="parked" />
+                              <BookingRow key={booking.id} booking={booking} type="parked" section="parked" onBookingUpdated={handleBookingUpdated} showHidden={showHidden} onUnhide={handleUnhide} />
                             ))}
                           </>
                         )}
