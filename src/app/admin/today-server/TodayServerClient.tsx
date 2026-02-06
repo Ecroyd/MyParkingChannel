@@ -568,15 +568,15 @@ export default function TodayServerClient({
             throw new Error(data.error || 'Failed to update gate status');
           }
           const b = data?.booking;
-          const updated = {
+          const updated: Booking = {
             ...booking,
-            gate_status: b?.gate_status ?? next,
-            checked_in_at: b?.checked_in_at ?? booking.checked_in_at,
-            checked_out_at: b?.checked_out_at ?? booking.checked_out_at,
-            status: b?.status ?? booking.status,
-            highlight_code: b?.highlight_code ?? booking.highlight_code,
+            gate_status: (b?.gate_status as string | null | undefined) ?? next ?? undefined,
+            checked_in_at: (b?.checked_in_at as string | null | undefined) ?? booking.checked_in_at,
+            checked_out_at: (b?.checked_out_at as string | null | undefined) ?? booking.checked_out_at,
+            status: (b?.status as string | undefined) ?? booking.status,
+            highlight_code: (b?.highlight_code as Booking['highlight_code'] | undefined) ?? booking.highlight_code,
             ...(b && (b.ops_hidden !== undefined || b.ops_hidden_reason !== undefined)
-              ? { ops_hidden: b.ops_hidden ?? false, ops_hidden_reason: b.ops_hidden_reason ?? null }
+              ? { ops_hidden: Boolean(b.ops_hidden), ops_hidden_reason: (b.ops_hidden_reason as string | null) ?? null }
               : {}),
           };
           setArrivals((prev) => prev.map((x) => (x.id === booking.id ? updated : x)));
