@@ -275,10 +275,12 @@ export default function TodayServerClient({
     [sortedArrivals, showHidden, filterKeysTaken, filterArrivedKeyTaken]
   );
 
-  const visibleDepartures = useMemo(
-    () => applyStatusFilters(sortedDepartures),
-    [sortedDepartures, showHidden, filterKeysTaken, filterArrivedKeyTaken]
-  );
+  const visibleDepartures = useMemo(() => {
+    const filtered = applyStatusFilters(sortedDepartures);
+    // Hide departures marked as "Departed" unless "Show hidden" is on
+    if (showHidden) return filtered;
+    return filtered.filter((b) => b.gate_status !== GATE_STATUS.DEPARTED);
+  }, [sortedDepartures, showHidden, filterKeysTaken, filterArrivedKeyTaken]);
 
   // Counts for filter buttons (among rows visible when Show hidden is considered; cancelled hidden by default)
   const allVisibleToday = useMemo(() => {
