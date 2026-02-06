@@ -216,11 +216,12 @@ export default function TodayServerClient({
       if (!response.ok) {
         throw new Error('Failed to fetch data');
       }
-      
-      setKpis(data.kpis);
-      setArrivals(data.arrivals);
-      setDepartures(data.departures);
-      setCurrentlyParked(data.currentlyParked);
+
+      const defaultKpis: KPIs = { arrivals: 0, departures: 0, checkedIn: 0, capacityLeft: 0, totalRevenue: 0 };
+      setKpis(data.kpis ?? defaultKpis);
+      setArrivals(data.arrivals ?? []);
+      setDepartures(data.departures ?? []);
+      setCurrentlyParked(data.currentlyParked ?? []);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
