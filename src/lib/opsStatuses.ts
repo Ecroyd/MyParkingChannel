@@ -62,11 +62,11 @@ export const STATUS_UI: Record<string, { label: string; pill: string }> = {
   [GATE_STATUS.DEPARTED]: { label: 'Departed', pill: 'bg-sky-100 text-sky-900 border-sky-200' },
   [GATE_STATUS.CANCELLED]: { label: 'Cancelled', pill: 'bg-red-100 text-red-900 border-red-200' },
   [OPS_STATUS_NONE]: { label: '— Ops —', pill: 'bg-gray-100 text-gray-500 border-gray-200' },
-  [OPS_STATUS.ARRIVED]: { label: 'Arrived', pill: 'bg-red-100 text-red-700 border-red-200' },
+  // OPS_STATUS.ARRIVED === GATE_STATUS.ARRIVED ('arrived'), same key as above
   [OPS_STATUS.NO_SHOW]: { label: 'No Show', pill: 'bg-red-200 text-black border-red-300' },
   [OPS_STATUS.TAKE_KEY]: { label: 'Take Key', pill: 'bg-amber-200 text-black border-amber-300' },
   [OPS_STATUS.ARRIVED_KEY_TAKEN]: { label: 'Arrived & Key Taken', pill: 'bg-amber-200 text-red-700 border-amber-300' },
-  [OPS_STATUS.DEPARTED]: { label: 'Departed', pill: 'bg-sky-100 text-sky-900 border-sky-200' },
+  // OPS_STATUS.DEPARTED === GATE_STATUS.DEPARTED ('departed'), same key as above
 };
 
 export function getStatusLabel(value: string): string {
