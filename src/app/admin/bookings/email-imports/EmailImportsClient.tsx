@@ -1,9 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { RefreshCw, Trash2, Play, AlertCircle, Clock, FileX, CheckCircle2 } from 'lucide-react';
+import { RefreshCw, Trash2, Play, AlertCircle, Clock, FileX, CheckCircle2, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 interface EmailFile {
   id: string;
@@ -44,11 +50,24 @@ interface RecentImport {
   pipeline_status: string;
 }
 
+type FilePreview = {
+  id: string;
+  filename: string;
+  content_type: string | null;
+  file_size: number | null;
+  truncated: boolean;
+  preview: string;
+} | null;
+
 export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
   const [status, setStatus] = useState<ParseHealthStatus | null>(null);
   const [recentImports, setRecentImports] = useState<RecentImport[]>([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState<Set<string>>(new Set());
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<FilePreview>(null);
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -167,6 +186,23 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
         next.delete(fileId);
         return next;
       });
+    }
+  };
+
+  const openPreview = async (fileId: string) => {
+    setPreviewOpen(true);
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setPreview(null);
+    try {
+      const res = await fetch(`/api/admin/email-imports/file-preview?fileId=${encodeURIComponent(fileId)}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || 'Failed to load preview');
+      setPreview(json);
+    } catch (e: unknown) {
+      setPreviewError(e instanceof Error ? e.message : 'Failed to load preview');
+    } finally {
+      setPreviewLoading(false);
     }
   };
 
@@ -477,6 +513,15 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
                       </CardDescription>
                     </div>
                     <div className="flex items-center gap-2 ml-4">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="px-2 py-1 rounded-md border text-sm"
+                        onClick={() => openPreview(file.id)}
+                      >
+                        <FileText className="h-4 w-4 mr-1" />
+                        View file
+                      </Button>
                       {(file.category === 'failed' || file.category === 'pending' || file.category === 'empty') && (
                         <Button
                           size="sm"
@@ -505,6 +550,31 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
           })}
         </div>
       )}
+
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>{preview?.filename ?? 'File preview'}</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 flex flex-col">
+            {previewLoading && <div className="text-sm text-muted-foreground">Loading…</div>}
+            {previewError && <div className="text-sm text-red-600">{previewError}</div>}
+            {preview?.preview != null && (
+              <pre className="text-xs whitespace-pre-wrap max-h-[60vh] overflow-auto border rounded-md p-3 bg-muted/30">
+                {preview.preview}
+                {preview.truncated ? '\n\n…(truncated)' : ''}
+              </pre>
+            )}
+            {preview && !previewLoading && !previewError && (
+              <p className="text-xs text-muted-foreground mt-2">
+                {preview.filename}
+                {preview.file_size != null && ` · ${(preview.file_size / 1024).toFixed(1)} KB`}
+                {preview.truncated && ' · first 200 KB shown'}
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

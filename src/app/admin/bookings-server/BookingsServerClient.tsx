@@ -556,7 +556,11 @@ export default function BookingsServerClient({ user, tenant, bookings: initialBo
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-600">
                           <div>
-                            <span className="font-medium">Vehicle:</span> {booking.plate} - {booking.car_make} {booking.car_model}
+                            <span className="font-medium">Vehicle:</span>{' '}
+                            <span className="font-mono font-semibold text-gray-900 bg-gray-100 px-2 py-0.5 rounded tracking-wide">
+                              {booking.plate}
+                            </span>
+                            {booking.car_make || booking.car_model ? ` — ${[booking.car_make, booking.car_model].filter(Boolean).join(' ')}` : ''}
                           </div>
                           <div>
                             <span className="font-medium">Period:</span> {formatDate(booking.start_at)} - {formatDate(booking.end_at)}

@@ -1,9 +1,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { RefreshCw, CheckCircle2, AlertTriangle, FileText } from 'lucide-react';
+import { RefreshCw, CheckCircle2, AlertTriangle, FileText, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 
 interface ParsedFile {
   file_id: string;
@@ -44,11 +51,30 @@ interface BookingWithSource {
   verification: string;
 }
 
+const TEXT_PREVIEW_MAX_BYTES = 200 * 1024; // 200KB
+
+type ViewFileMeta = {
+  bucket: string;
+  path: string;
+  filename: string;
+  contentType: string | null;
+  fileSize: number | null;
+  parserKey: string | null;
+  detectedSource: string | null;
+  signedUrl: string;
+};
+
 export default function ParsedFilesClient({ tenantId }: { tenantId: string }) {
   const [files, setFiles] = useState<ParsedFile[]>([]);
   const [bookings, setBookings] = useState<BookingWithSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'files' | 'bookings'>('files');
+  const [viewFileOpen, setViewFileOpen] = useState(false);
+  const [viewFileMeta, setViewFileMeta] = useState<ViewFileMeta | null>(null);
+  const [viewFileContent, setViewFileContent] = useState<string | null>(null);
+  const [viewFilePreviewType, setViewFilePreviewType] = useState<'text' | 'image' | null>(null);
+  const [viewFileLoading, setViewFileLoading] = useState(false);
+  const [viewFileError, setViewFileError] = useState<string | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -73,6 +99,57 @@ export default function ParsedFilesClient({ tenantId }: { tenantId: string }) {
     fetchData();
     // Only fetch on mount, no auto-refresh
   }, []);
+
+  const openViewFile = async (file: ParsedFile) => {
+    setViewFileOpen(true);
+    setViewFileMeta(null);
+    setViewFileContent(null);
+    setViewFilePreviewType(null);
+    setViewFileError(null);
+    setViewFileLoading(true);
+    try {
+      const res = await fetch('/api/admin/email-imports/signed-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ingestEmailFileId: file.file_id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setViewFileError(data?.error || `Request failed: ${res.status}`);
+        setViewFileLoading(false);
+        return;
+      }
+      setViewFileMeta({
+        bucket: data.bucket,
+        path: data.path,
+        filename: data.filename,
+        contentType: data.contentType ?? null,
+        fileSize: data.fileSize ?? null,
+        parserKey: data.parserKey ?? null,
+        detectedSource: data.detectedSource ?? null,
+        signedUrl: data.signedUrl,
+      });
+      const ct = (data.contentType || '').toLowerCase();
+      if (ct.startsWith('text/')) {
+        setViewFilePreviewType('text');
+        const fetchRes = await fetch(data.signedUrl);
+        const blob = await fetchRes.blob();
+        const text = await blob.slice(0, TEXT_PREVIEW_MAX_BYTES).text();
+        const truncated = blob.size > TEXT_PREVIEW_MAX_BYTES;
+        setViewFileContent(truncated ? text + '\n\n… (truncated)' : text);
+      } else if (ct.startsWith('image/')) {
+        setViewFilePreviewType('image');
+        setViewFileContent(data.signedUrl);
+      } else {
+        setViewFilePreviewType(null);
+        setViewFileContent(null);
+      }
+    } catch (e) {
+      setViewFileError(e instanceof Error ? e.message : 'Failed to load file');
+    } finally {
+      setViewFileLoading(false);
+    }
+  };
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'Never';
@@ -245,8 +322,19 @@ export default function ParsedFilesClient({ tenantId }: { tenantId: string }) {
                               )}
                             </div>
                           </div>
-                          <div className={`px-3 py-1 rounded text-sm font-medium ${status.color} bg-white border`}>
-                            {status.message}
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openViewFile(file)}
+                            >
+                              <Eye className="h-4 w-4 mr-1" />
+                              View file
+                            </Button>
+                            <div className={`px-3 py-1 rounded text-sm font-medium ${status.color} bg-white border`}>
+                              {status.message}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -312,8 +400,19 @@ export default function ParsedFilesClient({ tenantId }: { tenantId: string }) {
                               From: {file.from_address} • Subject: {file.subject || '(no subject)'}
                             </div>
                           </div>
-                          <div className={`ml-4 px-3 py-1 rounded text-xs font-medium ${status.color} bg-white border`}>
-                            {status.message}
+                          <div className="ml-4 flex items-center gap-2 shrink-0">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openViewFile(file)}
+                            >
+                              <Eye className="h-4 w-4 mr-1" />
+                              View file
+                            </Button>
+                            <div className={`px-3 py-1 rounded text-xs font-medium ${status.color} bg-white border`}>
+                              {status.message}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -325,6 +424,52 @@ export default function ParsedFilesClient({ tenantId }: { tenantId: string }) {
           </Card>
         </div>
       )}
+
+      {/* View file modal */}
+      <Dialog open={viewFileOpen} onOpenChange={setViewFileOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>{viewFileMeta?.filename ?? 'File preview'}</DialogTitle>
+            <DialogDescription>
+              {viewFileLoading ? 'Loading…' : viewFileMeta ? 'Preview and metadata' : viewFileError ?? ''}
+            </DialogDescription>
+          </DialogHeader>
+          {viewFileError && !viewFileMeta && (
+            <p className="text-destructive text-sm">{viewFileError}</p>
+          )}
+          {viewFileMeta && (
+            <>
+              <div className="grid grid-cols-2 gap-2 text-sm border rounded p-3 bg-muted/50">
+                <div><span className="font-medium">Bucket:</span> {viewFileMeta.bucket}</div>
+                <div><span className="font-medium">Path:</span> <span className="font-mono text-xs break-all">{viewFileMeta.path}</span></div>
+                <div><span className="font-medium">Size:</span> {viewFileMeta.fileSize != null ? `${(viewFileMeta.fileSize / 1024).toFixed(1)} KB` : '—'}</div>
+                <div><span className="font-medium">Parser key:</span> {viewFileMeta.parserKey ?? '—'}</div>
+                <div><span className="font-medium">Detected source:</span> {viewFileMeta.detectedSource ?? '—'}</div>
+              </div>
+              {viewFilePreviewType === 'text' && viewFileContent != null && (
+                <div className="border rounded overflow-auto flex-1 min-h-0 max-h-[50vh]">
+                  <pre className="p-4 text-xs whitespace-pre-wrap font-mono block">
+                    {viewFileContent.split('\n').map((line, i) => (
+                      <span key={i} className="flex">
+                        <span className="select-none w-10 shrink-0 text-muted-foreground pr-2 text-right">{i + 1}</span>
+                        <span>{line || ' '}</span>
+                      </span>
+                    ))}
+                  </pre>
+                </div>
+              )}
+              {viewFilePreviewType === 'image' && viewFileContent && (
+                <div className="border rounded overflow-auto flex-1 min-h-0 max-h-[50vh] flex items-center justify-center p-4">
+                  <img src={viewFileContent} alt={viewFileMeta.filename} className="max-w-full max-h-[45vh] object-contain" />
+                </div>
+              )}
+              {viewFilePreviewType === null && viewFileMeta && !viewFileLoading && (
+                <p className="text-muted-foreground text-sm">Preview not available for this content type ({viewFileMeta.contentType ?? 'unknown'})</p>
+              )}
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Bookings View */}
       {view === 'bookings' && (
@@ -362,7 +507,7 @@ export default function ParsedFilesClient({ tenantId }: { tenantId: string }) {
                         <tr key={booking.booking_id} className={`border-b ${!isCorrect ? 'bg-red-50' : ''}`}>
                           <td className="p-2 font-medium">{booking.reference}</td>
                           <td className="p-2">{booking.customer_name}</td>
-                          <td className="p-2">{booking.plate}</td>
+                          <td className="p-2 font-mono font-semibold text-gray-900">{booking.plate}</td>
                           <td className="p-2">{booking.source}</td>
                           <td className="p-2">{booking.external_source}</td>
                           <td className="p-2 text-xs">{booking.source_file}</td>

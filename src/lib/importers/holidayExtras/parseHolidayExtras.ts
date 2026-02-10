@@ -30,12 +30,36 @@ function parseMoney(v: string | number | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Detect EXT1 TSV by content (not extension). SaaS-safe: no hardcoded filename patterns.
+ * Treat as EXT1 TSV when: lots of tabs, lines split into ~16+ columns, EXT1 in 2nd column on most rows.
+ */
+export function looksLikeExt1Tsv(text: string): boolean {
+  const lines = text.replace(/\r\n/g, "\n").split("\n").filter((l) => l.trim() !== "");
+  if (lines.length === 0) return false;
+
+  const sample = lines.slice(0, Math.min(lines.length, 10));
+  const tabby = sample.filter((l) => l.includes("\t")).length;
+  if (tabby < Math.ceil(sample.length * 0.8)) return false;
+
+  const ok = sample
+    .map((l) => l.split("\t"))
+    .filter((cols) => cols.length >= 16)
+    .filter((cols) => (cols[1] ?? "").trim() === "EXT1").length;
+
+  return ok >= Math.ceil(sample.length * 0.5);
+}
+
 export function isHolidayExtrasFile(filename: string, text: string): boolean {
+  if (looksLikeExt1Tsv(text)) return true;
   const name = filename.toLowerCase();
   if (name.startsWith("ext") && name.endsWith(".txt")) return true;
   // content sniff: EXT1 + tabs + *FIRM* tokens
   return text.includes("\tEXT1\t") && (text.includes("*FIRM*") || text.includes("*AMND*") || text.includes("*CANX*"));
 }
+
+/** Allow EXT1, EXT2, etc. */
+const EXT_VARIANT = /^EXT\d+$/i;
 
 export function parseHolidayExtrasText(text: string): CanonicalBooking[] {
   const lines = text.split(/\r?\n/).map(l => l.trimEnd()).filter(Boolean);
@@ -44,9 +68,13 @@ export function parseHolidayExtrasText(text: string): CanonicalBooking[] {
   const rows = lines.map(line => line.split("\t"));
 
   return rows.map((f) => {
-    // Field indexes based on observed sample rows in ext1180126.txt
+    // Only process lines with EXT1 / EXT2 / etc. in column 1
+    const col1 = trim(f[1]);
+    if (!EXT_VARIANT.test(col1)) return null;
+
+    // Field indexes based on observed sample rows (ext1180126.txt / ext1090226.txt)
     // 0: N
-    // 1: EXT1
+    // 1: EXT1 (or EXT2, etc.)
     // 2: booking ref (KHFVGQ)
     // 3: surname
     // 4: title (MR/MRS/MS/MISS)

@@ -180,7 +180,7 @@ export default function DashboardClient({
                       </span>
                     </div>
                     <div className="flex items-center gap-3 mt-1 text-sm text-gray-600">
-                      <span className="font-mono">{booking.plate}</span>
+                      <span className="font-mono font-semibold text-gray-900 bg-gray-100 px-2 py-0.5 rounded tracking-wide">{booking.plate}</span>
                       {booking.flight_number && (
                         <span>Flight: {booking.flight_number}</span>
                       )}
@@ -232,7 +232,7 @@ export default function DashboardClient({
                       </span>
                     </div>
                     <div className="flex items-center gap-3 mt-1 text-sm text-gray-600">
-                      <span className="font-mono">{booking.plate}</span>
+                      <span className="font-mono font-semibold text-gray-900 bg-gray-100 px-2 py-0.5 rounded tracking-wide">{booking.plate}</span>
                       {booking.flight_number && (
                         <span>Flight: {booking.flight_number}</span>
                       )}
@@ -280,7 +280,7 @@ export default function DashboardClient({
                       </span>
                     )}
                   </div>
-                  <p className="text-sm text-gray-500">{booking.plate}</p>
+                  <p className="text-sm font-mono font-semibold text-gray-900">{booking.plate}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-medium text-gray-900">£{booking.money_charged || 0}</p>

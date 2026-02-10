@@ -130,8 +130,8 @@ export async function POST(req: NextRequest) {
       if (isTexty) {
         const text = att.content.toString("utf-8");
         const m = detectAndMapFromAttachment(filename, text);
-        if (m) {
-          mapped.push(...m);
+        if (m && m.bookings.length > 0) {
+          mapped.push(...m.bookings);
         }
       }
     }

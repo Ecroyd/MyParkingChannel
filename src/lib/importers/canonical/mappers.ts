@@ -333,17 +333,23 @@ export function mapFlyparksEmailText(emailText: string): CanonicalBooking[] {
   ];
 }
 
+export type DetectResult =
+  | { bookings: CanonicalBooking[]; format: "HOLIDAY_EXTRAS" | null }
+  | null;
+
 /**
- * Auto-detect format from filename and content
+ * Auto-detect format from filename and content.
+ * Returns { bookings, format } so that 0 rows with format HOLIDAY_EXTRAS can be treated as "empty" (EXT1 TSV not matched).
  */
-export function detectAndMapFromAttachment(filename: string, text: string): CanonicalBooking[] | null {
+export function detectAndMapFromAttachment(filename: string, text: string): DetectResult {
   const name = filename.toLowerCase();
 
-  // Holiday Extras - check first (tab-delimited, specific format)
+  // Holiday Extras EXT1 TSV - detect by content first (not extension), then parse
   try {
-    const { isHolidayExtrasFile, parseHolidayExtrasText } = require("@/lib/importers/holidayExtras/parseHolidayExtras");
-    if (isHolidayExtrasFile(filename, text)) {
-      return parseHolidayExtrasText(text);
+    const { looksLikeExt1Tsv, isHolidayExtrasFile, parseHolidayExtrasText } = require("@/lib/importers/holidayExtras/parseHolidayExtras");
+    if (looksLikeExt1Tsv(text) || isHolidayExtrasFile(filename, text)) {
+      const bookings = parseHolidayExtrasText(text);
+      return { bookings, format: "HOLIDAY_EXTRAS" };
     }
   } catch (err) {
     console.error("[detectAndMap] Holiday Extras check failed:", err);
@@ -355,7 +361,7 @@ export function detectAndMapFromAttachment(filename: string, text: string): Cano
     try {
       const flyparks = mapFlyparksEmailText(text);
       if (flyparks && flyparks.length > 0 && flyparks[0].booking_reference) {
-        return flyparks;
+        return { bookings: flyparks, format: null };
       }
     } catch (err) {
       console.error("[detectAndMap] Flyparks parse failed:", err);
@@ -374,7 +380,7 @@ export function detectAndMapFromAttachment(filename: string, text: string): Cano
   
   if (isCavuFilename || isCavuContent) {
     try {
-      return mapCavuHourlyCsv(text);
+      return { bookings: mapCavuHourlyCsv(text), format: null };
     } catch (err) {
       console.error("[detectAndMap] CAVU parse failed:", err);
       // Fall through to try other formats
@@ -383,7 +389,7 @@ export function detectAndMapFromAttachment(filename: string, text: string): Cano
 
   // APH csv-like - check filename OR content signature
   if (name.includes("aph") || text.startsWith('"0') || text.includes('"NEW')) {
-    return mapAphCsvLike(text);
+    return { bookings: mapAphCsvLike(text), format: null };
   }
 
   return null;

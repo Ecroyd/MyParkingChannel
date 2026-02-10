@@ -7,14 +7,24 @@ import { channelToParserKey, getAttribution, type ParserKey } from "@/lib/import
 
 /**
  * Parse file using canonical mappers (supports APH, CAVU, etc.)
+ * Returns { rows, detectedFormat } so EXT1 TSV with 0 rows can set parse_outcome = 'empty'.
  */
-function parseFileWithCanonicalMappers(buffer: Buffer, filename: string) {
+function parseFileWithCanonicalMappers(buffer: Buffer, filename: string): { rows: any[]; detectedFormat: string | null } {
   const text = buffer.toString("utf-8");
-  
-  // Use canonical mapper to detect and parse
-  const canonicalBookings = detectAndMapFromAttachment(filename, text);
-  
-  if (!canonicalBookings || canonicalBookings.length === 0) {
+  const result = detectAndMapFromAttachment(filename, text);
+
+  if (!result) {
+    throw new Error(`Could not detect format for file: ${filename}`);
+  }
+
+  const { bookings: canonicalBookings, format: detectedFormat } = result;
+
+  // Holiday Extras detected but 0 rows → return empty so caller can set parse_outcome = 'empty'
+  if (canonicalBookings.length === 0 && detectedFormat === "HOLIDAY_EXTRAS") {
+    return { rows: [], detectedFormat: "HOLIDAY_EXTRAS" };
+  }
+
+  if (canonicalBookings.length === 0) {
     throw new Error(`Could not detect format for file: ${filename}`);
   }
 
@@ -61,7 +71,7 @@ function parseFileWithCanonicalMappers(buffer: Buffer, filename: string) {
     };
   });
 
-  return { headers: [], rows: parsedRows };
+  return { headers: [], rows: parsedRows, detectedFormat };
 }
 
 export async function parseEmailFile(fileId: string, tenantId: string) {
@@ -222,6 +232,29 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       })
       .eq("id", fileId);
     throw parseErr;
+  }
+
+  // EXT1 TSV detected but 0 data rows (format mismatch or empty file)
+  if (parsedData.rows.length === 0 && parsedData.detectedFormat === "HOLIDAY_EXTRAS") {
+    console.log(`[parseEmailFile] EXT1 TSV detected but 0 rows: ${file.filename}`);
+    await supabase
+      .from("ingest_email_files")
+      .update({
+        parse_outcome: "empty",
+        parse_status: "parsed",
+        parsed_at: new Date().toISOString(),
+        parse_error: null,
+        parse_reason: "No EXT1 rows detected (format mismatch or empty file)",
+      })
+      .eq("id", fileId);
+    return {
+      ok: true,
+      fileId: file.id,
+      filename: file.filename,
+      rowsParsed: 0,
+      stagedCount: 0,
+      importResult: { runId: null, successCount: 0, errorCount: 0, errors: [], cancelledCount: 0 },
+    };
   }
 
   if (!parsedData.rows || parsedData.rows.length === 0) {

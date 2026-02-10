@@ -15,7 +15,7 @@ interface BookingRow {
   start_at: string;
   end_at: string;
   status: string;
-  ops_status: string;
+  gate_status: string;
   created_at: string;
 }
 
@@ -33,22 +33,31 @@ export default function KeyReportClient() {
   const [to, setTo] = useState(() => todayStr());
   const [bookings, setBookings] = useState<BookingRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const fetchBookings = useCallback(async () => {
     const fromStr = from || todayStr();
     const toStr = to || todayStr();
 
     setLoading(true);
+    setFetchError(null);
     try {
       const res = await fetch(
         `/api/admin/key-report?tab=${tab}&from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`
       );
-      if (!res.ok) throw new Error('Failed to fetch');
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const message = data?.error ?? `Request failed (${res.status})`;
+        setFetchError(message);
+        setBookings([]);
+        return;
+      }
       setBookings(data.bookings || []);
     } catch (err) {
-      console.error(err);
+      const message = err instanceof Error ? err.message : 'Failed to fetch';
+      setFetchError(message);
       setBookings([]);
+      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -139,6 +148,11 @@ export default function KeyReportClient() {
         </Button>
       </div>
 
+      {fetchError && (
+        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+          {fetchError}
+        </p>
+      )}
       {loading ? (
         <p className="text-sm text-gray-500">Loading…</p>
       ) : (
@@ -166,7 +180,7 @@ export default function KeyReportClient() {
                   <tr key={b.id} className="hover:bg-gray-50">
                     <td className="px-3 py-2 text-sm font-medium text-gray-900">{b.reference}</td>
                     <td className="px-3 py-2 text-sm text-gray-900">{b.customer_name ?? '-'}</td>
-                    <td className="px-3 py-2 text-sm font-mono text-gray-700">{b.plate}</td>
+                    <td className="px-3 py-2 text-sm font-mono font-semibold text-gray-900">{b.plate}</td>
                     <td className="px-3 py-2 text-sm font-mono text-gray-600">
                       {new Date(b.start_at).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' })}
                     </td>
