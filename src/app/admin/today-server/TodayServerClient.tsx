@@ -40,12 +40,12 @@ async function parseJsonFromResponse(res: Response): Promise<unknown> {
   }
 }
 
-type BoardSection = 'arrivals' | 'departures';
+type BoardSection = 'arrivals' | 'departures' | 'parked';
 
 /** Spreadsheet-style row colours: row background + text colour for entire row. */
 function getRowStyleClasses(
   b: { gate_status?: string | null },
-  section: BoardSection
+  section: BoardSection | undefined
 ): string {
   const s = b.gate_status;
   let rowBg = 'bg-white';
@@ -59,15 +59,14 @@ function getRowStyleClasses(
       rowBg = 'bg-white';
       text = 'text-red-600';
     }
-  }
-
-  if (section === 'departures') {
+  } else if (section === 'departures') {
     rowBg = 'bg-green-600';
     text = 'text-black';
     if (s === 'take_key' || s === 'arrived_key_taken') {
       text = 'text-red-600';
     }
   }
+  // 'parked' or undefined: default white/black
 
   return `${rowBg} ${text}`;
 }
