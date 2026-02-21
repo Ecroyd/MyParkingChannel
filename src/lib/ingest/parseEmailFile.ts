@@ -71,7 +71,7 @@ function parseFileWithCanonicalMappers(buffer: Buffer, filename: string): { rows
     };
   });
 
-  return { headers: [], rows: parsedRows, detectedFormat };
+  return { rows: parsedRows, detectedFormat };
 }
 
 export async function parseEmailFile(fileId: string, tenantId: string) {
