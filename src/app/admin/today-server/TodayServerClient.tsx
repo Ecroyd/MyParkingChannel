@@ -40,6 +40,38 @@ async function parseJsonFromResponse(res: Response): Promise<unknown> {
   }
 }
 
+type BoardSection = 'arrivals' | 'departures';
+
+/** Spreadsheet-style row colours: row background + text colour for entire row. */
+function getRowStyleClasses(
+  b: { gate_status?: string | null },
+  section: BoardSection
+): string {
+  const s = b.gate_status;
+  let rowBg = 'bg-white';
+  let text = 'text-black';
+
+  if (section === 'arrivals') {
+    if (s === 'no_show') {
+      rowBg = 'bg-red-600';
+      text = 'text-black';
+    } else if (s === 'arrived' || s === 'arrived_key_taken') {
+      rowBg = 'bg-white';
+      text = 'text-red-600';
+    }
+  }
+
+  if (section === 'departures') {
+    rowBg = 'bg-green-600';
+    text = 'text-black';
+    if (s === 'take_key' || s === 'arrived_key_taken') {
+      text = 'text-red-600';
+    }
+  }
+
+  return `${rowBg} ${text}`;
+}
+
 interface Booking {
   id: string;
   tenant_id: string;
@@ -550,9 +582,7 @@ export default function TodayServerClient({
     const rowClass = cn(
       'group border-b transition-colors',
       highlightMode && 'cursor-pointer',
-      'hover:bg-muted/30',
-      section === 'arrivals' && 'bg-blue-50/40',
-      section === 'departures' && 'bg-green-50/40'
+      getRowStyleClasses(booking, section)
     );
 
     const handleGateStatusChange = (value: string) => {
@@ -582,7 +612,11 @@ export default function TodayServerClient({
               : {}),
           };
           setArrivals((prev) => prev.map((x) => (x.id === booking.id ? updated : x)));
-          setDepartures((prev) => prev.map((x) => (x.id === booking.id ? updated : x)));
+          setDepartures((prev) => {
+            const nextList = prev.map((x) => (x.id === booking.id ? updated : x));
+            if (next === GATE_STATUS.DEPARTED) return nextList.filter((x) => x.id !== booking.id);
+            return nextList;
+          });
           setCurrentlyParked((prev) => prev.map((x) => (x.id === booking.id ? updated : x)));
           lastUpdateRef.current = { gate_status: next };
           toast({ title: 'Gate status updated', description: gateStatusLabel(next) });
@@ -606,10 +640,10 @@ export default function TodayServerClient({
     // Single dropdown: gate_status only (— Status — / Arrived / No Show / Take Key / Arrived & Key Taken / Departed).
     return (
       <tr className={rowClass}>
-        <td colSpan={3} className="px-1.5 py-1 cursor-pointer align-middle" onClick={handleRowClick}>
+        <td colSpan={3} className="px-1.5 py-1 cursor-pointer align-middle text-inherit" onClick={handleRowClick}>
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm">
             {isKeyTaken && (
-              <span className="inline-flex items-center text-amber-600" title="Key taken">
+              <span className="inline-flex items-center text-inherit" title="Key taken">
                 <KeyRound className="h-4 w-4 shrink-0" />
               </span>
             )}
@@ -651,7 +685,7 @@ export default function TodayServerClient({
               <BookingHighlightIcon highlightCode={effectiveHighlightCode} />
             ) : null}
             <span>{booking.customer_name}</span>
-            <span className="text-sm font-semibold font-mono text-gray-900 bg-gray-100 px-2 py-0.5 rounded tracking-wide">{booking.plate}</span>
+            <span className="text-sm font-semibold font-mono text-inherit bg-black/10 px-2 py-0.5 rounded tracking-wide">{booking.plate}</span>
             {(booking as any).is_incomplete && (
               <span className="inline-flex items-center h-5 rounded-md px-1.5 py-0.5 text-xs font-medium bg-amber-50 text-amber-800">Incomplete</span>
             )}
@@ -673,17 +707,17 @@ export default function TodayServerClient({
             )}
           </div>
         </td>
-        <td colSpan={3} className="px-1.5 py-1 cursor-pointer align-middle" onClick={handleRowClick}>
-          <span className="text-xs text-muted-foreground font-normal">
+        <td colSpan={3} className="px-1.5 py-1 cursor-pointer align-middle text-inherit" onClick={handleRowClick}>
+          <span className="text-xs font-normal">
             {new Date(booking.start_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}, {new Date(booking.start_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
           </span>
         </td>
-        <td colSpan={3} className="px-1.5 py-1 cursor-pointer align-middle" onClick={handleRowClick}>
-          <span className="text-xs text-muted-foreground font-normal">
+        <td colSpan={3} className="px-1.5 py-1 cursor-pointer align-middle text-inherit" onClick={handleRowClick}>
+          <span className="text-xs font-normal">
             {new Date(booking.end_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}, {new Date(booking.end_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
           </span>
         </td>
-        <td colSpan={3} className="px-1.5 py-1 align-middle" onClick={(e) => e.stopPropagation()}>
+        <td colSpan={3} className="px-1.5 py-1 align-middle text-inherit" onClick={(e) => e.stopPropagation()}>
           <div className="flex flex-col md:flex-row md:items-center md:justify-end gap-1 md:gap-2">
             <div className="flex flex-wrap justify-end gap-1 text-sm">
               <span>{calculateDays()}d</span>
@@ -692,7 +726,7 @@ export default function TodayServerClient({
             <Select value={displayGateStatus === '' ? undefined : displayGateStatus} onValueChange={handleGateStatusChange} disabled={isPending}>
               <SelectTrigger className="h-7 px-1 py-0 bg-transparent border-0 shadow-none gap-1 cursor-pointer focus:ring-0 focus:ring-offset-0 min-w-0 w-auto [&>svg]:shrink-0 [&>span:first-of-type]:sr-only">
                 <SelectValue />
-                <span className={cn('inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium leading-none', gateStatusPillClass(displayGateStatus))}>
+                <span className={cn('inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium leading-none text-inherit', gateStatusPillClass(displayGateStatus))}>
                   {gateStatusLabel(displayGateStatus)}
                 </span>
               </SelectTrigger>
