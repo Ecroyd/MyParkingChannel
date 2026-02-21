@@ -19,7 +19,7 @@ const CSV_HEADERS = [
   'created_at',
 ];
 
-function escapeCsvCell(v: string | number | null | undefined): string {
+function escapeCsvCell(v: unknown): string {
   const s = v === null || v === undefined ? '' : String(v);
   const quoted = s.replace(/"/g, '""');
   return `"${quoted}"`;
@@ -86,7 +86,7 @@ export async function GET(request: NextRequest) {
     const csvRows = [
       CSV_HEADERS.join(','),
       ...filtered.map((r) =>
-        CSV_HEADERS.map((h) => escapeCsvCell((r as Record<string, string | number | null | undefined>)[h])).join(',')
+        CSV_HEADERS.map((h) => escapeCsvCell((r as Record<string, unknown>)[h])).join(',')
       ),
     ];
     const csv = csvRows.join('\n');
