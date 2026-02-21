@@ -86,7 +86,7 @@ export async function GET(request: NextRequest) {
     const csvRows = [
       CSV_HEADERS.join(','),
       ...filtered.map((r) =>
-        CSV_HEADERS.map((h) => escapeCsvCell((r as Record<string, unknown>)[h])).join(',')
+        CSV_HEADERS.map((h) => escapeCsvCell((r as Record<string, string | number | null | undefined>)[h])).join(',')
       ),
     ];
     const csv = csvRows.join('\n');
