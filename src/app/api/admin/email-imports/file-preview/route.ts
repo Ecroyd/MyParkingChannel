@@ -4,6 +4,32 @@ import { createAdminClient } from "@/lib/supabase/server-admin";
 
 export const runtime = "nodejs";
 
+/** Resolve tenant from sender email (same as signed-url / parsed-files) */
+function getEmailTenantMap(): Record<string, string> {
+  if (process.env.EMAIL_TENANT_MAP) {
+    try {
+      return JSON.parse(process.env.EMAIL_TENANT_MAP);
+    } catch {
+      // ignore
+    }
+  }
+  return {
+    "jcecroyd@gmail.com": "bab45dab-19e8-4230-b18e-ee1f663608e5",
+    "info@flyparksexeter.co.uk": "bab45dab-19e8-4230-b18e-ee1f663608e5",
+    "eek_me@hotmail.com": "bab45dab-19e8-4230-b18e-ee1f663608e5",
+  };
+}
+
+function tenantIdFromEmail(fromAddress: string | null | undefined): string | null {
+  if (!fromAddress) return null;
+  const map = getEmailTenantMap();
+  const from = fromAddress.toLowerCase().trim();
+  if (map[from]) return map[from];
+  const domain = from.split("@")[1];
+  if (domain && map[domain]) return map[domain];
+  return null;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
@@ -46,6 +72,16 @@ export async function GET(req: NextRequest) {
       .limit(1);
 
     let tenantId: string | null = st?.[0]?.tenant_id ?? null;
+
+    if (!tenantId && file.email_id) {
+      const { data: emailRow } = await admin
+        .from("ingest_emails")
+        .select("from_address")
+        .eq("id", file.email_id)
+        .limit(1)
+        .maybeSingle();
+      tenantId = tenantIdFromEmail(emailRow?.from_address ?? null);
+    }
 
     if (!tenantId) {
       const { data: pa } = await admin

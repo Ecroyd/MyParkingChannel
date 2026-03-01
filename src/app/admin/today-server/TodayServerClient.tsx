@@ -45,28 +45,59 @@ type BoardSection = 'arrivals' | 'departures' | 'parked';
 /** Spreadsheet-style row colours: row background + text colour for entire row. */
 function getRowStyleClasses(
   b: { gate_status?: string | null },
-  section: BoardSection | undefined
+  section: BoardSection | undefined,
+  gateStatusOverride?: string | null
 ): string {
-  const s = b.gate_status;
+  const s = gateStatusOverride ?? b.gate_status;
+  const isTakeKey = s === 'take_key';
+  const isArrivedKeyTaken = s === 'arrived_key_taken';
   let rowBg = 'bg-white';
   let text = 'text-black';
 
   if (section === 'arrivals') {
     if (s === 'no_show') {
       rowBg = 'bg-red-600';
-      text = 'text-black';
-    } else if (s === 'arrived' || s === 'arrived_key_taken') {
+      text = 'text-black [&_*]:!text-black';
+    } else if (s === 'cancelled') {
+      rowBg = 'bg-red-600';
+      text = 'text-black [&_*]:!text-black';
+    } else if (isArrivedKeyTaken) {
+      rowBg = 'bg-yellow-400';
+      text = 'text-red-600 [&_*]:!text-red-600';
+    } else if (isTakeKey) {
+      rowBg = 'bg-yellow-400';
+      text = 'text-black [&_*]:!text-black';
+    } else if (s === 'arrived') {
       rowBg = 'bg-white';
       text = 'text-red-600';
     }
   } else if (section === 'departures') {
-    rowBg = 'bg-green-600';
-    text = 'text-black';
-    if (s === 'take_key' || s === 'arrived_key_taken') {
-      text = 'text-red-600';
+    if (s === 'no_show') {
+      rowBg = 'bg-red-600';
+      text = 'text-black [&_*]:!text-black';
+    } else if (isArrivedKeyTaken) {
+      rowBg = 'bg-yellow-400';
+      text = 'text-red-600 [&_*]:!text-red-600';
+    } else if (isTakeKey) {
+      rowBg = 'bg-yellow-400';
+      text = 'text-black [&_*]:!text-black';
+    } else {
+      rowBg = 'bg-green-600';
+      text = 'text-black';
+    }
+  } else if (section === 'parked' || section === undefined) {
+    if (s === 'no_show') {
+      rowBg = 'bg-red-600';
+      text = 'text-black [&_*]:!text-black';
+    } else if (isArrivedKeyTaken) {
+      rowBg = 'bg-yellow-400';
+      text = 'text-red-600 [&_*]:!text-red-600';
+    } else if (isTakeKey) {
+      rowBg = 'bg-yellow-400';
+      text = 'text-black [&_*]:!text-black';
     }
   }
-  // 'parked' or undefined: default white/black
+  // else: default white/black
 
   return `${rowBg} ${text}`;
 }
@@ -301,16 +332,21 @@ export default function TodayServerClient({
     });
   }
 
-  const visibleArrivals = useMemo(
-    () => applyStatusFilters(sortedArrivals),
-    [sortedArrivals, showHidden, filterKeysTaken, filterArrivedKeyTaken]
-  );
+  const visibleArrivals = useMemo(() => {
+    const filtered = applyStatusFilters(sortedArrivals);
+    // Always show cancelled arrivals (red row); they are removed from departures below
+    const cancelledArrivals = sortedArrivals.filter((b) => b.gate_status === GATE_STATUS.CANCELLED);
+    const filteredIds = new Set(filtered.map((b) => b.id));
+    const extra = cancelledArrivals.filter((b) => !filteredIds.has(b.id));
+    return [...filtered, ...extra];
+  }, [sortedArrivals, showHidden, filterKeysTaken, filterArrivedKeyTaken]);
 
   const visibleDepartures = useMemo(() => {
     const filtered = applyStatusFilters(sortedDepartures);
     // Hide departures marked as "Departed" unless "Show hidden" is on
-    if (showHidden) return filtered;
-    return filtered.filter((b) => b.gate_status !== GATE_STATUS.DEPARTED);
+    const withoutDeparted = showHidden ? filtered : filtered.filter((b) => b.gate_status !== GATE_STATUS.DEPARTED);
+    // Remove cancelled from departures list (they stay on arrivals only, highlighted red)
+    return withoutDeparted.filter((b) => b.gate_status !== GATE_STATUS.CANCELLED);
   }, [sortedDepartures, showHidden, filterKeysTaken, filterArrivedKeyTaken]);
 
   // Counts for filter buttons (among rows visible when Show hidden is considered; cancelled hidden by default)
@@ -581,7 +617,7 @@ export default function TodayServerClient({
     const rowClass = cn(
       'group border-b transition-colors',
       highlightMode && 'cursor-pointer',
-      getRowStyleClasses(booking, section)
+      getRowStyleClasses(booking, section, displayGateStatus)
     );
 
     const handleGateStatusChange = (value: string) => {
@@ -613,7 +649,7 @@ export default function TodayServerClient({
           setArrivals((prev) => prev.map((x) => (x.id === booking.id ? updated : x)));
           setDepartures((prev) => {
             const nextList = prev.map((x) => (x.id === booking.id ? updated : x));
-            if (next === GATE_STATUS.DEPARTED) return nextList.filter((x) => x.id !== booking.id);
+            if (next === GATE_STATUS.DEPARTED || next === GATE_STATUS.CANCELLED) return nextList.filter((x) => x.id !== booking.id);
             return nextList;
           });
           setCurrentlyParked((prev) => prev.map((x) => (x.id === booking.id ? updated : x)));
@@ -631,9 +667,18 @@ export default function TodayServerClient({
 
     const gateStatusOptions = useMemo(() => {
       if (section === 'departures') {
-        return GATE_STATUS_OPTIONS.filter((o) => o.value === GATE_STATUS.NONE || o.value === GATE_STATUS.DEPARTED);
+        return GATE_STATUS_OPTIONS.filter(
+          (o) =>
+            o.value === GATE_STATUS.NONE ||
+            o.value === GATE_STATUS.NO_SHOW ||
+            o.value === GATE_STATUS.DEPARTED
+        );
       }
-      return GATE_STATUS_OPTIONS;
+      if (section === 'arrivals') {
+        return GATE_STATUS_OPTIONS; // includes Cancelled (arrivals only)
+      }
+      // Parked: full list except Cancelled (Cancelled is for arrivals only)
+      return GATE_STATUS_OPTIONS.filter((o) => o.value !== GATE_STATUS.CANCELLED);
     }, [section]);
 
     // Single dropdown: gate_status only (— Status — / Arrived / No Show / Take Key / Arrived & Key Taken / Departed).
@@ -808,8 +853,8 @@ export default function TodayServerClient({
         </div>
 
         {/* Arrivals and Departures by Day */}
-        <section className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <div className="p-4 border-b border-gray-200">
+        <section className="w-full -mx-4 md:-mx-6 bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <div className="p-4 md:p-6 border-b border-gray-200">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="shrink-0">
                 <h2 className="text-lg font-semibold text-gray-900">Arrivals & Departures</h2>
@@ -964,11 +1009,11 @@ export default function TodayServerClient({
                                 <>
                                   <tr className="bg-blue-50/40 border-t border-blue-100">
                                     <td colSpan={12} className="py-1">
-                                      <div className="flex items-center justify-between">
-                                        <span className="inline-flex items-center rounded-full bg-blue-600 text-white px-2 py-0.5 text-xs font-semibold uppercase">
+                                      <div className="flex items-center justify-center relative py-2">
+                                        <span className="inline-flex items-center rounded-full bg-blue-600 text-white px-4 py-1 text-sm font-semibold uppercase">
                                           Arrivals
                                         </span>
-                                        <span className="rounded-full bg-blue-100 text-blue-800 text-xs font-medium px-2 py-0.5">
+                                        <span className="absolute right-4 rounded-full bg-blue-100 text-blue-800 text-xs font-medium px-2 py-0.5">
                                           {dayGroup.arrivals.length}
                                         </span>
                                       </div>
@@ -979,16 +1024,16 @@ export default function TodayServerClient({
                                   ))}
                                 </>
                               )}
-                              {/* Departures for this date — green header pill + count */}
+                              {/* Departures for this date — prominent green banner */}
                               {dayGroup.departures.length > 0 && (
                                 <>
-                                  <tr className="bg-green-50/40 border-t border-green-100">
+                                  <tr className="bg-green-600 border-t border-green-700">
                                     <td colSpan={12} className="py-1">
-                                      <div className="flex items-center justify-between">
-                                        <span className="inline-flex items-center rounded-full bg-green-600 text-white px-2 py-0.5 text-xs font-semibold uppercase">
+                                      <div className="flex items-center justify-center relative py-2">
+                                        <span className="inline-flex items-center rounded-full bg-green-500 text-white px-4 py-1 text-sm font-semibold uppercase">
                                           Departures
                                         </span>
-                                        <span className="rounded-full bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5">
+                                        <span className="absolute right-4 rounded-full bg-white/25 text-white text-xs font-medium px-2 py-0.5">
                                           {dayGroup.departures.length}
                                         </span>
                                       </div>

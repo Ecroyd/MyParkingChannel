@@ -17,7 +17,6 @@ export const ADMIN_NAV: NavNode[] = [
   { key: "dashboard", label: "Dashboard", href: "/admin/dashboard-server", section: "Core" },
   { key: "today", label: "Today", href: "/admin/today-server", section: "Core" },
   { key: "key-report", label: "Key Report", href: "/admin/key-report", section: "Core" },
-  { key: "accounting-export", label: "Accounting export", href: "/admin/accounting-export", section: "Core" },
   {
     key: "bookings",
     label: "Bookings",

@@ -53,6 +53,44 @@ interface BookingWithSource {
 
 const TEXT_PREVIEW_MAX_BYTES = 200 * 1024; // 200KB
 
+/** Parse a single CSV line respecting quoted fields (handles commas inside quotes) */
+function parseCSVLine(line: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if ((c === ',' || c === '\t') && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += c;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+function isCSVContent(content: string, filename?: string | null): boolean {
+  const name = (filename || '').toLowerCase();
+  if (name.endsWith('.csv') || name.endsWith('.tsv')) return true;
+  const firstLine = content.split('\n')[0] ?? '';
+  return firstLine.includes(',') || firstLine.includes('\t');
+}
+
+/** Parse CSV/TSV content into rows (array of columns). Stops at truncation marker. */
+function parseCSVContent(content: string): string[][] {
+  const lines = content.split(/\r?\n/).filter((line) => line.trim() !== '' && !line.includes('… (truncated)'));
+  return lines.map((line) => parseCSVLine(line));
+}
+
 type ViewFileMeta = {
   bucket: string;
   path: string;
@@ -427,7 +465,7 @@ export default function ParsedFilesClient({ tenantId }: { tenantId: string }) {
 
       {/* View file modal */}
       <Dialog open={viewFileOpen} onOpenChange={setViewFileOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
           <DialogHeader>
             <DialogTitle>{viewFileMeta?.filename ?? 'File preview'}</DialogTitle>
             <DialogDescription>
@@ -439,7 +477,7 @@ export default function ParsedFilesClient({ tenantId }: { tenantId: string }) {
           )}
           {viewFileMeta && (
             <>
-              <div className="grid grid-cols-2 gap-2 text-sm border rounded p-3 bg-muted/50">
+              <div className="grid grid-cols-2 gap-2 text-sm border rounded p-3 bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200">
                 <div><span className="font-medium">Bucket:</span> {viewFileMeta.bucket}</div>
                 <div><span className="font-medium">Path:</span> <span className="font-mono text-xs break-all">{viewFileMeta.path}</span></div>
                 <div><span className="font-medium">Size:</span> {viewFileMeta.fileSize != null ? `${(viewFileMeta.fileSize / 1024).toFixed(1)} KB` : '—'}</div>
@@ -447,19 +485,35 @@ export default function ParsedFilesClient({ tenantId }: { tenantId: string }) {
                 <div><span className="font-medium">Detected source:</span> {viewFileMeta.detectedSource ?? '—'}</div>
               </div>
               {viewFilePreviewType === 'text' && viewFileContent != null && (
-                <div className="border rounded overflow-auto flex-1 min-h-0 max-h-[50vh]">
-                  <pre className="p-4 text-xs whitespace-pre-wrap font-mono block">
-                    {viewFileContent.split('\n').map((line, i) => (
-                      <span key={i} className="flex">
-                        <span className="select-none w-10 shrink-0 text-muted-foreground pr-2 text-right">{i + 1}</span>
-                        <span>{line || ' '}</span>
-                      </span>
-                    ))}
-                  </pre>
+                <div className="border rounded overflow-auto flex-1 min-h-0 max-h-[50vh] bg-gray-50 dark:bg-gray-800">
+                  {isCSVContent(viewFileContent, viewFileMeta?.filename) ? (
+                    <table className="w-full text-xs font-mono border-collapse">
+                      <tbody>
+                        {parseCSVContent(viewFileContent).map((row, i) => (
+                          <tr key={i} className={i === 0 ? 'bg-gray-200 dark:bg-gray-700 font-semibold' : 'border-b border-gray-200 dark:border-gray-600'}>
+                            {row.map((cell, j) => (
+                              <td key={j} className="px-3 py-1.5 text-left align-top text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                                {cell}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <pre className="p-4 text-xs whitespace-pre-wrap font-mono block text-gray-900 dark:text-gray-100">
+                      {viewFileContent.split('\n').map((line, i) => (
+                        <span key={i} className="flex">
+                          <span className="select-none w-10 shrink-0 text-gray-500 dark:text-gray-400 pr-2 text-right">{i + 1}</span>
+                          <span className="text-gray-900 dark:text-gray-100">{line || ' '}</span>
+                        </span>
+                      ))}
+                    </pre>
+                  )}
                 </div>
               )}
               {viewFilePreviewType === 'image' && viewFileContent && (
-                <div className="border rounded overflow-auto flex-1 min-h-0 max-h-[50vh] flex items-center justify-center p-4">
+                <div className="border rounded overflow-auto flex-1 min-h-0 max-h-[50vh] flex items-center justify-center p-4 bg-gray-100 dark:bg-gray-800">
                   <img src={viewFileContent} alt={viewFileMeta.filename} className="max-w-full max-h-[45vh] object-contain" />
                 </div>
               )}

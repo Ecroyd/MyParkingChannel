@@ -77,6 +77,8 @@ export default function AnalyticsDashboard({ tenantId }: { tenantId: string }) {
   const [showCustomRange, setShowCustomRange] = useState(false);
   const [customStart, setCustomStart] = useState<Date>(subDays(new Date(), 30));
   const [customEnd, setCustomEnd] = useState<Date>(new Date());
+  const [exportAgents, setExportAgents] = useState<string[]>([]);
+  const [exportAgentsLoading, setExportAgentsLoading] = useState(false);
 
   const predefinedRanges: DateRange[] = [
     {
@@ -202,6 +204,23 @@ export default function AnalyticsDashboard({ tenantId }: { tenantId: string }) {
       fetchAnalytics(dateRange.start, dateRange.end);
     }
   }, [tenantId, dateRange]);
+
+  // Fetch agents for detailed accounting export (admin API)
+  useEffect(() => {
+    let cancelled = false;
+    setExportAgentsLoading(true);
+    const startStr = format(dateRange.start, 'yyyy-MM-dd');
+    const endStr = format(dateRange.end, 'yyyy-MM-dd');
+    fetch(`/api/admin/accounting-export?from=${encodeURIComponent(startStr)}&to=${encodeURIComponent(endStr)}&list=1`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && Array.isArray(data?.agents)) setExportAgents(data.agents);
+        else if (!cancelled) setExportAgents([]);
+      })
+      .catch(() => { if (!cancelled) setExportAgents([]); })
+      .finally(() => { if (!cancelled) setExportAgentsLoading(false); });
+    return () => { cancelled = true; };
+  }, [dateRange]);
 
   const handleDateRangeChange = (range: DateRange) => {
     setDateRange(range);
@@ -445,16 +464,50 @@ export default function AnalyticsDashboard({ tenantId }: { tenantId: string }) {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-green-700 mb-4">
-            Export detailed financial data for accounting purposes. Includes dates, money charged/received, 
-            extensions, and channels (no customer details).
+            Export financial data for accounting. Summary format includes extensions and total revenue; detailed CSV includes customer, plate, and can be downloaded per channel/agent.
           </p>
-          <Button 
-            onClick={() => handleExportCSV('accounting')} 
-            className="bg-green-600 hover:bg-green-700 text-white"
-          >
-            <Download className="h-4 w-4 mr-2" />
-            Export Accounting CSV
-          </Button>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button 
+              onClick={() => handleExportCSV('accounting')} 
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Summary CSV (with extensions)
+            </Button>
+            <Button 
+              variant="outline"
+              onClick={() => {
+                const startStr = format(dateRange.start, 'yyyy-MM-dd');
+                const endStr = format(dateRange.end, 'yyyy-MM-dd');
+                window.open(`/api/admin/accounting-export?from=${encodeURIComponent(startStr)}&to=${encodeURIComponent(endStr)}`, '_blank');
+              }}
+              disabled={exportAgentsLoading}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Detailed CSV (All)
+            </Button>
+            {exportAgents.length > 0 && (
+              <>
+                <span className="text-sm text-green-700">Per channel:</span>
+                {exportAgents.map((agentKey) => (
+                  <Button
+                    key={agentKey}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const startStr = format(dateRange.start, 'yyyy-MM-dd');
+                      const endStr = format(dateRange.end, 'yyyy-MM-dd');
+                      window.open(`/api/admin/accounting-export?from=${encodeURIComponent(startStr)}&to=${encodeURIComponent(endStr)}&agent=${encodeURIComponent(agentKey)}`, '_blank');
+                    }}
+                    disabled={exportAgentsLoading}
+                  >
+                    <Download className="h-4 w-4 mr-1" />
+                    {agentKey}
+                  </Button>
+                ))}
+              </>
+            )}
+          </div>
         </CardContent>
       </Card>
 

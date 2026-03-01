@@ -6,6 +6,32 @@ type Body = {
   ingestEmailFileId: string;
 };
 
+/** Resolve tenant from sender email (same logic as parsed-files so files shown in list are viewable) */
+function getEmailTenantMap(): Record<string, string> {
+  if (process.env.EMAIL_TENANT_MAP) {
+    try {
+      return JSON.parse(process.env.EMAIL_TENANT_MAP);
+    } catch {
+      // ignore
+    }
+  }
+  return {
+    "jcecroyd@gmail.com": "bab45dab-19e8-4230-b18e-ee1f663608e5",
+    "info@flyparksexeter.co.uk": "bab45dab-19e8-4230-b18e-ee1f663608e5",
+    "eek_me@hotmail.com": "bab45dab-19e8-4230-b18e-ee1f663608e5",
+  };
+}
+
+function tenantIdFromEmail(fromAddress: string | null | undefined): string | null {
+  if (!fromAddress) return null;
+  const map = getEmailTenantMap();
+  const from = fromAddress.toLowerCase().trim();
+  if (map[from]) return map[from];
+  const domain = from.split("@")[1];
+  if (domain && map[domain]) return map[domain];
+  return null;
+}
+
 export async function POST(req: Request) {
   const { ingestEmailFileId } = (await req.json()) as Body;
 
@@ -28,7 +54,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "File has no storage object" }, { status: 404 });
   }
 
-  // 3) Authorize: user must have tenant access to whatever tenant this file maps to.
+  // 3) Resolve tenant: first from staging, then from email (same as parsed-files list)
   const { data: st } = await admin
     .from("booking_import_staging")
     .select("tenant_id")
@@ -38,6 +64,17 @@ export async function POST(req: Request) {
 
   let tenantId: string | null = st?.[0]?.tenant_id ?? null;
 
+  if (!tenantId && file.email_id) {
+    const { data: emailRow } = await admin
+      .from("ingest_emails")
+      .select("from_address")
+      .eq("id", file.email_id)
+      .limit(1)
+      .maybeSingle();
+    tenantId = tenantIdFromEmail(emailRow?.from_address ?? null);
+  }
+
+  // 4) Authorize: user must have tenant access or be platform admin
   if (!tenantId) {
     const { data: pa } = await admin
       .from("platform_admins")
@@ -62,7 +99,7 @@ export async function POST(req: Request) {
     if (!ut) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // 4) Create signed URL
+  // 5) Create signed URL
   const expiresIn = 60 * 5; // 5 minutes
   const { data: signed, error: signErr } = await admin.storage
     .from(file.storage_bucket)
