@@ -4,6 +4,8 @@ import { logRequestAttribution } from '@/lib/jobSecret';
 import { getCanaryHealth } from '@/lib/health/canary';
 import { getCavuSyncHealth } from '@/lib/health/cavu';
 import { getEmailParseHealth } from '@/lib/health/emailParse';
+import { getServiceSupabase } from '@/lib/supabase/service';
+import { checkIngestSchemaColumns } from '@/lib/ingest/schemaGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,6 +40,7 @@ export interface HealthSnapshotResponse {
   canary: Awaited<ReturnType<typeof getCanaryHealth>>;
   emailParse: Awaited<ReturnType<typeof getEmailParseHealth>>;
   cavu: Awaited<ReturnType<typeof getCavuSyncHealth>>;
+  ingestSchema: Awaited<ReturnType<typeof checkIngestSchemaColumns>>;
 }
 
 /**
@@ -53,7 +56,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const [canary, emailParse, cavu] = await Promise.all([
+    const supabase = getServiceSupabase();
+    const [canary, emailParse, cavu, ingestSchema] = await Promise.all([
       getCanaryHealth().catch((err) => {
         console.error('[HEALTH SNAPSHOT] canary failed', err);
         return CANARY_FALLBACK;
@@ -66,6 +70,15 @@ export async function GET(req: NextRequest) {
         console.error('[HEALTH SNAPSHOT] cavu failed', err);
         return CAVU_FALLBACK;
       }),
+      checkIngestSchemaColumns(supabase).catch((err) => {
+        console.error('[HEALTH SNAPSHOT] ingestSchema failed', err);
+        return {
+          ok: false,
+          checkedAt: new Date().toISOString(),
+          columns: [],
+          missing: ['check failed'],
+        };
+      }),
     ]);
 
     return NextResponse.json({
@@ -73,6 +86,7 @@ export async function GET(req: NextRequest) {
       canary,
       emailParse,
       cavu,
+      ingestSchema,
     } satisfies HealthSnapshotResponse);
   } catch (err: any) {
     console.error('[HEALTH SNAPSHOT] error', err);

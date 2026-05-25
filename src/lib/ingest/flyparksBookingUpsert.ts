@@ -3,6 +3,7 @@
  * Used by: /api/ingest/email (live ingest) and scripts/backfillFlyparksBookingsFromEmails.ts (backfill).
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { safeBookingUpsertPayload } from "@/lib/ingest/safeBookingUpsertPayload";
 
 export function match1(text: string, re: RegExp): string | null {
   return text.match(re)?.[1]?.trim() ?? null;
@@ -116,9 +117,14 @@ export async function upsertBookingFromFlyparksParse(
     payload.money_received = amount;
   }
 
+  const safePayload = safeBookingUpsertPayload(payload);
+  if (!safePayload.ok) {
+    return { ok: false, error: safePayload.error };
+  }
+
   const { error } = await supabaseAdmin
     .from("bookings")
-    .upsert(payload, { onConflict: "tenant_id,reference" });
+    .upsert(safePayload.data, { onConflict: "tenant_id,reference" });
 
   if (error) {
     return { ok: false, error: error.message };

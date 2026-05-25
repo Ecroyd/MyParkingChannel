@@ -6,7 +6,7 @@ import { createAdminClient } from '@/lib/supabase/server';
  */
 export async function writeHealthStatus(
   tenantId: string | null,
-  key: 'canary' | 'cavu' | 'email_parse',
+  key: 'canary' | 'cavu' | 'email_parse' | 'email_ingest',
   payload: Record<string, unknown>
 ): Promise<void> {
   const supabase = createAdminClient();

@@ -4,6 +4,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { mapStagingToBookings } from "@/lib/imports/mapToBookings";
+import { safeBookingUpsertPayload } from "@/lib/ingest/safeBookingUpsertPayload";
 
 export type PromoteResult = { ok: boolean; error?: string; updated?: boolean; bookingId?: string };
 
@@ -72,7 +73,7 @@ export async function promoteStagingRowToBooking(
         ? "aph"
         : null;
 
-  const bookingRow = {
+  const bookingRowRaw = {
     ...mapped,
     tenant_id: tenantId,
     source,
@@ -87,6 +88,12 @@ export async function promoteStagingRowToBooking(
       ? { customer_email: stagingRow.raw_json.extracted.email }
       : {}),
   };
+
+  const safePayload = safeBookingUpsertPayload(bookingRowRaw);
+  if (!safePayload.ok) {
+    return { ok: false, error: safePayload.error };
+  }
+  const bookingRow = safePayload.data;
 
   // Skip insert/upsert if vehicle_reg is required and missing (match parseEmailFile behavior).
   const isFlyparksText = stagingRow.raw_json?.kind === "flyparks_text_email";
