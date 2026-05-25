@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 import { getServiceSupabase } from "@/lib/supabase/service";
 import { requireAdminApi } from "@/lib/ingest/requireAdminApi";
-import {
-  clearIngestEmailForReprocess,
-  processIngestEmail,
-} from "@/lib/ingest/processIngestEmail";
+import { processIngestEmail } from "@/lib/ingest/processIngestEmail";
+import { clearIngestEmailForReprocess } from "@/lib/ingest/markIngestFailure";
 
 export const dynamic = "force-dynamic";
 

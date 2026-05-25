@@ -7,7 +7,14 @@ import {
   extractFlyparksReceiptFromForward,
   guessFlyparksFields,
 } from "@/lib/email/flyparksForward";
-import { markIngestFailure, markIngestSuccess } from "@/lib/ingest/markIngestFailure";
+import {
+  markIngestFailure,
+  markIngestSuccess,
+  clearIngestEmailForReprocess,
+  type IngestParseSuccessPatch,
+} from "@/lib/ingest/markIngestFailure";
+
+export { clearIngestEmailForReprocess };
 import { detectTenantFromEmail } from "@/lib/ingest/detectTenantFromEmail";
 
 export type IngestAttachment = {
@@ -110,6 +117,7 @@ export async function processIngestEmail(
   let parseFailure: string | null = null;
   let bookingId: string | null = null;
   let textPromoted = false;
+  let parseSuccessPatch: IngestParseSuccessPatch | undefined;
 
   try {
     tenantIdFromInbox = await resolveTenantFromInbox(supabase, toAddress ?? null);
@@ -190,6 +198,14 @@ export async function processIngestEmail(
       if (parseRowErr) {
         throw new Error(`ingest_email_parses upsert failed: ${parseRowErr.message}`);
       }
+
+      parseSuccessPatch = {
+        parsed_subject: parsedForReceipt.subject,
+        parsed_text: parsedForReceipt.text,
+        forwarded_text,
+        booking_plate_guess: guessed.plate ?? null,
+        booking_reference_guess: guessed.reference ?? null,
+      };
 
       const bookingFilePresent = hasBookingFileAttachment(parsedEmail?.attachments);
       const looksLikeFlyparks = looksLikeFlyparksReceipt(
@@ -386,10 +402,8 @@ export async function processIngestEmail(
       await parseFilesAsync(fileIds, tenantIdForFiles);
     }
 
-    if (textPromoted) {
-      await markIngestSuccess(supabase, emailId);
-    } else {
-      await supabase.from("ingest_emails").update({ error: null }).eq("id", emailId);
+    if (textPromoted || bookingId) {
+      await markIngestSuccess(supabase, emailId, parseSuccessPatch);
     }
 
     return {
@@ -416,15 +430,3 @@ export async function processIngestEmail(
   }
 }
 
-/**
- * Reset email status before reprocessing from admin.
- */
-export async function clearIngestEmailForReprocess(
-  supabase: SupabaseClient,
-  emailId: string
-): Promise<void> {
-  await supabase
-    .from("ingest_emails")
-    .update({ status: "received", error: null })
-    .eq("id", emailId);
-}

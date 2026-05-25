@@ -46,12 +46,59 @@ export async function markIngestFailure(
   });
 }
 
+export type IngestParseSuccessPatch = {
+  parsed_subject?: string | null;
+  parsed_text?: string | null;
+  forwarded_text?: string | null;
+  booking_plate_guess?: string | null;
+  booking_reference_guess?: string | null;
+};
+
+/**
+ * Finalize successful ingest/reprocess: clear all error fields and mark parsed.
+ * Call when booking upsert (or full pipeline success with booking) completes.
+ */
 export async function markIngestSuccess(
+  supabase: SupabaseClient,
+  emailId: string,
+  parsePatch?: IngestParseSuccessPatch
+): Promise<void> {
+  const parsedAt = new Date().toISOString();
+
+  await supabase
+    .from("ingest_emails")
+    .update({ status: "parsed", error: null })
+    .eq("id", emailId);
+
+  await supabase.from("ingest_email_parses").upsert(
+    {
+      ingest_email_id: emailId,
+      parse_status: "parsed",
+      parse_error: null,
+      parsed_at: parsedAt,
+      ...parsePatch,
+    },
+    { onConflict: "ingest_email_id" }
+  );
+}
+
+/**
+ * Reset email/parse error state before admin reprocess replay.
+ */
+export async function clearIngestEmailForReprocess(
   supabase: SupabaseClient,
   emailId: string
 ): Promise<void> {
   await supabase
     .from("ingest_emails")
-    .update({ status: "parsed", error: null })
+    .update({ status: "received", error: null })
     .eq("id", emailId);
+
+  await supabase.from("ingest_email_parses").upsert(
+    {
+      ingest_email_id: emailId,
+      parse_error: null,
+    },
+    { onConflict: "ingest_email_id" }
+  );
 }
