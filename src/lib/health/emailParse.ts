@@ -82,7 +82,7 @@ export async function getEmailParseHealth(tenantId: string): Promise<EmailParseH
   const { data: allParsedFiles } = await adminClient
     .from('ingest_email_files')
     .select(`
-      id, filename, content_type, parse_status, parse_outcome, parsed_at, created_at,
+      id, filename, content_type, parse_status, parse_outcome, parse_reason, parsed_at, created_at,
       ingest_emails!inner(id, from_address, subject, created_at)
     `)
     .eq('parse_status', 'parsed')
@@ -117,19 +117,45 @@ export async function getEmailParseHealth(tenantId: string): Promise<EmailParseH
       const escapedFilename = file.filename.replace(/%/g, '\\%').replace(/_/g, '\\_');
       const { data: importRuns } = await adminClient
         .from('import_runs')
-        .select('id, inserted_count, error_count, created_at, profile_name')
+        .select('id, inserted_count, error_count, created_at, profile_name, meta')
         .eq('tenant_id', tenantId)
         .gte('created_at', checkStart.toISOString())
         .lte('created_at', checkEnd.toISOString())
         .or(`profile_name.eq.${exactMatch},profile_name.ilike.%${escapedFilename}%`);
       if (importRuns?.length) {
         const exactMatchRun = importRuns.find((r: any) => r.profile_name === exactMatch);
-        const successfulRun = exactMatchRun || importRuns.find((r: any) => (r.inserted_count || 0) > 0);
-        if (successfulRun && (successfulRun.inserted_count || 0) > 0) {
-          hasSuccessfulImportRun = true;
-          bookingCount = successfulRun.inserted_count || 0;
+        const successfulRun =
+          exactMatchRun ||
+          importRuns.find((r: any) => {
+            const inserted = r.inserted_count || 0;
+            const meta = r.meta as { updated?: number; cancelled_count?: number } | null;
+            const updated = meta?.updated ?? 0;
+            const cancelled = meta?.cancelled_count ?? 0;
+            return inserted > 0 || updated > 0 || cancelled > 0;
+          });
+        if (successfulRun) {
+          const meta = successfulRun.meta as { updated?: number; cancelled_count?: number } | null;
+          const total =
+            (successfulRun.inserted_count || 0) +
+            (meta?.updated ?? 0) +
+            (meta?.cancelled_count ?? 0);
+          if (total > 0) {
+            hasSuccessfulImportRun = true;
+            bookingCount = total;
+          }
         }
       }
+    }
+
+    const upsertedFromReason = (() => {
+      const reason = file.parse_reason as string | null;
+      if (!reason) return 0;
+      const m = reason.match(/rows_upserted=(\d+)/);
+      return m ? Number(m[1]) : 0;
+    })();
+    if (upsertedFromReason > 0) {
+      hasSuccessfulImportRun = true;
+      bookingCount = Math.max(bookingCount, upsertedFromReason);
     }
 
     if (hasSuccessfulImportRun && bookingCount === 0 && stagingRows?.length) {
@@ -175,8 +201,12 @@ export async function getEmailParseHealth(tenantId: string): Promise<EmailParseH
       bookingCount = recentBookingCount || 0;
     }
 
-    if ((stagingCount || 0) === 0 && bookingCount === 0) {
-      parsedWithIssues.push({ ...file, staging_count: stagingCount || 0, booking_count: bookingCount });
+    if (file.parse_outcome === 'empty' || ((stagingCount || 0) === 0 && bookingCount === 0)) {
+      parsedWithIssues.push({
+        ...file,
+        staging_count: stagingCount || 0,
+        booking_count: bookingCount,
+      });
     }
   }
 

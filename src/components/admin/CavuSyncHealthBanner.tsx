@@ -6,26 +6,32 @@ import { AlertCircle, RefreshCw, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 
-interface CavuSyncHealthBannerProps {
-  cavu: {
+export type CavuHealthForBanner = {
+  ok: boolean;
+  syncStatus?: 'running' | 'success' | 'failed' | 'idle';
+  lastRunAt?: string | null;
+  lastSuccessAt?: string | null;
+  lastError?: string | null;
+  latestRun: {
+    id: string;
+    started_at: string;
+    finished_at: string | null;
     ok: boolean;
-    latestRun: {
-      id: string;
-      started_at: string;
-      finished_at: string | null;
-      ok: boolean;
-      events_seen: number;
-      bookings_upserted: number;
-      bookings_cancelled: number;
-      errors: string[];
-      hours: number;
-    } | null;
-    latestSuccessfulRun: {
-      id: string;
-      started_at: string;
-      finished_at: string | null;
-    } | null;
+    events_seen: number;
+    bookings_upserted: number;
+    bookings_cancelled: number;
+    errors: string[];
+    hours: number;
   } | null;
+  latestSuccessfulRun: {
+    id: string;
+    started_at: string;
+    finished_at: string | null;
+  } | null;
+} | null;
+
+interface CavuSyncHealthBannerProps {
+  cavu: CavuHealthForBanner;
   isLoading: boolean;
   onRefetch: () => Promise<void>;
 }
@@ -34,7 +40,7 @@ export function CavuSyncHealthBanner({ cavu, isLoading, onRefetch }: CavuSyncHea
   const router = useRouter();
   const [syncing, setSyncing] = useState(false);
 
-  const formatDate = (dateString: string | null) => {
+  const formatDate = (dateString: string | null | undefined) => {
     if (!dateString) return 'Never';
     const date = new Date(dateString);
     const now = new Date();
@@ -62,9 +68,10 @@ export function CavuSyncHealthBanner({ cavu, isLoading, onRefetch }: CavuSyncHea
           router.refresh();
         }, 2000);
       } else {
-        alert('Failed to trigger sync');
+        const data = await res.json().catch(() => ({}));
+        alert(data?.error ?? 'Failed to trigger sync');
       }
-    } catch (err) {
+    } catch {
       alert('Failed to trigger sync');
     } finally {
       setSyncing(false);
@@ -72,29 +79,46 @@ export function CavuSyncHealthBanner({ cavu, isLoading, onRefetch }: CavuSyncHea
   };
 
   if (isLoading) return null;
-  if (!cavu || (!cavu.latestRun && !cavu.latestSuccessfulRun)) return null;
+  if (!cavu || (!cavu.latestRun && !cavu.latestSuccessfulRun && !cavu.lastRunAt)) return null;
 
   const latestRun = cavu.latestRun;
   const latestSuccessfulRun = cavu.latestSuccessfulRun;
+  const syncStatus = cavu.syncStatus;
+  const lastRunAt = cavu.lastRunAt ?? latestRun?.started_at ?? null;
+  const lastSuccessAt =
+    cavu.lastSuccessAt ?? latestSuccessfulRun?.started_at ?? null;
+  const lastError =
+    cavu.lastError ?? (latestRun && !latestRun.ok ? latestRun.errors?.[0] : null) ?? null;
 
   let bannerState: 'error' | 'warning' | null = null;
   let bannerMessage = '';
-  let bannerDetails: string[] = [];
+  const bannerDetails: string[] = [];
 
-  if (latestRun && (!latestRun.ok || (latestRun.errors && latestRun.errors.length > 0))) {
+  if (syncStatus === 'running') {
+    bannerState = 'warning';
+    bannerMessage = 'CAVU sync in progress';
+    if (lastRunAt) bannerDetails.push(`Started: ${formatDate(lastRunAt)}`);
+  } else if (syncStatus === 'failed' || (latestRun && (!latestRun.ok || (latestRun.errors?.length ?? 0) > 0))) {
     bannerState = 'error';
     bannerMessage = 'CAVU sync failed';
-    if (latestRun.errors?.length) {
-      bannerDetails.push(latestRun.errors[0]);
-      if (latestRun.errors.length > 1) bannerDetails.push(`+${latestRun.errors.length - 1} more error${latestRun.errors.length - 1 !== 1 ? 's' : ''}`);
+    if (lastRunAt) bannerDetails.push(`Last run: ${formatDate(lastRunAt)}`);
+    if (lastSuccessAt) {
+      bannerDetails.push(`Last success: ${formatDate(lastSuccessAt)}`);
     }
-  } else if (latestSuccessfulRun) {
-    const lastSuccess = new Date(latestSuccessfulRun.started_at);
+    if (lastError) {
+      bannerDetails.push(`Error: ${lastError}`);
+    } else if (latestRun?.errors?.length) {
+      bannerDetails.push(`Error: ${latestRun.errors[0]}`);
+    }
+  } else if (lastSuccessAt) {
+    const lastSuccess = new Date(lastSuccessAt);
     const diffHours = (Date.now() - lastSuccess.getTime()) / (1000 * 60 * 60);
     if (diffHours > 2) {
       bannerState = 'warning';
       bannerMessage = 'CAVU sync delayed';
-      bannerDetails.push(`Last successful sync was ${formatDate(latestSuccessfulRun.started_at)}`);
+      if (lastRunAt) bannerDetails.push(`Last run: ${formatDate(lastRunAt)}`);
+      bannerDetails.push(`Last success: ${formatDate(lastSuccessAt)}`);
+      if (lastError) bannerDetails.push(`Error: ${lastError}`);
     }
   } else if (latestRun && !latestRun.finished_at) {
     const diffMins = (Date.now() - new Date(latestRun.started_at).getTime()) / (1000 * 60);
@@ -118,28 +142,34 @@ export function CavuSyncHealthBanner({ cavu, isLoading, onRefetch }: CavuSyncHea
         <div className="flex items-start gap-3 flex-1">
           <Icon className={`h-5 w-5 ${iconColor} mt-0.5`} />
           <div className="flex-1">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
               <h3 className={`font-semibold ${textColor}`}>{bannerMessage}</h3>
-              {latestRun && (
-                <span className={`text-xs ${textColor} opacity-75`}>Last run: {formatDate(latestRun.started_at)}</span>
-              )}
             </div>
             {bannerDetails.length > 0 && (
               <div className="space-y-1">
                 {bannerDetails.map((detail, idx) => (
-                  <p key={idx} className={`text-sm ${textColor} opacity-90`}>{detail}</p>
+                  <p key={idx} className={`text-sm ${textColor} opacity-90`}>
+                    {detail}
+                  </p>
                 ))}
               </div>
             )}
-            {latestRun?.errors?.length ? (
-              <Link href="/admin/channels/cavu/sync-runs" className="text-sm font-medium underline mt-2 inline-block">
-                View details
-              </Link>
-            ) : null}
+            <Link
+              href="/admin/channels/cavu/sync-runs"
+              className="text-sm font-medium underline mt-2 inline-block"
+            >
+              View sync runs
+            </Link>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => onRefetch()} className={`${textColor} hover:opacity-80`} aria-label="Refresh">
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onRefetch()}
+            className={`${textColor} hover:opacity-80`}
+            aria-label="Refresh"
+          >
             <RefreshCw className="h-4 w-4" />
           </Button>
           <Button

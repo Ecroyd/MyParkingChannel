@@ -1,12 +1,7 @@
 /**
  * Canonical cancellation detection for booking_import_staging rows.
- * Used by apply_import_run (DB) and by parsers to set status/external_status.
- * A row is considered cancelled if ANY of:
- * - status ILIKE 'cancel%'
- * - external_status ILIKE 'cancel%'
- * - raw_json (as string) contains cancel keywords
  */
-const CANCEL_KEYWORDS = /cancel/i;
+import { isCancelledSupplierStatus } from "@/lib/ingest/importStatusMapping";
 
 export type StagingRowLike = {
   status?: string | null;
@@ -15,16 +10,25 @@ export type StagingRowLike = {
 };
 
 export function isCancelledRow(row: StagingRowLike): boolean {
-  const status = (row.status ?? "").toString().trim();
-  const externalStatus = (row.external_status ?? "").toString().trim();
-  if (CANCEL_KEYWORDS.test(status) || CANCEL_KEYWORDS.test(externalStatus)) {
+  const externalStatus =
+    row.external_status ??
+    (row.raw_json &&
+    typeof row.raw_json === "object" &&
+    row.raw_json !== null &&
+    "external_status" in row.raw_json
+      ? String((row.raw_json as { external_status?: unknown }).external_status ?? "")
+      : null);
+
+  if (isCancelledSupplierStatus(row.status) || isCancelledSupplierStatus(externalStatus)) {
     return true;
   }
+
   const rawStr =
     row.raw_json == null
       ? ""
       : typeof row.raw_json === "string"
         ? row.raw_json
         : JSON.stringify(row.raw_json);
-  return CANCEL_KEYWORDS.test(rawStr);
+
+  return /\bCANX\b/i.test(rawStr) || /cancel/i.test(rawStr);
 }

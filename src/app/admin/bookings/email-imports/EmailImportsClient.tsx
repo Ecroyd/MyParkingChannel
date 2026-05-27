@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -15,6 +16,8 @@ interface EmailFile {
   id: string;
   filename: string;
   parse_status: string;
+  parse_outcome?: string | null;
+  parse_reason?: string | null;
   parse_error: string | null;
   parsed_at: string | null;
   created_at: string;
@@ -276,7 +279,7 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
       </div>
 
       {/* Last 10 emails imported — tick when successful */}
-      <Card>
+      <Card className="bg-white shadow-sm">
         <CardHeader>
           <CardTitle className="text-lg">Recent imports</CardTitle>
           <CardDescription>
@@ -315,25 +318,25 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
+        <Card className="bg-white shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Failed Files</CardTitle>
+            <CardTitle className="text-sm font-medium text-slate-500">Failed Files</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-red-600">{status.summary.failedCount}</div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="bg-white shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Stuck Pending</CardTitle>
+            <CardTitle className="text-sm font-medium text-slate-500">Stuck Pending</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-amber-600">{status.summary.stuckPendingCount}</div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="bg-white shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Empty Parsed</CardTitle>
+            <CardTitle className="text-sm font-medium text-slate-500">Empty Parsed</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-orange-600">{status.summary.emptyParsedCount}</div>
@@ -435,7 +438,16 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
             const email = file.ingest_emails;
 
             return (
-              <Card key={file.id} className={file.category === 'failed' ? 'border-red-200' : file.category === 'pending' ? 'border-amber-200' : 'border-orange-200'}>
+              <Card
+                key={file.id}
+                className={`bg-white shadow-sm ${
+                  file.category === 'failed'
+                    ? 'border-red-200'
+                    : file.category === 'pending'
+                      ? 'border-amber-200'
+                      : 'border-orange-200'
+                }`}
+              >
                 <CardHeader>
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
@@ -484,7 +496,18 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
                           {file.category === 'empty' && (
                             <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded text-orange-800 text-xs">
                               <div className="font-medium mb-1">File was parsed but created 0 bookings.</div>
-                              <div>This usually means the file is empty, has no valid data rows, or all rows were skipped (e.g., missing vehicle registration).</div>
+                              <div className="mb-1">
+                                Row breakdown (from parser): total rows found, skipped for missing reference,
+                                invalid date, unknown format; plus upserted and cancelled counts when available.
+                              </div>
+                              {file.parse_reason && (
+                                <div className="font-mono text-[11px] mt-1 break-all">
+                                  {file.parse_reason}
+                                </div>
+                              )}
+                              {!file.parse_reason && (
+                                <div>No parse_reason recorded — reprocess the file to refresh diagnostics.</div>
+                              )}
                               {(() => {
                                 const fileDate = new Date(file.created_at);
                                 const daysOld = (Date.now() - fileDate.getTime()) / (1000 * 60 * 60 * 24);
@@ -552,21 +575,33 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
       )}
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col bg-white text-slate-900 border border-gray-200 shadow-lg">
           <DialogHeader>
             <DialogTitle>{preview?.filename ?? 'File preview'}</DialogTitle>
+            <DialogDescription className="text-slate-500">
+              {previewLoading
+                ? 'Loading…'
+                : previewError
+                  ? previewError
+                  : preview
+                    ? 'File contents (truncated if large)'
+                    : ''}
+            </DialogDescription>
           </DialogHeader>
-          <div className="flex-1 min-h-0 flex flex-col">
-            {previewLoading && <div className="text-sm text-muted-foreground">Loading…</div>}
-            {previewError && <div className="text-sm text-red-600">{previewError}</div>}
+          <div className="flex-1 min-h-0 flex flex-col gap-2">
+            {previewError && !previewLoading && (
+              <p className="text-sm text-red-600">{previewError}</p>
+            )}
             {preview?.preview != null && (
-              <pre className="text-xs whitespace-pre-wrap max-h-[60vh] overflow-auto border rounded-md p-3 bg-muted/30">
-                {preview.preview}
-                {preview.truncated ? '\n\n…(truncated)' : ''}
-              </pre>
+              <div className="border border-gray-200 rounded-md overflow-auto max-h-[60vh] bg-gray-50">
+                <pre className="text-xs whitespace-pre-wrap p-4 font-mono text-slate-900">
+                  {preview.preview}
+                  {preview.truncated ? '\n\n…(truncated)' : ''}
+                </pre>
+              </div>
             )}
             {preview && !previewLoading && !previewError && (
-              <p className="text-xs text-muted-foreground mt-2">
+              <p className="text-xs text-slate-500">
                 {preview.filename}
                 {preview.file_size != null && ` · ${(preview.file_size / 1024).toFixed(1)} KB`}
                 {preview.truncated && ' · first 200 KB shown'}

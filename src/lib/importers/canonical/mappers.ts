@@ -1,5 +1,6 @@
 import Papa from "papaparse";
 import type { CanonicalBooking } from "./types";
+import type { HolidayExtrasParseStats } from "@/lib/importers/holidayExtras/parseHolidayExtras";
 
 /**
  * Convert UK date/time format to ISO string
@@ -334,7 +335,11 @@ export function mapFlyparksEmailText(emailText: string): CanonicalBooking[] {
 }
 
 export type DetectResult =
-  | { bookings: CanonicalBooking[]; format: "HOLIDAY_EXTRAS" | null }
+  | {
+      bookings: CanonicalBooking[];
+      format: "HOLIDAY_EXTRAS" | null;
+      holidayExtrasStats?: HolidayExtrasParseStats;
+    }
   | null;
 
 /**
@@ -346,10 +351,14 @@ export function detectAndMapFromAttachment(filename: string, text: string): Dete
 
   // Holiday Extras EXT1 TSV - detect by content first (not extension), then parse
   try {
-    const { looksLikeExt1Tsv, isHolidayExtrasFile, parseHolidayExtrasText } = require("@/lib/importers/holidayExtras/parseHolidayExtras");
+    const {
+      looksLikeExt1Tsv,
+      isHolidayExtrasFile,
+      parseHolidayExtrasText,
+    } = require("@/lib/importers/holidayExtras/parseHolidayExtras");
     if (looksLikeExt1Tsv(text) || isHolidayExtrasFile(filename, text)) {
-      const bookings = parseHolidayExtrasText(text);
-      return { bookings, format: "HOLIDAY_EXTRAS" };
+      const { bookings, stats } = parseHolidayExtrasText(text);
+      return { bookings, format: "HOLIDAY_EXTRAS", holidayExtrasStats: stats };
     }
   } catch (err) {
     console.error("[detectAndMap] Holiday Extras check failed:", err);

@@ -1,15 +1,29 @@
 import { getServiceSupabase } from "@/lib/supabase/service";
 import { supabaseAdmin } from "@/lib/supabase/server";
-import { makeImportDedupeKey } from "@/lib/bookings/dedupe";
-import { mapAphCsvLike, detectAndMapFromAttachment } from "@/lib/importers/canonical/mappers";
+import { detectAndMapFromAttachment } from "@/lib/importers/canonical/mappers";
 import { isImageFile } from "@/lib/ingest/fileTypeUtils";
 import { channelToParserKey, getAttribution, type ParserKey } from "@/lib/importAttribution";
+import { applyImportRun } from "@/lib/ingest/applyImportRun";
+import { makeStagingDedupeKey } from "@/lib/ingest/bookingFromStaging";
+import {
+  mapSupplierStatusToBookingStatus,
+  normalizeSupplierStatus,
+} from "@/lib/ingest/importStatusMapping";
+import { formatHolidayExtrasParseReason } from "@/lib/importers/holidayExtras/parseHolidayExtras";
+import type { HolidayExtrasParseStats } from "@/lib/importers/holidayExtras/parseHolidayExtras";
 
 /**
  * Parse file using canonical mappers (supports APH, CAVU, etc.)
  * Returns { rows, detectedFormat } so EXT1 TSV with 0 rows can set parse_outcome = 'empty'.
  */
-function parseFileWithCanonicalMappers(buffer: Buffer, filename: string): { rows: any[]; detectedFormat: string | null } {
+function parseFileWithCanonicalMappers(
+  buffer: Buffer,
+  filename: string
+): {
+  rows: any[];
+  detectedFormat: string | null;
+  holidayExtrasStats?: HolidayExtrasParseStats;
+} {
   const text = buffer.toString("utf-8");
   const result = detectAndMapFromAttachment(filename, text);
 
@@ -17,11 +31,15 @@ function parseFileWithCanonicalMappers(buffer: Buffer, filename: string): { rows
     throw new Error(`Could not detect format for file: ${filename}`);
   }
 
-  const { bookings: canonicalBookings, format: detectedFormat } = result;
+  const {
+    bookings: canonicalBookings,
+    format: detectedFormat,
+    holidayExtrasStats,
+  } = result;
 
   // Holiday Extras detected but 0 rows → return empty so caller can set parse_outcome = 'empty'
   if (canonicalBookings.length === 0 && detectedFormat === "HOLIDAY_EXTRAS") {
-    return { rows: [], detectedFormat: "HOLIDAY_EXTRAS" };
+    return { rows: [], detectedFormat: "HOLIDAY_EXTRAS", holidayExtrasStats };
   }
 
   if (canonicalBookings.length === 0) {
@@ -34,10 +52,8 @@ function parseFileWithCanonicalMappers(buffer: Buffer, filename: string): { rows
     const external_status = canonical.raw?.external_status != null
       ? String(canonical.raw.external_status).trim()
       : null;
-    // CANX (from *CANX*) and cancel* both map to cancelled
-    const isCancel =
-      external_status != null &&
-      (/cancel/i.test(external_status) || external_status.toUpperCase().trim() === "CANX");
+    const supplierToken = normalizeSupplierStatus(external_status);
+    const mappedStatus = mapSupplierStatusToBookingStatus(supplierToken);
     return {
       channel: canonical.channel, // Keep original channel (CAVU, APH, FLYPARKS_EMAIL, HOLIDAY_EXTRAS) for source mapping
       source: canonical.channel.toLowerCase(), // For dedupe key
@@ -56,13 +72,13 @@ function parseFileWithCanonicalMappers(buffer: Buffer, filename: string): { rows
       vehicle_model: canonical.vehicle_model,
       flight_number: canonical.return_flight_number || canonical.outbound_flight_number,
       phone: canonical.customer_phone,
-      status: isCancel ? "cancelled" : "reserved",
+      status: mappedStatus,
       price: canonical.money_charged ?? canonical.total_price ?? 0,
       money_received: canonical.money_received ?? 0,
       notes: null,
       // Additional fields
       external_reference: canonical.third_party_reference || canonical.booking_reference,
-      external_status, // Keep raw token (e.g. "CANX") for audit; status is "cancelled" when isCancel
+      external_status: supplierToken ?? external_status,
       return_flight_no: canonical.return_flight_number,
       product_code: null,
       currency: canonical.currency || "GBP",
@@ -71,7 +87,7 @@ function parseFileWithCanonicalMappers(buffer: Buffer, filename: string): { rows
     };
   });
 
-  return { rows: parsedRows, detectedFormat };
+  return { rows: parsedRows, detectedFormat, holidayExtrasStats };
 }
 
 export async function parseEmailFile(fileId: string, tenantId: string) {
@@ -234,9 +250,13 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     throw parseErr;
   }
 
-  // EXT1 TSV detected but 0 data rows (format mismatch or empty file)
+  // EXT TSV detected but 0 accepted rows
   if (parsedData.rows.length === 0 && parsedData.detectedFormat === "HOLIDAY_EXTRAS") {
-    console.log(`[parseEmailFile] EXT1 TSV detected but 0 rows: ${file.filename}`);
+    const stats = parsedData.holidayExtrasStats;
+    const parseReason = stats
+      ? formatHolidayExtrasParseReason(stats)
+      : "No EXT rows accepted (format mismatch or empty file)";
+    console.log(`[parseEmailFile] Holiday Extras 0 accepted rows: ${file.filename}`, parseReason);
     await supabase
       .from("ingest_email_files")
       .update({
@@ -244,7 +264,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
         parse_status: "parsed",
         parsed_at: new Date().toISOString(),
         parse_error: null,
-        parse_reason: "No EXT1 rows detected (format mismatch or empty file)",
+        parse_reason: parseReason,
       })
       .eq("id", fileId);
     return {
@@ -253,6 +273,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       filename: file.filename,
       rowsParsed: 0,
       stagedCount: 0,
+      parseStats: stats ?? null,
       importResult: { runId: null, successCount: 0, errorCount: 0, errors: [], cancelledCount: 0 },
     };
   }
@@ -309,12 +330,10 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     // Generate dedupe_key (required by staging table)
     // Use the start_at as-is for now, it will be normalized later when promoting to bookings
     // Provide fallbacks for required fields
-    const dedupe_key = makeImportDedupeKey({
-      source: raw.source || channel.toLowerCase(),
-      reference: raw.reference || raw.external_reference || "UNKNOWN",
-      vehicle_reg: raw.vehicle_reg || "UNKNOWN",
-      start_utc: raw.start_at || new Date().toISOString(), // Fallback to now if missing
-    });
+    const ref = (raw.external_reference || raw.reference || "UNKNOWN").toString().trim().toUpperCase();
+    const dedupe_key = makeStagingDedupeKey(tenantId, ref);
+    const supplierToken = normalizeSupplierStatus(raw.external_status);
+    const mappedStatus = mapSupplierStatusToBookingStatus(supplierToken);
 
     return {
       tenant_id: tenantId,
@@ -323,9 +342,10 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       source_email_id: emailId,
       source_filename: file.filename,
       // Map to existing staging columns
-      reference: raw.external_reference || raw.reference,
-      external_reference: raw.external_reference,
-      external_status: raw.external_status,
+      reference: ref,
+      external_reference: ref,
+      external_status: supplierToken ?? raw.external_status,
+      supplier_status: supplierToken,
       start_at: raw.start_at,
       end_at: raw.end_at,
       vehicle_reg: raw.vehicle_reg,
@@ -343,7 +363,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       currency: raw.currency || "GBP",
       total_price: raw.total_price,
       price: raw.price || raw.total_price || 0, // For compatibility
-      status: raw.status || raw.external_status || "reserved",
+      status: mappedStatus,
       money_received: raw.money_received || 0,
       notes: null,
       dedupe_key: dedupe_key, // Required field
@@ -358,9 +378,8 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     };
   });
 
-  // Insert into staging (handle duplicates gracefully)
-  let stagedData: any[] = [];
-  
+  let stagedData: { id: string; external_reference?: string }[] = [];
+
   if (stagingInserts.length === 0) {
     console.warn(`[parseEmailFile] ⚠️ No staging inserts to process - parsedData.rows was empty`);
     // Still mark as parsed if format was detected, but log the issue
@@ -388,74 +407,86 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     };
   }
   
-  console.log(`[parseEmailFile] Preparing to insert ${stagingInserts.length} rows into staging`);
-  const { data: insertedData, error: stagingError } = await adminSupabase
+  console.log(`[parseEmailFile] Upserting ${stagingInserts.length} rows into staging (dedupe_key=tenant+reference)`);
+  const { data: upsertedStaging, error: stagingError } = await adminSupabase
     .from("booking_import_staging")
-    .insert(stagingInserts)
+    .upsert(stagingInserts, { onConflict: "dedupe_key", ignoreDuplicates: false })
     .select("id, external_reference");
 
   if (stagingError) {
-    // Check if it's a duplicate key error
-    const isDuplicate = stagingError.code === '23505' || 
-                       stagingError.message?.includes('duplicate key') ||
-                       stagingError.message?.includes('unique constraint');
-    
-    if (isDuplicate) {
-      console.log(`[parseEmailFile] ⚠️ Duplicate detected - booking already in staging, fetching existing records...`);
-      // Fetch existing records by dedupe_key to continue processing
-      const dedupeKeys = stagingInserts.map(s => s.dedupe_key);
-      const { data: existing } = await adminSupabase
-        .from("booking_import_staging")
-        .select("id, external_reference, dedupe_key")
-        .in("dedupe_key", dedupeKeys);
-      
-      stagedData = existing || [];
-      console.log(`[parseEmailFile] Found ${stagedData.length} existing staging records, continuing with booking promotion...`);
-    } else {
-      console.error(`[parseEmailFile] Staging insert failed:`, stagingError);
-      // Update file status with error
-      const errorMsg = stagingError.message || "unknown error";
-      await supabase
-        .from("ingest_email_files")
-        .update({ 
-          parse_outcome: "failed",
-          parse_status: "failed", 
-          parse_error: `Staging insert failed: ${errorMsg}`,
-          parse_reason: `exception:${errorMsg.substring(0, 200)}`,
-        })
-        .eq("id", fileId);
-      throw new Error(`Staging insert failed: ${errorMsg}`);
-    }
-  } else {
-    stagedData = insertedData || [];
-    console.log(`[parseEmailFile] ✅ Inserted ${stagedData.length} rows into staging`);
+    const errorMsg = stagingError.message || "unknown error";
+    console.error(`[parseEmailFile] Staging upsert failed:`, stagingError);
+    await supabase
+      .from("ingest_email_files")
+      .update({
+        parse_outcome: "failed",
+        parse_status: "failed",
+        parse_error: `Staging upsert failed: ${errorMsg}`,
+        parse_reason: `exception:${errorMsg.substring(0, 200)}`,
+      })
+      .eq("id", fileId);
+    throw new Error(`Staging upsert failed: ${errorMsg}`);
   }
 
-  // 7. Apply import run: upsert staging into bookings and apply cancellations (RPC)
-  const errors: any[] = [];
-  let upsertedCount = 0;
+  stagedData = upsertedStaging || [];
+  console.log(`[parseEmailFile] ✅ Upserted ${stagedData.length} staging rows`);
+
+  const errors: { rowIndex: number; reason: string; rowData: null }[] = [];
+  let insertedCount = 0;
+  let updatedCount = 0;
   let cancelledCount = 0;
+  let errorCount = 0;
+
   if (run?.id && stagedData.length > 0) {
-    const { data: applyResult, error: applyErr } = await adminSupabase
-      .rpc("apply_import_run", { p_run_id: run.id });
-    if (applyErr) {
-      console.error(`[parseEmailFile] apply_import_run failed:`, applyErr);
-      errors.push({ rowIndex: 0, reason: applyErr.message, rowData: null });
-    } else if (applyResult?.[0]) {
-      upsertedCount = applyResult[0].upserted_count ?? 0;
-      cancelledCount = applyResult[0].cancelled_count ?? 0;
-      console.log(`[parseEmailFile] apply_import_run: upserted=${upsertedCount}, cancelled=${cancelledCount}`);
+    try {
+      const applyResult = await applyImportRun(adminSupabase, run.id);
+      insertedCount = applyResult.inserted;
+      updatedCount = applyResult.updated;
+      cancelledCount = applyResult.cancelled;
+      errorCount = applyResult.errors;
+      for (const log of applyResult.logs) {
+        if (log.action === "error") {
+          errors.push({
+            rowIndex: 0,
+            reason: log.reason ?? `Failed: ${log.reference}`,
+            rowData: null,
+          });
+        }
+      }
+      console.log(
+        `[parseEmailFile] applyImportRun: inserted=${insertedCount}, updated=${updatedCount}, cancelled=${cancelledCount}, errors=${errorCount}`
+      );
+    } catch (applyErr: unknown) {
+      const msg = applyErr instanceof Error ? applyErr.message : String(applyErr);
+      console.error(`[parseEmailFile] applyImportRun failed:`, applyErr);
+      errors.push({ rowIndex: 0, reason: msg, rowData: null });
     }
   }
 
-  // Update import run with RPC result counts
+  const upsertedCount = insertedCount + updatedCount;
+  const heStats = parsedData.holidayExtrasStats;
+  const parseReasonParts: string[] = [];
+  if (heStats) {
+    parseReasonParts.push(formatHolidayExtrasParseReason(heStats));
+  }
+  parseReasonParts.push(`rows_parsed=${parsedData.rows.length}`);
+  parseReasonParts.push(`rows_upserted=${upsertedCount}`);
+  parseReasonParts.push(`rows_cancelled=${cancelledCount}`);
+  parseReasonParts.push(`rows_errors=${errorCount}`);
+  const parseReasonSummary = parseReasonParts.join("; ");
+
   if (run?.id) {
     await adminSupabase
       .from("import_runs")
       .update({
         inserted_count: upsertedCount,
-        error_count: errors.length,
-        meta: { cancelled_count: cancelledCount },
+        error_count: errorCount,
+        meta: {
+          cancelled_count: cancelledCount,
+          inserted: insertedCount,
+          updated: updatedCount,
+          holiday_extras_stats: heStats ?? null,
+        },
       })
       .eq("id", run.id);
   }
@@ -463,11 +494,11 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   const { error: updateError, data: updatedFile } = await supabase
     .from("ingest_email_files")
     .update({ 
-      parse_outcome: "parsed",
+      parse_outcome: upsertedCount > 0 || cancelledCount > 0 ? "parsed" : "empty",
       parse_status: "parsed",
       parsed_at: new Date().toISOString(),
-      parse_error: null, // Clear any previous errors
-      parse_reason: null, // Clear any previous reason
+      parse_error: null,
+      parse_reason: parseReasonSummary,
       // Set attribution fields (single source of truth)
       parser_key: winningParserKey,
       detected_source: attribution.detectedSource,
@@ -497,6 +528,8 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     importResult: {
       runId: run?.id || null,
       successCount: upsertedCount,
+      insertedCount,
+      updatedCount,
       errorCount: errors.length,
       cancelledCount,
       errors: errors.slice(0, 10),

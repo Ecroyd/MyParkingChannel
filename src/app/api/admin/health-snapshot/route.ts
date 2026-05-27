@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentTenantContext } from '@/lib/auth/current-tenant-context';
 import { logRequestAttribution } from '@/lib/jobSecret';
 import { getCanaryHealth } from '@/lib/health/canary';
-import { getCavuSyncHealth } from '@/lib/health/cavu';
+import { getCavuHealthForDisplay } from '@/lib/health/cavuWrite';
+import type { CavuHealthPayload } from '@/lib/health/cavuWrite';
 import { getEmailParseHealth } from '@/lib/health/emailParse';
 import { getServiceSupabase } from '@/lib/supabase/service';
 import { checkIngestSchemaColumns } from '@/lib/ingest/schemaGuard';
@@ -28,8 +29,12 @@ const EMAIL_PARSE_FALLBACK = {
   summary: { failedCount: 0, stuckPendingCount: 0, emptyParsedCount: 0 },
 };
 
-const CAVU_FALLBACK = {
-  ok: true as const,
+const CAVU_FALLBACK: CavuHealthPayload = {
+  ok: true,
+  syncStatus: 'idle',
+  lastRunAt: null,
+  lastSuccessAt: null,
+  lastError: null,
   latestRun: null,
   latestSuccessfulRun: null,
   lastSyncedAt: null,
@@ -39,7 +44,7 @@ export interface HealthSnapshotResponse {
   ok: true;
   canary: Awaited<ReturnType<typeof getCanaryHealth>>;
   emailParse: Awaited<ReturnType<typeof getEmailParseHealth>>;
-  cavu: Awaited<ReturnType<typeof getCavuSyncHealth>>;
+  cavu: CavuHealthPayload;
   ingestSchema: Awaited<ReturnType<typeof checkIngestSchemaColumns>>;
 }
 
@@ -66,7 +71,7 @@ export async function GET(req: NextRequest) {
         console.error('[HEALTH SNAPSHOT] emailParse failed', err);
         return EMAIL_PARSE_FALLBACK;
       }),
-      getCavuSyncHealth(ctx.tenantId).catch((err) => {
+      getCavuHealthForDisplay(ctx.tenantId).catch((err) => {
         console.error('[HEALTH SNAPSHOT] cavu failed', err);
         return CAVU_FALLBACK;
       }),

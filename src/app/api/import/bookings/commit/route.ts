@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { makeImportDedupeKey } from "@/lib/bookings/dedupe";
 import { mapStagingToBookings } from "@/lib/imports/mapToBookings";
+import { safeBookingUpsertPayload } from "@/lib/ingest/safeBookingUpsertPayload";
+import {
+  mapSupplierStatusToBookingStatus,
+  normalizeSupplierStatus,
+} from "@/lib/ingest/importStatusMapping";
 
 type InRow = {
   source:string; reference:string;
@@ -288,7 +293,13 @@ export async function POST(req: Request) {
         dedupe_key
       };
 
-      const mappedRow = mapStagingToBookings(stagingRecord);
+      const supplierToken = normalizeSupplierStatus(raw.status);
+      const stagingWithStatus = {
+        ...stagingRecord,
+        external_status: supplierToken ?? raw.status,
+        status: mapSupplierStatusToBookingStatus(supplierToken ?? raw.status),
+      };
+      const mappedRow = mapStagingToBookings(stagingWithStatus);
 
       // 2) Perform date validation and build detailed dateErrors[] if needed
       const startAtVal = (mappedRow as any).start_at;
@@ -365,22 +376,14 @@ export async function POST(req: Request) {
         continue;
       }
 
-      // 3) Attempt DB insert/upsert for the booking
-      // Check if booking already exists by reference (not dedupe_key)
-      // This allows customers to have multiple bookings with same vehicle/start time but different references
-      const { data: existing, error: probeErr } = await supabaseAdmin()
-        .from("bookings")
-        .select("id, reference")
-        .eq("tenant_id", tenantId)
-        .eq("reference", mappedRow.reference)
-        .maybeSingle();
-
-      if (probeErr) {
-        const reason = `DB probe error: ${probeErr.message ?? probeErr.toString()}`;
-        console.log(`[IMPORT] Row ${rowIndex} failed DB probe: ${reason}`);
+      const safePayload = safeBookingUpsertPayload({
+        ...mappedRow,
+        tenant_id: tenantId,
+        updated_at: new Date().toISOString(),
+      });
+      if (!safePayload.ok) {
+        const reason = safePayload.error;
         errors.push({ rowIndex, reason, rowData: mappedRow });
-        console.log(`[IMPORT] Added error to errors array. Total errors: ${errors.length}`);
-
         await logImportError({
           tenantId,
           importFileId,
@@ -389,69 +392,35 @@ export async function POST(req: Request) {
           reason,
           rowData: mappedRow,
         });
-
         continue;
       }
 
-      if (existing) {
-        // Booking already exists with same reference - update it to handle amended/cancelled bookings
-        console.log(`[IMPORT] Row ${rowIndex} - Booking with same reference found (reference: ${mappedRow.reference}, existing_id: ${existing.id}) - Updating existing booking`);
-        
-        // Update existing booking when importing from files to handle amendments and cancellations
-        // Only updates if reference matches, allowing multiple bookings with same vehicle/start time
-        const { error: updateErr } = await supabaseAdmin()
-          .from("bookings")
-          .update(mappedRow)
-          .eq("id", existing.id)
-          .eq("tenant_id", tenantId);
-        
-        if (updateErr) {
-          const reason = `DB update error: ${updateErr.message ?? updateErr.toString()}`;
-          console.log(`[IMPORT] Row ${rowIndex} failed DB update: ${reason}`);
-          errors.push({ rowIndex, reason, rowData: mappedRow });
-          console.log(`[IMPORT] Added error to errors array. Total errors: ${errors.length}`);
+      const { error: upsertError } = await supabaseAdmin()
+        .from("bookings")
+        .upsert(safePayload.data, {
+          onConflict: "tenant_id,reference",
+          ignoreDuplicates: false,
+        });
 
-          await logImportError({
-            tenantId,
-            importFileId,
-            importRunId: run.id,
-            rowIndex,
-            reason,
-            rowData: mappedRow,
-          });
-
-          continue;
-        } else {
-          console.log(`[IMPORT] Row ${rowIndex} successfully updated existing booking`);
-          successCount++;
-        }
-      } else {
-        // Insert new booking
-        const { error: insertError } = await supabaseAdmin()
-          .from('bookings')
-          .insert(mappedRow);
-
-        if (insertError) {
-          const reason = `DB insert error: ${insertError.message ?? insertError.toString()}`;
-          console.log(`[IMPORT] Row ${rowIndex} failed DB insert: ${reason}`);
-          errors.push({ rowIndex, reason, rowData: mappedRow });
-          console.log(`[IMPORT] Added error to errors array. Total errors: ${errors.length}`);
-
-          await logImportError({
-            tenantId,
-            importFileId,
-            importRunId: run.id,
-            rowIndex,
-            reason,
-            rowData: mappedRow,
-          });
-
-          continue;
-        } else {
-          console.log(`[IMPORT] Row ${rowIndex} successfully inserted new booking`);
-          successCount++;
-        }
+      if (upsertError) {
+        const reason = `DB upsert error: ${upsertError.message ?? upsertError.toString()}`;
+        console.log(`[IMPORT] Row ${rowIndex} failed DB upsert: ${reason}`);
+        errors.push({ rowIndex, reason, rowData: mappedRow });
+        await logImportError({
+          tenantId,
+          importFileId,
+          importRunId: run.id,
+          rowIndex,
+          reason,
+          rowData: mappedRow,
+        });
+        continue;
       }
+
+      console.log(
+        `[IMPORT] Row ${rowIndex} upserted reference=${mappedRow.reference} status=${mappedRow.status}`
+      );
+      successCount++;
     } catch (err: any) {
       const reason = `unexpected import error: ${
         err?.message ?? String(err)

@@ -4,9 +4,8 @@ import { getCurrentTenantContext } from '@/lib/auth/current-tenant-context';
 import { syncCavuEventsForTenant } from '@/lib/suppliers/cavuEventsSync';
 import { createSyncAlert, getAlertRoutes } from '@/lib/suppliers/alerting';
 import { deliverAlert } from '@/lib/suppliers/alertDelivery';
-import { logRequestAttribution, validateJobSecret } from '@/lib/jobSecret';
-import { getCavuSyncHealth } from '@/lib/health/cavu';
-import { writeHealthStatus } from '@/lib/health/writeHealthStatus';
+import { logRequestAttribution, validateCronAuth } from '@/lib/jobSecret';
+import { writeCavuHealthForTenant } from '@/lib/health/cavuWrite';
 
 /**
  * Calculate hours to sync based on last_synced_at.
@@ -158,6 +157,12 @@ async function runCavuCron(req?: NextRequest) {
       // normal mode: compute from lastSyncedAt then clamp
       const computed = computeHoursFromLastSyncedAt(lastSyncedAt) ?? 2;
       hoursToFetch = Math.min(Math.max(computed, 1), 168);
+    }
+
+    try {
+      await writeCavuHealthForTenant(tenantId, { status: 'running', last_error: null });
+    } catch (e) {
+      console.warn('[CAVU CRON] Failed to write running health', tenantId, e);
     }
 
     // Create sync run record
@@ -378,11 +383,29 @@ async function runCavuCron(req?: NextRequest) {
 
       totalEvents += result.eventsSeen;
       totalBookings += result.bookingsUpserted;
+
+      try {
+        await writeCavuHealthForTenant(tenantId, {
+          status: runOk ? 'success' : 'failed',
+          last_error: runOk ? null : result.errors[0] ?? 'Sync completed with errors',
+        });
+      } catch (e) {
+        console.warn('[CAVU CRON] Failed to write success health', tenantId, e);
+      }
     } catch (err: any) {
       console.error('[CAVU CRON] Error for tenant', tenantId, err);
 
       // Update sync run record with error
       const errorMessage = err?.message ?? String(err);
+
+      try {
+        await writeCavuHealthForTenant(tenantId, {
+          status: 'failed',
+          last_error: errorMessage,
+        });
+      } catch (e) {
+        console.warn('[CAVU CRON] Failed to write failed health', tenantId, e);
+      }
       if (run) {
         await supabase
           .from('supplier_sync_runs')
@@ -429,17 +452,6 @@ async function runCavuCron(req?: NextRequest) {
     }
   }
 
-  // Write cavu health per tenant to system_health_status so UI can read from Supabase (revalidate: 60)
-  const tenantIds = (configs ?? []).map((c: { tenant_id: string }) => c.tenant_id);
-  for (const tenantId of tenantIds) {
-    try {
-      const cavuHealth = await getCavuSyncHealth(tenantId);
-      await writeHealthStatus(tenantId, 'cavu', cavuHealth as unknown as Record<string, unknown>);
-    } catch (e) {
-      console.warn('[CAVU CRON] Failed to write health status for tenant', tenantId, e);
-    }
-  }
-
   return NextResponse.json({
     ok: true,
     tenantsProcessed: configs?.length ?? 0,
@@ -452,7 +464,7 @@ async function runCavuCron(req?: NextRequest) {
 // Allow both GET and POST so it's easy to test + works with QStash
 export async function GET(req: NextRequest) {
   logRequestAttribution(req, '/api/internal/suppliers/cavu/cron');
-  if (!validateJobSecret(req)) {
+  if (!validateCronAuth(req)) {
     return new NextResponse('Forbidden', { status: 403 });
   }
   return runCavuCron(req);
@@ -460,7 +472,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   logRequestAttribution(req, '/api/internal/suppliers/cavu/cron');
-  const hasSecret = validateJobSecret(req);
+  const hasSecret = validateCronAuth(req);
   const ctx = await getCurrentTenantContext();
   const hasAdminSession = ctx && (ctx.role === 'admin' || ctx.role === 'owner');
   if (!hasSecret && !hasAdminSession) {

@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentTenantContext } from '@/lib/auth/current-tenant-context';
 import { logRequestAttribution } from '@/lib/jobSecret';
-import { getCavuSyncHealth } from '@/lib/health/cavu';
+import { getCavuHealthForDisplay } from '@/lib/health/cavuWrite';
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
     if (!ctx || (ctx.role !== 'admin' && ctx.role !== 'owner')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    const result = await getCavuSyncHealth(ctx.tenantId);
+    const result = await getCavuHealthForDisplay(ctx.tenantId);
     return NextResponse.json(result);
   } catch (err: any) {
     console.error('[CAVU SYNC HEALTH] error', err);

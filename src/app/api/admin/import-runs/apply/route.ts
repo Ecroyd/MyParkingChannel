@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { getCurrentTenantContext } from "@/lib/auth/current-tenant-context";
 import { createAdminClient } from "@/lib/supabase/server-admin";
+import { applyImportRun } from "@/lib/ingest/applyImportRun";
 
 /**
  * POST /api/admin/import-runs/apply
  * Body: { runId: string }
- * Calls apply_import_run(run_id) and returns { upserted_count, cancelled_count }.
+ * Promotes staging rows to bookings via tenant_id + reference upsert.
  */
 export async function POST(req: Request) {
   try {
@@ -20,15 +21,17 @@ export async function POST(req: Request) {
     }
 
     const admin = await createAdminClient();
-    const { data, error } = await admin.rpc("apply_import_run", { p_run_id: runId });
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-    const row = data?.[0];
+    const result = await applyImportRun(admin, runId);
+
     return NextResponse.json({
       ok: true,
-      upserted_count: row?.upserted_count ?? 0,
-      cancelled_count: row?.cancelled_count ?? 0,
+      upserted_count: result.inserted + result.updated,
+      inserted: result.inserted,
+      updated: result.updated,
+      cancelled_count: result.cancelled,
+      skipped: result.skipped,
+      errors: result.errors,
+      logs: result.logs,
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Unknown error";

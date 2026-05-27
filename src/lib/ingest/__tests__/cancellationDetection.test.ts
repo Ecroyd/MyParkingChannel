@@ -11,6 +11,8 @@ describe("isCancelledRow", () => {
   it("returns true when external_status contains cancel", () => {
     expect(isCancelledRow({ external_status: "cancelled" })).toBe(true);
     expect(isCancelledRow({ external_status: "Cancel" })).toBe(true);
+    expect(isCancelledRow({ external_status: "CANX" })).toBe(true);
+    expect(isCancelledRow({ external_status: "*CANX*" })).toBe(true);
   });
 
   it("returns true when raw_json string contains cancel", () => {

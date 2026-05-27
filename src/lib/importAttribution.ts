@@ -33,17 +33,17 @@ type Attribution = {
 export const ATTRIBUTION_BY_PARSER: Record<ParserKey, Attribution> = {
   aph_email_import: {
     bookingSource: "other", // APH uses "other" since "aph" is not in the booking source enum
-    externalSource: "APH Email Import",
+    externalSource: "aph",
     detectedSource: "APH",
   },
   holiday_extras_email_import: {
     bookingSource: "holidayextras", // Matches database enum (consider normalizing to "holiday_extras" in future)
-    externalSource: "Holiday Extras Email Import",
+    externalSource: "holiday_extras",
     detectedSource: "HOLIDAY_EXTRAS",
   },
   cavu_email_import: {
     bookingSource: "cavu",
-    externalSource: "CAVU Email Import",
+    externalSource: "cavu",
     detectedSource: "CAVU",
   },
   flyparks_email_import: {

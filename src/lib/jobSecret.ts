@@ -16,6 +16,23 @@ export function validateJobSecret(req: Request): boolean {
   return !!provided && provided === expected;
 }
 
+/** Vercel Cron sends Authorization: Bearer CRON_SECRET; other jobs use INTERNAL_CRON_KEY or x-job-secret. */
+export function validateCronAuth(req: Request): boolean {
+  if (validateJobSecret(req)) return true;
+
+  const authHeader = req.headers.get('authorization')?.trim();
+  if (!authHeader?.startsWith('Bearer ')) return false;
+  const token = authHeader.slice('Bearer '.length).trim();
+
+  const internalKey = process.env.INTERNAL_CRON_KEY?.trim();
+  if (internalKey && token === internalKey) return true;
+
+  const cronSecret = process.env.CRON_SECRET?.trim();
+  if (cronSecret && token === cronSecret) return true;
+
+  return false;
+}
+
 /**
  * Log request attribution for cron/health routes (optional). No-op by default;
  * set DEBUG_HIT=1 in env to enable logging for debugging.

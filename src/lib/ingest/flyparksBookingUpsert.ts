@@ -124,7 +124,10 @@ export async function upsertBookingFromFlyparksParse(
 
   const { error } = await supabaseAdmin
     .from("bookings")
-    .upsert(safePayload.data, { onConflict: "tenant_id,reference" });
+    .upsert(safePayload.data, {
+      onConflict: "tenant_id,reference",
+      ignoreDuplicates: false,
+    });
 
   if (error) {
     return { ok: false, error: error.message };

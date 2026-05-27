@@ -16,6 +16,7 @@ export type IngestSchemaGuardResult = {
 
 const REQUIRED_COLUMNS: { table: string; column: string }[] = [
   { table: "bookings", column: "external_status" },
+  { table: "bookings", column: "supplier_status" },
   { table: "bookings", column: "reference" },
   { table: "bookings", column: "status" },
   { table: "bookings", column: "gate_status" },

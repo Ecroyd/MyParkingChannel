@@ -22,6 +22,7 @@ export const ALLOWED_BOOKING_UPSERT_FIELDS = [
   "source",
   "external_source",
   "external_status",
+  "supplier_status",
   "flight_number",
   "return_flight_number",
   "notes",

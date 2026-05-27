@@ -13,6 +13,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       lastRun: result.latestRun,
+      latestSuccessfulRun: result.latestSuccessfulRun,
       lastSyncedAt: result.lastSyncedAt,
     });
   } catch (err: any) {

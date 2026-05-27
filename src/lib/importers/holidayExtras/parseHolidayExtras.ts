@@ -1,9 +1,30 @@
 import type { CanonicalBooking } from "../canonical/types";
+import {
+  mapSupplierStatusToBookingStatus,
+  normalizeSupplierStatus,
+} from "@/lib/ingest/importStatusMapping";
 
 const trim = (v: unknown) => String(v ?? "").trim().replace(/^"|"$/g, "");
 
+/** Allow EXT1, EXT2, etc. */
+const EXT_VARIANT = /^EXT\d+$/i;
+
+export type HolidayExtrasParseStats = {
+  total_lines: number;
+  ext_rows_found: number;
+  rows_accepted: number;
+  skipped_missing_reference: number;
+  skipped_missing_status: number;
+  skipped_invalid_date: number;
+  skipped_unknown_format: number;
+};
+
+export type HolidayExtrasParseResult = {
+  bookings: CanonicalBooking[];
+  stats: HolidayExtrasParseStats;
+};
+
 function parseDMY6(dmy6: string) {
-  // "190126" => 19/01/2026
   const s = trim(dmy6);
   const m = s.match(/^(\d{2})(\d{2})(\d{2})$/);
   if (!m) return null;
@@ -17,11 +38,9 @@ function toIsoFromDMY6_HM(dmy6: string, hm: string) {
   const d = parseDMY6(dmy6);
   const t = trim(hm) || "00:00";
   if (!d) return null;
-  // Store as UTC ISO (good enough for now; refine to Europe/London if needed)
   return `${d.yyyy}-${d.mm}-${d.dd}T${t.padStart(5, "0")}:00.000Z`;
 }
 
-/** Safe money parser: strips non-numeric chars, returns null for empty/invalid. */
 function parseMoney(v: string | number | null | undefined): number | null {
   if (v === null || v === undefined) return null;
   const s = String(v).trim();
@@ -30,140 +49,188 @@ function parseMoney(v: string | number | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Column offset: 0 = "N" then EXT1 in col1; -1 = EXT1 in col0 then ref in col1 */
+function resolveExtOffset(cols: string[]): number | null {
+  const c0 = trim(cols[0]);
+  const c1 = trim(cols[1]);
+  if (EXT_VARIANT.test(c1)) return 0;
+  if (EXT_VARIANT.test(c0) && /^[A-Z0-9]{4,12}$/i.test(c1)) return -1;
+  return null;
+}
+
+function fieldAt(cols: string[], index: number, offset: number): string {
+  return trim(cols[index + offset]);
+}
+
+function hasExtMarker(text: string): boolean {
+  return (
+    text.includes("\tEXT1\t") ||
+    /\tEXT\d+\t/i.test(text) ||
+    /^EXT\d+\t/im.test(text)
+  );
+}
+
 /**
- * Detect EXT1 TSV by content (not extension). SaaS-safe: no hardcoded filename patterns.
- * Treat as EXT1 TSV when: lots of tabs, lines split into ~16+ columns, EXT1 in 2nd column on most rows.
+ * Detect EXT TSV by content (not extension).
  */
 export function looksLikeExt1Tsv(text: string): boolean {
   const lines = text.replace(/\r\n/g, "\n").split("\n").filter((l) => l.trim() !== "");
   if (lines.length === 0) return false;
 
-  const sample = lines.slice(0, Math.min(lines.length, 10));
+  const sample = lines.slice(0, Math.min(lines.length, 20));
   const tabby = sample.filter((l) => l.includes("\t")).length;
   if (tabby < Math.ceil(sample.length * 0.8)) return false;
 
-  const ok = sample
+  const extRows = sample
     .map((l) => l.split("\t"))
-    .filter((cols) => cols.length >= 16)
-    .filter((cols) => (cols[1] ?? "").trim() === "EXT1").length;
+    .filter((cols) => cols.length >= 14 && resolveExtOffset(cols) !== null).length;
 
-  return ok >= Math.ceil(sample.length * 0.5);
+  return extRows >= Math.ceil(sample.length * 0.4);
 }
 
 export function isHolidayExtrasFile(filename: string, text: string): boolean {
   if (looksLikeExt1Tsv(text)) return true;
   const name = filename.toLowerCase();
   if (name.startsWith("ext") && name.endsWith(".txt")) return true;
-  // content sniff: EXT1 + tabs + *FIRM* tokens
-  return text.includes("\tEXT1\t") && (text.includes("*FIRM*") || text.includes("*AMND*") || text.includes("*CANX*"));
+  return (
+    hasExtMarker(text) &&
+    (text.includes("*FIRM*") ||
+      text.includes("*AMND*") ||
+      text.includes("*CANX*") ||
+      text.includes("FIRM") ||
+      text.includes("CANX"))
+  );
 }
 
-/** Allow EXT1, EXT2, etc. */
-const EXT_VARIANT = /^EXT\d+$/i;
+function emptyStats(totalLines: number): HolidayExtrasParseStats {
+  return {
+    total_lines: totalLines,
+    ext_rows_found: 0,
+    rows_accepted: 0,
+    skipped_missing_reference: 0,
+    skipped_missing_status: 0,
+    skipped_invalid_date: 0,
+    skipped_unknown_format: totalLines,
+  };
+}
 
-export function parseHolidayExtrasText(text: string): CanonicalBooking[] {
-  const lines = text.split(/\r?\n/).map(l => l.trimEnd()).filter(Boolean);
+export function formatHolidayExtrasParseReason(stats: HolidayExtrasParseStats): string {
+  return [
+    `total_rows=${stats.total_lines}`,
+    `ext_rows=${stats.ext_rows_found}`,
+    `accepted=${stats.rows_accepted}`,
+    `skipped_missing_reference=${stats.skipped_missing_reference}`,
+    `skipped_missing_status=${stats.skipped_missing_status}`,
+    `skipped_invalid_date=${stats.skipped_invalid_date}`,
+    `skipped_unknown_format=${stats.skipped_unknown_format}`,
+  ].join("; ");
+}
 
-  // TSV: split on tabs, keep empty fields
-  const rows = lines.map(line => line.split("\t"));
+export function parseHolidayExtrasText(text: string): HolidayExtrasParseResult {
+  const lines = text.split(/\r?\n/).map((l) => l.trimEnd()).filter(Boolean);
+  const stats = emptyStats(lines.length);
+  const bookings: CanonicalBooking[] = [];
 
-  return rows.map((f) => {
-    // Only process lines with EXT1 / EXT2 / etc. in column 1
-    const col1 = trim(f[1]);
-    if (!EXT_VARIANT.test(col1)) return null;
+  for (const line of lines) {
+    const f = line.split("\t");
+    const offset = resolveExtOffset(f);
 
-    // Field indexes based on observed sample rows (ext1180126.txt / ext1090226.txt)
-    // 0: N
-    // 1: EXT1 (or EXT2, etc.)
-    // 2: booking ref (KHFVGQ)
-    // 3: surname
-    // 4: title (MR/MRS/MS/MISS)
-    // 5: first initial
-    // 6: days
-    // 7: arrival time (14:30)
-    // 8: arrival date "190126"
-    // 9: ??? (003)
-    // 10: status (*FIRM*/*AMND*/*CANX*)
-    // 11: money_received (left amount, e.g. 64.40)
-    // 12: money_charged (right amount, e.g. 79.12)
-    // 13: return date (280126)
-    // 14: return time (17:30)
-    // 15: vehicle reg (MF18UFU) - CAN BE EMPTY!
-    // 16: two-letter code (QI/CK/etc)
-    // 17: vehicle colour
-    // 18: vehicle make
-    // 19: vehicle model
-    // 20: outbound flight? (KL1101)
-    // 21: phone1
-    // 22: phone2
-    // 23: sometimes "07/00" etc (ignore)
-    // 24.. etc
-    // 25: return flight? (KL1102) (often present)
-    const bookingRef = trim(f[2]) || null;
+    if (offset === null) {
+      stats.skipped_unknown_format++;
+      continue;
+    }
 
-    const startAt = (f[8] && f[7]) ? toIsoFromDMY6_HM(f[8], f[7]) : null;
-    const endAt = (f[13] && f[14]) ? toIsoFromDMY6_HM(f[13], f[14]) : null;
+    stats.ext_rows_found++;
 
-    const surname = trim(f[3]) || null;
-    const firstInitial = trim(f[5]) || null;
-
-    // Left column (11) = money_received; right column (12) = money_charged
-    const money_received = parseMoney(f[11]);
-    const money_charged = parseMoney(f[12]);
-    const total_price = money_charged ?? money_received;
-
-    // Field 10: *FIRM* | *AMND* | *CANX* — normalize to FIRM/AMND/CANX for external_status
-    const statusToken = trim(f[10]) || null;
+    const bookingRef = fieldAt(f, 2, offset) || null;
+    const statusToken = fieldAt(f, 10, offset) || null;
     const rawStatus = statusToken
       ? statusToken.replace(/\*/g, "").trim().toUpperCase()
       : null;
+    const supplierToken = normalizeSupplierStatus(rawStatus ?? statusToken);
 
-    // Phones sometimes include country codes and quoting
-    const phone = trim(f[21]) || trim(f[22]) || null;
-
-    const outboundFlight = trim(f[20]) || null;
-    const returnFlight = trim(f[25]) || null;
-
-    const vehicleRegRaw = trim(f[15]) || "";
-    // Filter out empty strings, "-", and whitespace-only values
-    const vehicleReg = vehicleRegRaw && vehicleRegRaw !== "-" && vehicleRegRaw.trim() !== "" 
-      ? vehicleRegRaw.trim() 
-      : null;
-    const vehicleColour = trim(f[17]) || null;
-    const vehicleMake = trim(f[18]) || null;
-    const vehicleModel = trim(f[19]) || null;
-
-    // Skip rows without vehicle registration (required for bookings table)
-    if (!vehicleReg) {
-      console.warn(`[parseHolidayExtras] Skipping row with missing vehicle_reg:`, {
-        bookingRef,
-        field15: f[15],
-        fields: f.slice(0, 20),
-      });
-      return null;
+    if (!bookingRef) {
+      stats.skipped_missing_reference++;
+      continue;
     }
 
-    return {
+    if (!supplierToken && !statusToken) {
+      stats.skipped_missing_status++;
+      continue;
+    }
+
+    const arrivalDate = fieldAt(f, 8, offset);
+    const arrivalTime = fieldAt(f, 7, offset);
+    const returnDate = fieldAt(f, 13, offset);
+    const returnTime = fieldAt(f, 14, offset);
+
+    let startAt =
+      arrivalDate && arrivalTime ? toIsoFromDMY6_HM(arrivalDate, arrivalTime) : null;
+    let endAt =
+      returnDate && returnTime ? toIsoFromDMY6_HM(returnDate, returnTime) : null;
+
+    if (!startAt) {
+      stats.skipped_invalid_date++;
+      continue;
+    }
+
+    // End date optional — default to start + 1h when missing (CANX rows often omit return)
+    if (!endAt) {
+      const startMs = new Date(startAt).getTime();
+      endAt = new Date(startMs + 60 * 60 * 1000).toISOString();
+    }
+
+    const surname = fieldAt(f, 3, offset) || null;
+    const firstInitial = fieldAt(f, 5, offset) || null;
+    const money_received = parseMoney(fieldAt(f, 11, offset));
+    const money_charged = parseMoney(fieldAt(f, 12, offset));
+    const total_price = money_charged ?? money_received ?? 0;
+
+    const phone = fieldAt(f, 21, offset) || fieldAt(f, 22, offset) || null;
+    const outboundFlight = fieldAt(f, 20, offset) || null;
+    const returnFlight = fieldAt(f, 25, offset) || null;
+
+    const vehicleRegRaw = fieldAt(f, 15, offset);
+    const vehicleReg =
+      vehicleRegRaw && vehicleRegRaw !== "-" && vehicleRegRaw.trim() !== ""
+        ? vehicleRegRaw.trim()
+        : null;
+
+    const mappedStatus = mapSupplierStatusToBookingStatus(supplierToken);
+
+    bookings.push({
       channel: "HOLIDAY_EXTRAS" as const,
-      booking_reference: bookingRef,
+      booking_reference: bookingRef.toUpperCase(),
       third_party_reference: null,
       start_at: startAt,
       end_at: endAt,
       vehicle_registration: vehicleReg,
-      vehicle_make: vehicleMake,
-      vehicle_model: vehicleModel,
-      vehicle_colour: vehicleColour,
-      customer_firstname: firstInitial,     // best effort: only an initial in file
+      vehicle_make: fieldAt(f, 18, offset) || null,
+      vehicle_model: fieldAt(f, 19, offset) || null,
+      vehicle_colour: fieldAt(f, 17, offset) || null,
+      customer_firstname: firstInitial,
       customer_lastname: surname,
       customer_email: null,
       customer_phone: phone,
       outbound_flight_number: outboundFlight,
       return_flight_number: returnFlight,
       total_price,
-      money_received,
-      money_charged,
+      money_received: money_received ?? 0,
+      money_charged: money_charged ?? 0,
       currency: "GBP",
-      raw: { fields: f, external_status: rawStatus ?? statusToken },
-    };
-  }).filter((r): r is NonNullable<typeof r> => r !== null); // Filter out nulls (rows without vehicle_reg)
+      raw: {
+        fields: f,
+        external_status: supplierToken ?? rawStatus ?? statusToken,
+        mapped_status: mappedStatus,
+      },
+    });
+    stats.rows_accepted++;
+  }
+
+  return { bookings, stats };
+}
+
+/** @deprecated Use parseHolidayExtrasText — returns bookings only for callers not yet on stats API */
+export function parseHolidayExtrasTextLegacy(text: string): CanonicalBooking[] {
+  return parseHolidayExtrasText(text).bookings;
 }
