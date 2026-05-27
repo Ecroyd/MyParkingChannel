@@ -235,7 +235,7 @@ function bookingPayloadVariants(
   push(payload);
 
   if (payload.supplier_status !== undefined) {
-    const withoutSupplier = { ...payload };
+    const withoutSupplier: Record<string, unknown> = { ...payload };
     delete withoutSupplier.supplier_status;
     push(withoutSupplier);
   }
@@ -243,7 +243,7 @@ function bookingPayloadVariants(
   const src = String(payload.source ?? "");
   if (src === "holiday_extras") {
     push({ ...payload, source: "holidayextras" });
-    const alt = { ...payload, source: "holidayextras" };
+    const alt: Record<string, unknown> = { ...payload, source: "holidayextras" };
     delete alt.supplier_status;
     push(alt);
   } else if (src === "holidayextras") {
