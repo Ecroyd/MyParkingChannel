@@ -4,6 +4,10 @@ import {
   upsertBookingFromStagingRow,
   type StagingRow,
 } from "@/lib/ingest/bookingFromStaging";
+import {
+  formatPostgresError,
+  logBookingPromotionError,
+} from "@/lib/ingest/logBookingPromotionError";
 
 export type BookingUpsertError = { reference: string; reason: string };
 
@@ -93,8 +97,12 @@ export async function promoteStagingToBookings(
   opts: {
     tenantId: string;
     runId?: string | null;
+    importFileId?: string | null;
+    importRunId?: string | null;
     dedupeKeys?: string[];
     stagingIds?: string[];
+    /** 0-based row index per staging dedupe_key (e.g. from parse order) */
+    rowIndexByDedupeKey?: Record<string, number>;
   }
 ): Promise<ImportPromotionResult> {
   const rows = await loadStagingRows(supabase, opts);
@@ -122,11 +130,43 @@ export async function promoteStagingToBookings(
     .single();
   const tz = tenantData?.timezone ?? "Europe/London";
 
-  for (const row of rows) {
-    const upsertResult = await upsertBookingFromStagingRow(supabase, row, {
-      timezone: tz,
-      sourceFilename: (row.source_filename as string | null) ?? null,
-    });
+  const importRunId = opts.importRunId ?? opts.runId ?? null;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const dedupeKey = String(row.dedupe_key ?? "");
+    const rowIndex =
+      opts.rowIndexByDedupeKey?.[dedupeKey] ??
+      (typeof row.row_index === "number" ? row.row_index : i);
+
+    let upsertResult;
+    try {
+      upsertResult = await upsertBookingFromStagingRow(supabase, row, {
+        timezone: tz,
+        sourceFilename: (row.source_filename as string | null) ?? null,
+      });
+    } catch (promotionErr: unknown) {
+      const reason = formatPostgresError(promotionErr);
+      console.error("[booking-promotion-error]", {
+        reference: row.reference,
+        rowIndex,
+        reason,
+        err: promotionErr,
+      });
+      await logBookingPromotionError(supabase, {
+        tenantId,
+        importFileId: opts.importFileId ?? null,
+        importRunId,
+        rowIndex,
+        reason,
+        rowData: row as Record<string, unknown>,
+      });
+      result.booking_upsert_errors.push({
+        reference: String(row.reference ?? row.external_reference ?? "UNKNOWN"),
+        reason,
+      });
+      continue;
+    }
 
     const log = upsertResult.log;
     result.logs.push(log);
@@ -142,12 +182,27 @@ export async function promoteStagingToBookings(
       case "skipped":
         result.skipped++;
         break;
-      case "error":
+      case "error": {
+        const reason = log.reason ?? "unknown error";
+        console.error("[booking-promotion-error]", {
+          reference: log.reference,
+          rowIndex,
+          reason,
+        });
+        await logBookingPromotionError(supabase, {
+          tenantId,
+          importFileId: opts.importFileId ?? null,
+          importRunId,
+          rowIndex,
+          reason,
+          rowData: upsertResult.attemptedPayload ?? (row as Record<string, unknown>),
+        });
         result.booking_upsert_errors.push({
           reference: log.reference,
-          reason: log.reason ?? "unknown error",
+          reason,
         });
         break;
+      }
     }
 
     if (

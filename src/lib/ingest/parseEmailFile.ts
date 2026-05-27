@@ -3,6 +3,10 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { detectAndMapFromAttachment } from "@/lib/importers/canonical/mappers";
 import { isImageFile } from "@/lib/ingest/fileTypeUtils";
 import { channelToParserKey, getAttribution, type ParserKey } from "@/lib/importAttribution";
+import {
+  formatPostgresError,
+  logBookingPromotionError,
+} from "@/lib/ingest/logBookingPromotionError";
 import { promoteStagingToBookings } from "@/lib/ingest/promoteStagingToBookings";
 import { makeStagingDedupeKey } from "@/lib/ingest/bookingFromStaging";
 import {
@@ -495,12 +499,20 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   let cancelledCount = 0;
   let errorCount = 0;
 
+  const rowIndexByDedupeKey: Record<string, number> = {};
+  stagingInserts.forEach((s, idx) => {
+    rowIndexByDedupeKey[s.dedupe_key as string] = idx;
+  });
+
   if (stagedData.length > 0) {
     try {
       const promotion = await promoteStagingToBookings(adminSupabase, {
         tenantId,
         runId: run?.id ?? null,
+        importFileId: fileId,
+        importRunId: run?.id ?? null,
         dedupeKeys: stagingInserts.map((s) => s.dedupe_key as string),
+        rowIndexByDedupeKey,
       });
       insertedCount = promotion.bookings_inserted_count;
       updatedCount = promotion.bookings_updated_count;
@@ -517,8 +529,16 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
         `[parseEmailFile] promoteStagingToBookings: staging=${promotion.staging_rows_count} inserted=${insertedCount} updated=${updatedCount} cancelled=${cancelledCount} errors=${errorCount}`
       );
     } catch (applyErr: unknown) {
-      const msg = applyErr instanceof Error ? applyErr.message : String(applyErr);
+      const msg = formatPostgresError(applyErr);
       console.error(`[parseEmailFile] promoteStagingToBookings failed:`, applyErr);
+      await logBookingPromotionError(adminSupabase, {
+        tenantId,
+        importFileId: fileId,
+        importRunId: run?.id ?? null,
+        rowIndex: 0,
+        reason: msg,
+        rowData: { phase: "promoteStagingToBookings", dedupeKeys: stagingInserts.length },
+      });
       errors.push({ rowIndex: 0, reason: msg, rowData: null });
     }
   }

@@ -119,6 +119,8 @@ describe("staging → bookings promotion", () => {
     expect(payload.status).toBe("cancelled");
     expect(payload.external_status).toBe("CANX");
     expect(payload.external_source).toBe("holiday_extras");
+    expect(payload.source).toBe("holiday_extras");
+    expect(payload.customer_email).toContain("@");
     expect(payload.plate).toBeNull();
   });
 
@@ -137,6 +139,8 @@ describe("staging → bookings promotion", () => {
     expect(updatePayloads[0].status).toBe("cancelled");
     expect(updatePayloads[0].external_status).toBe("CANX");
     expect(updatePayloads[0].external_source).toBe("holiday_extras");
+    expect(updatePayloads[0].source).toBe("holiday_extras");
+    expect(updatePayloads[0].status).toBe("cancelled");
   });
 
   it("does not skip promotion when plate is blank", async () => {

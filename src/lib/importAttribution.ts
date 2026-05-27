@@ -11,7 +11,8 @@
  */
 
 export type BookingSource =
-  | "holidayextras"  // Note: Database enum uses "holidayextras" (no underscore). Consider normalizing to "holiday_extras" in future migration.
+  | "holiday_extras"
+  | "holidayextras"
   | "aph"
   | "cavu"
   | "direct"
@@ -32,12 +33,12 @@ type Attribution = {
 
 export const ATTRIBUTION_BY_PARSER: Record<ParserKey, Attribution> = {
   aph_email_import: {
-    bookingSource: "other", // APH uses "other" since "aph" is not in the booking source enum
+    bookingSource: "aph",
     externalSource: "aph",
     detectedSource: "APH",
   },
   holiday_extras_email_import: {
-    bookingSource: "holidayextras", // Matches database enum (consider normalizing to "holiday_extras" in future)
+    bookingSource: "holiday_extras",
     externalSource: "holiday_extras",
     detectedSource: "HOLIDAY_EXTRAS",
   },

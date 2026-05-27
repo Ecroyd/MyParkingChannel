@@ -1,5 +1,6 @@
 import type { ParserKey } from "@/lib/importAttribution";
 import { channelToParserKey, getAttribution } from "@/lib/importAttribution";
+import { normalizeBookingSourceForDb } from "@/lib/bookings/normalizeBookingSource";
 
 /** Platform id stored in bookings.external_source (not raw supplier status). */
 export type ImportPlatformId =
@@ -19,12 +20,12 @@ export type ImportPlatformAttribution = {
 
 const PLATFORM_BY_CHANNEL: Record<string, ImportPlatformAttribution> = {
   HOLIDAY_EXTRAS: {
-    bookingSource: "holidayextras",
+    bookingSource: "holiday_extras",
     platformId: "holiday_extras",
     parserKey: "holiday_extras_email_import",
   },
   APH: {
-    bookingSource: "other",
+    bookingSource: "aph",
     platformId: "aph",
     parserKey: "aph_email_import",
   },
@@ -69,7 +70,11 @@ export function resolveImportPlatform(opts: {
             : "unknown";
 
   return {
-    bookingSource: attr.bookingSource,
+    bookingSource: normalizeBookingSourceForDb(attr.bookingSource, {
+      channel: opts.channel,
+      externalSource: platformFromParser,
+      parserKey,
+    }),
     platformId: platformFromParser,
     parserKey,
   };

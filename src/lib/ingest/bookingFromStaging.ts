@@ -6,6 +6,8 @@ import {
   mapSupplierStatusToBookingStatus,
   normalizeSupplierStatus,
 } from "@/lib/ingest/importStatusMapping";
+import { normalizeBookingSourceForDb } from "@/lib/bookings/normalizeBookingSource";
+import { formatPostgresError } from "@/lib/ingest/logBookingPromotionError";
 import { resolveImportPlatform } from "@/lib/ingest/importPlatform";
 import { safeBookingUpsertPayload } from "@/lib/ingest/safeBookingUpsertPayload";
 
@@ -43,6 +45,7 @@ export type StagingRow = Record<string, unknown> & {
   notes?: string | null;
   customer_name?: string | null;
   customer_email?: string | null;
+  dedupe_key?: string | null;
   raw_json?: {
     channel?: string;
     kind?: string;
@@ -50,6 +53,21 @@ export type StagingRow = Record<string, unknown> & {
     [key: string]: unknown;
   } | null;
 };
+
+function resolveCustomerEmail(row: StagingRow, reference: string): string {
+  const fromRow = row.customer_email;
+  if (fromRow && String(fromRow).trim().includes("@")) {
+    return String(fromRow).trim();
+  }
+  const fromRaw =
+    row.raw_json?.extracted &&
+    typeof row.raw_json.extracted === "object" &&
+    (row.raw_json.extracted as { email?: string }).email;
+  if (fromRaw && String(fromRaw).trim().includes("@")) {
+    return String(fromRaw).trim();
+  }
+  return `import+${reference.toLowerCase()}@imports.local`;
+}
 
 function cleanPlate(reg: string | null | undefined): string | null {
   if (!reg) return null;
@@ -131,6 +149,14 @@ export function buildBookingPayloadFromStaging(
     channel: channel ?? null,
     stagingSource: row.source ?? null,
   });
+  const bookingSource = normalizeBookingSourceForDb(
+    platform.bookingSource ?? row.source ?? null,
+    {
+      channel: channel ?? null,
+      externalSource: platform.platformId,
+      parserKey: platform.parserKey,
+    }
+  );
 
   const parsedStatus = resolveParsedStatus(row);
   const mappedStatus = mapSupplierStatusToBookingStatus(parsedStatus);
@@ -154,7 +180,7 @@ export function buildBookingPayloadFromStaging(
     tenant_id: row.tenant_id,
     reference,
     customer_name: row.customer_name ?? null,
-    customer_email: row.customer_email ?? "",
+    customer_email: resolveCustomerEmail(row, reference),
     customer_phone: row.phone ?? null,
     plate,
     car_make: row.vehicle_make ?? null,
@@ -168,7 +194,7 @@ export function buildBookingPayloadFromStaging(
     money_charged: Number.isFinite(moneyCharged) ? moneyCharged : 0,
     money_received: Number.isFinite(moneyReceived) ? moneyReceived : 0,
     notes: row.notes ?? "",
-    source: platform.bookingSource,
+    source: bookingSource,
     external_source: platform.platformId,
     flight_number: row.flight_number ?? null,
     return_flight_number: returnFlight,
@@ -189,7 +215,132 @@ export function buildBookingPayloadFromStaging(
 export type UpsertStagingResult = {
   log: ImportRowLog;
   bookingId?: string;
+  /** Payload sent (or last attempted) when action is error — for booking_import_errors.row_data */
+  attemptedPayload?: Record<string, unknown> | null;
 };
+
+function bookingPayloadVariants(
+  payload: Record<string, unknown>
+): Record<string, unknown>[] {
+  const seen = new Set<string>();
+  const out: Record<string, unknown>[] = [];
+
+  const push = (p: Record<string, unknown>) => {
+    const key = JSON.stringify(p);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(p);
+  };
+
+  push(payload);
+
+  if (payload.supplier_status !== undefined) {
+    const withoutSupplier = { ...payload };
+    delete withoutSupplier.supplier_status;
+    push(withoutSupplier);
+  }
+
+  const src = String(payload.source ?? "");
+  if (src === "holiday_extras") {
+    push({ ...payload, source: "holidayextras" });
+    const alt = { ...payload, source: "holidayextras" };
+    delete alt.supplier_status;
+    push(alt);
+  } else if (src === "holidayextras") {
+    push({ ...payload, source: "holiday_extras" });
+  }
+
+  return out;
+}
+
+async function updateBookingWithVariants(
+  supabase: SupabaseClient,
+  tenantId: string,
+  reference: string,
+  updatePayload: Record<string, unknown>
+): Promise<
+  | { ok: true; bookingId?: string; payload: Record<string, unknown> }
+  | { ok: false; reason: string; payload: Record<string, unknown> }
+> {
+  const variants = bookingPayloadVariants(updatePayload);
+  const errors: string[] = [];
+
+  for (const variant of variants) {
+    const { data: updated, error: updateErr } = await supabase
+      .from("bookings")
+      .update(variant)
+      .eq("tenant_id", tenantId)
+      .eq("reference", reference)
+      .select("id");
+
+    if (!updateErr) {
+      return {
+        ok: true,
+        bookingId: updated?.[0]?.id,
+        payload: variant,
+      };
+    }
+    errors.push(formatPostgresError(updateErr));
+  }
+
+  return {
+    ok: false,
+    reason: errors.join(" → "),
+    payload: variants[variants.length - 1] ?? updatePayload,
+  };
+}
+
+async function insertBookingWithVariants(
+  supabase: SupabaseClient,
+  payload: Record<string, unknown>,
+  reference: string,
+  baseLog: ImportRowLog,
+  mappedStatus: string
+): Promise<UpsertStagingResult> {
+  const variants = bookingPayloadVariants(payload);
+  const errors: string[] = [];
+
+  for (const variant of variants) {
+    const { data: inserted, error: insertErr } = await supabase
+      .from("bookings")
+      .insert(variant)
+      .select("id")
+      .single();
+
+    if (!insertErr) {
+      return {
+        log: {
+          ...baseLog,
+          reference,
+          action: "inserted",
+          mapped_status: mappedStatus,
+        },
+        bookingId: inserted?.id,
+        attemptedPayload: variant,
+      };
+    }
+    errors.push(formatPostgresError(insertErr));
+  }
+
+  const upsertFallback = await tryPostgrestUpsert(
+    supabase,
+    variants[0] ?? payload,
+    reference,
+    baseLog,
+    mappedStatus
+  );
+  if (upsertFallback) return { ...upsertFallback, attemptedPayload: variants[0] ?? payload };
+
+  return {
+    log: {
+      ...baseLog,
+      reference,
+      action: "error",
+      reason: errors.join(" → "),
+    },
+    attemptedPayload: variants[variants.length - 1] ?? payload,
+  };
+}
 
 /**
  * Update existing booking(s) by tenant_id + reference, or insert when none exist.
@@ -254,6 +405,7 @@ export async function upsertBookingFromStagingRow(
   if ("error" in times) {
     return {
       log: { ...baseLog, reference, action: "error", reason: times.error },
+      attemptedPayload: null,
     };
   }
 
@@ -262,6 +414,7 @@ export async function upsertBookingFromStagingRow(
   if (!safePayload.ok) {
     return {
       log: { ...baseLog, reference, action: "error", reason: safePayload.error },
+      attemptedPayload: bookingRowRaw,
     };
   }
 
@@ -280,8 +433,9 @@ export async function upsertBookingFromStagingRow(
         ...baseLog,
         reference,
         action: "error",
-        reason: `select existing: ${selectErr.message}`,
+        reason: `select existing: ${formatPostgresError(selectErr)}`,
       },
+      attemptedPayload: payload,
     };
   }
 
@@ -290,54 +444,39 @@ export async function upsertBookingFromStagingRow(
   delete updatePayload.reference;
 
   if (existingRows && existingRows.length > 0) {
-    const { data: updated, error: updateErr } = await supabase
-      .from("bookings")
-      .update(updatePayload)
-      .eq("tenant_id", tenantId)
-      .eq("reference", reference)
-      .select("id");
+    const updateResult = await updateBookingWithVariants(
+      supabase,
+      tenantId,
+      reference,
+      updatePayload
+    );
 
-    if (updateErr) {
+    if (!updateResult.ok) {
       return {
         log: {
           ...baseLog,
           reference,
           action: "error",
-          reason: `update: ${updateErr.message}`,
+          reason: `update: ${updateResult.reason}`,
         },
+        attemptedPayload: updateResult.payload,
       };
     }
 
     return {
       log: { ...baseLog, reference, action: "updated", mapped_status: mappedStatus },
-      bookingId: updated?.[0]?.id ?? existingRows[0].id,
+      bookingId: updateResult.bookingId ?? existingRows[0].id,
+      attemptedPayload: updateResult.payload,
     };
   }
 
-  const { data: inserted, error: insertErr } = await supabase
-    .from("bookings")
-    .insert(payload)
-    .select("id")
-    .single();
-
-  if (insertErr) {
-    const upsertFallback = await tryPostgrestUpsert(supabase, payload, reference, baseLog, mappedStatus);
-    if (upsertFallback) return upsertFallback;
-
-    return {
-      log: {
-        ...baseLog,
-        reference,
-        action: "error",
-        reason: `insert: ${insertErr.message}`,
-      },
-    };
-  }
-
-  return {
-    log: { ...baseLog, reference, action: "inserted", mapped_status: mappedStatus },
-    bookingId: inserted?.id,
-  };
+  return insertBookingWithVariants(
+    supabase,
+    payload,
+    reference,
+    baseLog,
+    mappedStatus
+  );
 }
 
 async function tryPostgrestUpsert(
