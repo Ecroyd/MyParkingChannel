@@ -9,8 +9,17 @@ import {
   mapSupplierStatusToBookingStatus,
   normalizeSupplierStatus,
 } from "@/lib/ingest/importStatusMapping";
-import { formatHolidayExtrasParseReason } from "@/lib/importers/holidayExtras/parseHolidayExtras";
+import { decodeExtAttachmentText } from "@/lib/importers/holidayExtras/decodeExtText";
+import { isHolidayExtrasFile } from "@/lib/importers/holidayExtras/parseHolidayExtras";
 import type { HolidayExtrasParseStats } from "@/lib/importers/holidayExtras/parseHolidayExtras";
+import {
+  buildParseReasonSummary,
+  resolveParseOutcome,
+} from "@/lib/ingest/parseOutcome";
+
+function isHolidayExtrasFilename(filename: string): boolean {
+  return /^ext\d+.*\.txt$/i.test(filename.trim());
+}
 
 /**
  * Parse file using canonical mappers (supports APH, CAVU, etc.)
@@ -24,7 +33,7 @@ function parseFileWithCanonicalMappers(
   detectedFormat: string | null;
   holidayExtrasStats?: HolidayExtrasParseStats;
 } {
-  const text = buffer.toString("utf-8");
+  const text = decodeExtAttachmentText(buffer);
   const result = detectAndMapFromAttachment(filename, text);
 
   if (!result) {
@@ -206,18 +215,21 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
 
   // 4. Parse file using canonical mappers
   let parsedData;
-  let winningParserKey: ParserKey = "unknown";
+  let winningParserKey: ParserKey = isHolidayExtrasFilename(file.filename)
+    ? "holiday_extras_email_import"
+    : "unknown";
   try {
     console.log(`[parseEmailFile] Parsing file with canonical mappers: ${file.filename}`);
     parsedData = parseFileWithCanonicalMappers(buffer, file.filename);
     console.log(`[parseEmailFile] Parsed ${parsedData.rows.length} rows from ${file.filename}`);
-    
-    // Determine winning parser from the channel detected in parsed rows
-    if (parsedData.rows.length > 0) {
-      const detectedChannel = (parsedData.rows[0] as any).channel;
+
+    if (parsedData.detectedFormat === "HOLIDAY_EXTRAS" || isHolidayExtrasFilename(file.filename)) {
+      winningParserKey = "holiday_extras_email_import";
+    } else if (parsedData.rows.length > 0) {
+      const detectedChannel = (parsedData.rows[0] as { channel?: string }).channel;
       winningParserKey = channelToParserKey(detectedChannel);
       console.log(`[parseEmailFile] Detected channel: ${detectedChannel}, parser key: ${winningParserKey}`);
-      
+
       console.log(`[parseEmailFile] Sample row:`, {
         reference: parsedData.rows[0].reference,
         channel: detectedChannel,
@@ -250,12 +262,23 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     throw parseErr;
   }
 
-  // EXT TSV detected but 0 accepted rows
-  if (parsedData.rows.length === 0 && parsedData.detectedFormat === "HOLIDAY_EXTRAS") {
+  const isHeFile =
+    parsedData.detectedFormat === "HOLIDAY_EXTRAS" ||
+    isHolidayExtrasFilename(file.filename) ||
+    isHolidayExtrasFile(file.filename, decodeExtAttachmentText(buffer));
+
+  // Holiday Extras: 0 accepted rows → empty (never "parsed")
+  if (parsedData.rows.length === 0 && isHeFile) {
     const stats = parsedData.holidayExtrasStats;
-    const parseReason = stats
-      ? formatHolidayExtrasParseReason(stats)
-      : "No EXT rows accepted (format mismatch or empty file)";
+    const attribution = getAttribution("holiday_extras_email_import");
+    const parseReason = buildParseReasonSummary({
+      holidayExtrasStats: stats ?? undefined,
+      rowsParsed: 0,
+      rowsStaged: 0,
+      rowsUpserted: 0,
+      rowsCancelled: 0,
+      extra: "rows_accepted=0",
+    });
     console.log(`[parseEmailFile] Holiday Extras 0 accepted rows: ${file.filename}`, parseReason);
     await supabase
       .from("ingest_email_files")
@@ -265,6 +288,9 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
         parsed_at: new Date().toISOString(),
         parse_error: null,
         parse_reason: parseReason,
+        parser_key: "holiday_extras_email_import",
+        detected_source: attribution.detectedSource,
+        external_source: attribution.externalSource,
       })
       .eq("id", fileId);
     return {
@@ -345,10 +371,9 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       reference: ref,
       external_reference: ref,
       external_status: supplierToken ?? raw.external_status,
-      supplier_status: supplierToken,
       start_at: raw.start_at,
       end_at: raw.end_at,
-      vehicle_reg: raw.vehicle_reg,
+      vehicle_reg: raw.vehicle_reg ?? null,
       vehicle_make: raw.vehicle_make,
       vehicle_colour: raw.vehicle_colour,
       vehicle_model: raw.vehicle_model,
@@ -369,7 +394,14 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       dedupe_key: dedupe_key, // Required field
       // Store raw data for debugging (never null – required for cancellation detection)
       raw_json: {
-        mapping: channel === "CAVU" ? "cavuV1" : channel === "FLYPARKS_EMAIL" ? "flyparksV1" : "aphV1",
+        mapping:
+          channel === "CAVU"
+            ? "cavuV1"
+            : channel === "FLYPARKS_EMAIL"
+              ? "flyparksV1"
+              : channel === "HOLIDAY_EXTRAS"
+                ? "holidayExtrasV1"
+                : "aphV1",
         channel: channel,
         raw_fields: raw.raw_fields ?? [],
         external_reference: raw.external_reference,
@@ -381,32 +413,38 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   let stagedData: { id: string; external_reference?: string }[] = [];
 
   if (stagingInserts.length === 0) {
-    console.warn(`[parseEmailFile] ⚠️ No staging inserts to process - parsedData.rows was empty`);
-    // Still mark as parsed if format was detected, but log the issue
+    const parseReason = buildParseReasonSummary({
+      holidayExtrasStats: parsedData.holidayExtrasStats,
+      rowsParsed: parsedData.rows.length,
+      rowsStaged: 0,
+      extra: "no_staging_rows_built",
+    });
     await supabase
       .from("ingest_email_files")
-      .update({ 
-        parse_outcome: "parsed",
+      .update({
+        parse_outcome: "empty",
         parse_status: "parsed",
         parsed_at: new Date().toISOString(),
-        parse_error: "File format detected but no valid rows extracted"
+        parse_error: null,
+        parse_reason: parseReason,
+        parser_key: winningParserKey,
       })
       .eq("id", fileId);
     return {
       ok: true,
       fileId: file.id,
       filename: file.filename,
-      rowsParsed: 0,
+      rowsParsed: parsedData.rows.length,
       stagedCount: 0,
       importResult: {
         runId: null,
         successCount: 0,
         errorCount: 0,
-        errors: [{ rowIndex: 0, reason: "No valid rows extracted from file", rowData: null }],
+        errors: [{ rowIndex: 0, reason: parseReason, rowData: null }],
       },
     };
   }
-  
+
   console.log(`[parseEmailFile] Upserting ${stagingInserts.length} rows into staging (dedupe_key=tenant+reference)`);
   const { data: upsertedStaging, error: stagingError } = await adminSupabase
     .from("booking_import_staging")
@@ -430,6 +468,26 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
 
   stagedData = upsertedStaging || [];
   console.log(`[parseEmailFile] ✅ Upserted ${stagedData.length} staging rows`);
+
+  if (stagedData.length === 0) {
+    const parseReason = buildParseReasonSummary({
+      holidayExtrasStats: parsedData.holidayExtrasStats,
+      rowsParsed: parsedData.rows.length,
+      rowsStaged: 0,
+      extra: "staging_upsert_returned_zero",
+    });
+    await supabase
+      .from("ingest_email_files")
+      .update({
+        parse_outcome: "failed",
+        parse_status: "failed",
+        parse_error: "Staging upsert returned 0 rows",
+        parse_reason: parseReason,
+        parser_key: winningParserKey,
+      })
+      .eq("id", fileId);
+    throw new Error("Staging upsert returned 0 rows");
+  }
 
   const errors: { rowIndex: number; reason: string; rowData: null }[] = [];
   let insertedCount = 0;
@@ -465,15 +523,21 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
 
   const upsertedCount = insertedCount + updatedCount;
   const heStats = parsedData.holidayExtrasStats;
-  const parseReasonParts: string[] = [];
-  if (heStats) {
-    parseReasonParts.push(formatHolidayExtrasParseReason(heStats));
-  }
-  parseReasonParts.push(`rows_parsed=${parsedData.rows.length}`);
-  parseReasonParts.push(`rows_upserted=${upsertedCount}`);
-  parseReasonParts.push(`rows_cancelled=${cancelledCount}`);
-  parseReasonParts.push(`rows_errors=${errorCount}`);
-  const parseReasonSummary = parseReasonParts.join("; ");
+  const rowsAccepted = heStats?.rows_accepted ?? parsedData.rows.length;
+  const parseReasonSummary = buildParseReasonSummary({
+    holidayExtrasStats: heStats,
+    rowsParsed: parsedData.rows.length,
+    rowsStaged: stagedData.length,
+    rowsUpserted: upsertedCount,
+    rowsCancelled: cancelledCount,
+    rowsErrors: errorCount,
+  });
+  const parseOutcome = resolveParseOutcome({
+    rowsAccepted,
+    rowsStaged: stagedData.length,
+    rowsUpserted: upsertedCount,
+    rowsCancelled: cancelledCount,
+  });
 
   if (run?.id) {
     await adminSupabase
@@ -494,7 +558,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   const { error: updateError, data: updatedFile } = await supabase
     .from("ingest_email_files")
     .update({ 
-      parse_outcome: upsertedCount > 0 || cancelledCount > 0 ? "parsed" : "empty",
+      parse_outcome: parseOutcome,
       parse_status: "parsed",
       parsed_at: new Date().toISOString(),
       parse_error: null,
