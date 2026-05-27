@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase/server";
 import { detectAndMapFromAttachment } from "@/lib/importers/canonical/mappers";
 import { isImageFile } from "@/lib/ingest/fileTypeUtils";
 import { channelToParserKey, getAttribution, type ParserKey } from "@/lib/importAttribution";
-import { applyImportRun } from "@/lib/ingest/applyImportRun";
+import { promoteStagingToBookings } from "@/lib/ingest/promoteStagingToBookings";
 import { makeStagingDedupeKey } from "@/lib/ingest/bookingFromStaging";
 import {
   mapSupplierStatusToBookingStatus,
@@ -495,28 +495,30 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   let cancelledCount = 0;
   let errorCount = 0;
 
-  if (run?.id && stagedData.length > 0) {
+  if (stagedData.length > 0) {
     try {
-      const applyResult = await applyImportRun(adminSupabase, run.id);
-      insertedCount = applyResult.inserted;
-      updatedCount = applyResult.updated;
-      cancelledCount = applyResult.cancelled;
-      errorCount = applyResult.errors;
-      for (const log of applyResult.logs) {
-        if (log.action === "error") {
-          errors.push({
-            rowIndex: 0,
-            reason: log.reason ?? `Failed: ${log.reference}`,
-            rowData: null,
-          });
-        }
+      const promotion = await promoteStagingToBookings(adminSupabase, {
+        tenantId,
+        runId: run?.id ?? null,
+        dedupeKeys: stagingInserts.map((s) => s.dedupe_key as string),
+      });
+      insertedCount = promotion.bookings_inserted_count;
+      updatedCount = promotion.bookings_updated_count;
+      cancelledCount = promotion.bookings_cancelled_count;
+      errorCount = promotion.booking_upsert_errors.length;
+      for (const err of promotion.booking_upsert_errors) {
+        errors.push({
+          rowIndex: 0,
+          reason: `${err.reference}: ${err.reason}`,
+          rowData: null,
+        });
       }
       console.log(
-        `[parseEmailFile] applyImportRun: inserted=${insertedCount}, updated=${updatedCount}, cancelled=${cancelledCount}, errors=${errorCount}`
+        `[parseEmailFile] promoteStagingToBookings: staging=${promotion.staging_rows_count} inserted=${insertedCount} updated=${updatedCount} cancelled=${cancelledCount} errors=${errorCount}`
       );
     } catch (applyErr: unknown) {
       const msg = applyErr instanceof Error ? applyErr.message : String(applyErr);
-      console.error(`[parseEmailFile] applyImportRun failed:`, applyErr);
+      console.error(`[parseEmailFile] promoteStagingToBookings failed:`, applyErr);
       errors.push({ rowIndex: 0, reason: msg, rowData: null });
     }
   }
@@ -549,6 +551,11 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
           cancelled_count: cancelledCount,
           inserted: insertedCount,
           updated: updatedCount,
+          staging_rows_count: stagedData.length,
+          bookings_inserted_count: insertedCount,
+          bookings_updated_count: updatedCount,
+          bookings_cancelled_count: cancelledCount,
+          booking_upsert_errors: errors.slice(0, 20),
           holiday_extras_stats: heStats ?? null,
         },
       })
@@ -596,6 +603,11 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       updatedCount,
       errorCount: errors.length,
       cancelledCount,
+      staging_rows_count: stagedData.length,
+      bookings_inserted_count: insertedCount,
+      bookings_updated_count: updatedCount,
+      bookings_cancelled_count: cancelledCount,
+      booking_upsert_errors: errors.slice(0, 10),
       errors: errors.slice(0, 10),
     },
   };

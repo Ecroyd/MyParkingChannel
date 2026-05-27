@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentTenantContext } from "@/lib/auth/current-tenant-context";
 import { createAdminClient } from "@/lib/supabase/server-admin";
-import { applyImportRun } from "@/lib/ingest/applyImportRun";
+import { applyImportRun } from "@/lib/ingest/promoteStagingToBookings";
 
 /**
  * POST /api/admin/import-runs/apply
@@ -25,12 +25,17 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      upserted_count: result.inserted + result.updated,
-      inserted: result.inserted,
-      updated: result.updated,
-      cancelled_count: result.cancelled,
+      upserted_count: result.bookings_inserted_count + result.bookings_updated_count,
+      inserted: result.bookings_inserted_count,
+      updated: result.bookings_updated_count,
+      cancelled_count: result.bookings_cancelled_count,
+      staging_rows_count: result.staging_rows_count,
+      bookings_inserted_count: result.bookings_inserted_count,
+      bookings_updated_count: result.bookings_updated_count,
+      bookings_cancelled_count: result.bookings_cancelled_count,
+      booking_upsert_errors: result.booking_upsert_errors,
       skipped: result.skipped,
-      errors: result.errors,
+      errors: result.booking_upsert_errors.length,
       logs: result.logs,
     });
   } catch (e: unknown) {

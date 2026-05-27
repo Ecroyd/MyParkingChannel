@@ -29,11 +29,20 @@ export type StagingRow = Record<string, unknown> & {
   start_at?: string | null;
   end_at?: string | null;
   vehicle_reg?: string | null;
+  vehicle_make?: string | null;
+  vehicle_model?: string | null;
+  vehicle_colour?: string | null;
+  flight_number?: string | null;
   source?: string | null;
   source_filename?: string | null;
+  phone?: string | null;
+  return_flight_no?: string | null;
   price?: number | null;
   total_price?: number | null;
   money_received?: number | null;
+  notes?: string | null;
+  customer_name?: string | null;
+  customer_email?: string | null;
   raw_json?: {
     channel?: string;
     kind?: string;
@@ -49,19 +58,33 @@ function cleanPlate(reg: string | null | undefined): string | null {
   return s;
 }
 
-function resolveReference(row: StagingRow): string | null {
+export function resolveReference(row: StagingRow): string | null {
   const ref = row.reference ?? row.external_reference;
   if (!ref) return null;
   return String(ref).trim().toUpperCase() || null;
 }
 
-function resolveParsedStatus(row: StagingRow): string | null {
-  const fromStaging = row.external_status ?? row.status;
+export function resolveParsedStatus(row: StagingRow): string | null {
+  const statusField = row.status != null ? String(row.status).trim() : "";
+  const externalStatus = row.external_status;
+
+  if (externalStatus != null && String(externalStatus).trim() !== "") {
+    return (
+      normalizeSupplierStatus(externalStatus) ?? String(externalStatus).trim().toUpperCase()
+    );
+  }
+
+  if (statusField) {
+    const fromStatus = normalizeSupplierStatus(statusField);
+    if (fromStatus) return fromStatus;
+    if (statusField.toLowerCase() === "cancelled") return "CANX";
+  }
+
   const fromRaw =
     row.raw_json?.external_status != null
       ? String(row.raw_json.external_status)
       : null;
-  return normalizeSupplierStatus(fromStaging ?? fromRaw) ?? (fromStaging ? String(fromStaging) : null);
+  return normalizeSupplierStatus(fromRaw) ?? (fromRaw ? String(fromRaw) : null);
 }
 
 async function normaliseTimes(
@@ -124,7 +147,10 @@ export function buildBookingPayloadFromStaging(
   const moneyReceived =
     row.money_received != null ? Number(row.money_received) : moneyCharged;
 
-  const payload: Record<string, unknown> = {
+  const returnFlight =
+    row.return_flight_no ?? (row as { return_flight_number?: string }).return_flight_number ?? null;
+
+  return {
     tenant_id: row.tenant_id,
     reference,
     customer_name: row.customer_name ?? null,
@@ -145,22 +171,19 @@ export function buildBookingPayloadFromStaging(
     source: platform.bookingSource,
     external_source: platform.platformId,
     flight_number: row.flight_number ?? null,
+    return_flight_number: returnFlight,
     updated_at: new Date().toISOString(),
     is_incomplete: false,
     missing_fields: [],
+    ...(isFlyparksText
+      ? { external_source: "flyparks_email_text", source: "direct" }
+      : {}),
+    ...(row.raw_json?.extracted &&
+    typeof row.raw_json.extracted === "object" &&
+    (row.raw_json.extracted as { email?: string }).email
+      ? { customer_email: (row.raw_json.extracted as { email?: string }).email }
+      : {}),
   };
-
-  if (row.raw_json?.extracted && typeof row.raw_json.extracted === "object") {
-    const email = (row.raw_json.extracted as { email?: string }).email;
-    if (email) payload.customer_email = email;
-  }
-
-  if (isFlyparksText) {
-    payload.external_source = "flyparks_email_text";
-    payload.source = "direct";
-  }
-
-  return payload;
 }
 
 export type UpsertStagingResult = {
@@ -169,7 +192,8 @@ export type UpsertStagingResult = {
 };
 
 /**
- * Upsert one staging row into public.bookings (tenant_id + reference).
+ * Update existing booking(s) by tenant_id + reference, or insert when none exist.
+ * Does not rely on PostgREST upsert unique constraint (works even if only app-level match).
  */
 export async function upsertBookingFromStagingRow(
   supabase: SupabaseClient,
@@ -209,7 +233,6 @@ export async function upsertBookingFromStagingRow(
     };
   }
 
-  // end_at optional — synthesize from start when missing (Holiday Extras CANX)
   const endAtForNormalize = endAtRaw || startAtRaw;
 
   let tz = opts?.timezone ?? "Europe/London";
@@ -234,13 +257,6 @@ export async function upsertBookingFromStagingRow(
     };
   }
 
-  const { data: existing } = await supabase
-    .from("bookings")
-    .select("id")
-    .eq("tenant_id", row.tenant_id)
-    .eq("reference", reference)
-    .maybeSingle();
-
   const bookingRowRaw = buildBookingPayloadFromStaging(row, times);
   const safePayload = safeBookingUpsertPayload(bookingRowRaw);
   if (!safePayload.ok) {
@@ -249,29 +265,106 @@ export async function upsertBookingFromStagingRow(
     };
   }
 
+  const tenantId = row.tenant_id;
+  const payload = safePayload.data;
+
+  const { data: existingRows, error: selectErr } = await supabase
+    .from("bookings")
+    .select("id, status")
+    .eq("tenant_id", tenantId)
+    .eq("reference", reference);
+
+  if (selectErr) {
+    return {
+      log: {
+        ...baseLog,
+        reference,
+        action: "error",
+        reason: `select existing: ${selectErr.message}`,
+      },
+    };
+  }
+
+  const updatePayload = { ...payload };
+  delete updatePayload.tenant_id;
+  delete updatePayload.reference;
+
+  if (existingRows && existingRows.length > 0) {
+    const { data: updated, error: updateErr } = await supabase
+      .from("bookings")
+      .update(updatePayload)
+      .eq("tenant_id", tenantId)
+      .eq("reference", reference)
+      .select("id");
+
+    if (updateErr) {
+      return {
+        log: {
+          ...baseLog,
+          reference,
+          action: "error",
+          reason: `update: ${updateErr.message}`,
+        },
+      };
+    }
+
+    return {
+      log: { ...baseLog, reference, action: "updated", mapped_status: mappedStatus },
+      bookingId: updated?.[0]?.id ?? existingRows[0].id,
+    };
+  }
+
+  const { data: inserted, error: insertErr } = await supabase
+    .from("bookings")
+    .insert(payload)
+    .select("id")
+    .single();
+
+  if (insertErr) {
+    const upsertFallback = await tryPostgrestUpsert(supabase, payload, reference, baseLog, mappedStatus);
+    if (upsertFallback) return upsertFallback;
+
+    return {
+      log: {
+        ...baseLog,
+        reference,
+        action: "error",
+        reason: `insert: ${insertErr.message}`,
+      },
+    };
+  }
+
+  return {
+    log: { ...baseLog, reference, action: "inserted", mapped_status: mappedStatus },
+    bookingId: inserted?.id,
+  };
+}
+
+async function tryPostgrestUpsert(
+  supabase: SupabaseClient,
+  payload: Record<string, unknown>,
+  reference: string,
+  baseLog: ImportRowLog,
+  mappedStatus: string
+): Promise<UpsertStagingResult | null> {
   const { data: upserted, error: upsertErr } = await supabase
     .from("bookings")
-    .upsert(safePayload.data, {
+    .upsert(payload, {
       onConflict: "tenant_id,reference",
       ignoreDuplicates: false,
     })
     .select("id")
     .single();
 
-  if (upsertErr) {
-    return {
-      log: {
-        ...baseLog,
-        reference,
-        action: "error",
-        reason: upsertErr.message,
-      },
-    };
-  }
+  if (upsertErr) return null;
 
-  const action: ImportRowAction = existing?.id ? "updated" : "inserted";
   return {
-    log: { ...baseLog, reference, action, mapped_status: mappedStatus },
+    log: {
+      ...baseLog,
+      reference,
+      action: "updated",
+      mapped_status: mappedStatus,
+    },
     bookingId: upserted?.id,
   };
 }
