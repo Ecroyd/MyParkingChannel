@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentTenantContext } from "@/lib/auth/current-tenant-context";
 import { getServiceSupabase } from "@/lib/supabase/service";
-import { parseEmailFile } from "@/lib/ingest/parseEmailFile";
+import { reprocessIngestEmailFile } from "@/lib/ingest/reprocessIngestEmailFile";
 
 /**
  * POST /api/admin/imports/reprocess-file
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "tenantId required" }, { status: 400 });
     }
 
-    const result = await parseEmailFile(resolvedFileId, tenantId);
+    const result = await reprocessIngestEmailFile(resolvedFileId, tenantId);
 
     const importResult = result.importResult ?? {};
     return NextResponse.json({

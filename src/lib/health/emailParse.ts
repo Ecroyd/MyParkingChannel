@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/server-admin';
 import { isBookingCapableFile, isImageFile } from '@/lib/ingest/fileTypeUtils';
+import { isFileParseFailedForBanner } from '@/lib/ingest/ingestEmailFileStatus';
 
 function getEmailTenantMap(): Record<string, string> {
   if (process.env.EMAIL_TENANT_MAP) {
@@ -44,7 +45,7 @@ export async function getEmailParseHealth(tenantId: string): Promise<EmailParseH
       id, filename, parse_status, parse_outcome, parse_error, parsed_at, created_at,
       ingest_emails!inner(id, from_address, subject, created_at)
     `)
-    .eq('parse_outcome', 'failed')
+    .eq('parse_status', 'failed')
     .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
     .order('created_at', { ascending: false })
     .limit(100);
@@ -53,7 +54,7 @@ export async function getEmailParseHealth(tenantId: string): Promise<EmailParseH
     const fileTenantId = detectTenantFromEmail(file.ingest_emails);
     const matches = fileTenantId === tenantId;
     const isBookingCapable = isBookingCapableFile(file.filename);
-    return matches && isBookingCapable;
+    return matches && isBookingCapable && isFileParseFailedForBanner(file);
   }).slice(0, 50);
 
   if (failedError) throw new Error(failedError.message);

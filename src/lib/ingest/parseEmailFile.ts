@@ -11,6 +11,12 @@ import { promoteStagingToBookings } from "@/lib/ingest/promoteStagingToBookings"
 import { makeStagingDedupeKey } from "@/lib/ingest/bookingFromStaging";
 import { dedupeStagingRowsByKey } from "@/lib/ingest/dedupeStagingRows";
 import {
+  finalizeIngestEmailFileParseSuccess,
+  markIngestEmailFileParseFailed,
+  prepareIngestEmailFileForRetry,
+  shouldPrepareIngestEmailFileForRetry,
+} from "@/lib/ingest/ingestEmailFileStatus";
+import {
   mapSupplierStatusToBookingStatus,
   normalizeSupplierStatus,
 } from "@/lib/ingest/importStatusMapping";
@@ -107,6 +113,7 @@ function parseFileWithCanonicalMappers(
 export async function parseEmailFile(fileId: string, tenantId: string) {
   console.log(`[parseEmailFile] Starting parse for file ${fileId}, tenant ${tenantId}`);
   const supabase = getServiceSupabase();
+  const adminSupabase = supabaseAdmin();
 
   // 1. Get file record
   const { data: file, error: fileError } = await supabase
@@ -171,24 +178,11 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     };
   }
 
-  // If already parsed, reset status to allow re-parsing (for retry scenarios)
-  // BUT: Don't reset if it was skipped (images) or if parse_outcome is "skipped"
-  if (fileWithOutcome.parse_status === "parsed" && fileWithOutcome.parse_outcome !== "skipped") {
-    console.log(`[parseEmailFile] File already parsed, resetting status for retry: ${fileId}`);
-    const { error: resetError } = await supabase
-      .from("ingest_email_files")
-      .update({ 
-        parse_status: "pending",
-        parsed_at: null,
-        parse_error: null,
-      })
-      .eq("id", fileId);
-    
-    if (resetError) {
-      console.error(`[parseEmailFile] Failed to reset status:`, resetError);
-    } else {
-      console.log(`[parseEmailFile] ✅ Status reset to pending for retry`);
-    }
+  // Admin retry: clear prior failed/parsed state on the same row before re-parse
+  if (shouldPrepareIngestEmailFileForRetry(fileWithOutcome)) {
+    console.log(`[parseEmailFile] Preparing file for retry: ${fileId}`);
+    await prepareIngestEmailFileForRetry(adminSupabase, fileId);
+    console.log(`[parseEmailFile] ✅ Status reset to pending for retry`);
   }
   
   console.log(`[parseEmailFile] File status: ${file.parse_status}, filename: ${file.filename}`);
@@ -200,15 +194,12 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
 
   if (downloadError || !fileData) {
     const errorMsg = downloadError?.message || "unknown";
-    await supabase
-      .from("ingest_email_files")
-      .update({ 
-        parse_outcome: "failed",
-        parse_status: "failed", 
-        parse_error: `Download failed: ${errorMsg}`,
-        parse_reason: `exception:${errorMsg.substring(0, 200)}`,
-      })
-      .eq("id", fileId);
+    await markIngestEmailFileParseFailed(
+      adminSupabase,
+      fileId,
+      `Download failed: ${errorMsg}`,
+      `exception:${errorMsg.substring(0, 200)}`
+    );
     throw new Error(`Download failed: ${errorMsg}`);
   }
 
@@ -255,15 +246,12 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       parseReason = `exception:${errorMsg.substring(0, 200)}`;
     }
     
-    await supabase
-      .from("ingest_email_files")
-      .update({ 
-        parse_outcome: "failed",
-        parse_status: "failed", 
-        parse_error: `Parse failed: ${parseErr.message}`,
-        parse_reason: parseReason,
-      })
-      .eq("id", fileId);
+    await markIngestEmailFileParseFailed(
+      adminSupabase,
+      fileId,
+      `Parse failed: ${parseErr.message}`,
+      parseReason ?? undefined
+    );
     throw parseErr;
   }
 
@@ -285,19 +273,14 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       extra: "rows_accepted=0",
     });
     console.log(`[parseEmailFile] Holiday Extras 0 accepted rows: ${file.filename}`, parseReason);
-    await supabase
-      .from("ingest_email_files")
-      .update({
-        parse_outcome: "empty",
-        parse_status: "parsed",
-        parsed_at: new Date().toISOString(),
-        parse_error: null,
-        parse_reason: parseReason,
-        parser_key: "holiday_extras_email_import",
-        detected_source: attribution.detectedSource,
-        external_source: attribution.externalSource,
-      })
-      .eq("id", fileId);
+    await finalizeIngestEmailFileParseSuccess(adminSupabase, {
+      fileId,
+      parseReason,
+      parseOutcome: "empty",
+      parserKey: "holiday_extras_email_import",
+      detectedSource: attribution.detectedSource,
+      externalSource: attribution.externalSource,
+    });
     return {
       ok: true,
       fileId: file.id,
@@ -311,20 +294,16 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
 
   if (!parsedData.rows || parsedData.rows.length === 0) {
     console.error(`[parseEmailFile] No valid rows found - file format detected but extracted 0 rows`);
-    await supabase
-      .from("ingest_email_files")
-      .update({ 
-        parse_outcome: "failed",
-        parse_status: "failed", 
-        parse_error: "File format detected but no valid rows extracted. File may be empty or have no data rows.",
-        parse_reason: "no_rows_extracted",
-      })
-      .eq("id", fileId);
+    await markIngestEmailFileParseFailed(
+      adminSupabase,
+      fileId,
+      "File format detected but no valid rows extracted. File may be empty or have no data rows.",
+      "no_rows_extracted"
+    );
     throw new Error("No valid rows found in file");
   }
 
   // 5. Create import run first so we can set run_id on staging rows
-  const adminSupabase = supabaseAdmin();
   const { data: run, error: runErr } = await adminSupabase
     .from("import_runs")
     .insert({
@@ -436,17 +415,12 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       rowsStaged: 0,
       extra: "no_staging_rows_built",
     });
-    await supabase
-      .from("ingest_email_files")
-      .update({
-        parse_outcome: "empty",
-        parse_status: "parsed",
-        parsed_at: new Date().toISOString(),
-        parse_error: null,
-        parse_reason: parseReason,
-        parser_key: winningParserKey,
-      })
-      .eq("id", fileId);
+    await finalizeIngestEmailFileParseSuccess(adminSupabase, {
+      fileId,
+      parseReason,
+      parseOutcome: "empty",
+      parserKey: winningParserKey,
+    });
     return {
       ok: true,
       fileId: file.id,
@@ -471,15 +445,12 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   if (stagingError) {
     const errorMsg = stagingError.message || "unknown error";
     console.error(`[parseEmailFile] Staging upsert failed:`, stagingError);
-    await supabase
-      .from("ingest_email_files")
-      .update({
-        parse_outcome: "failed",
-        parse_status: "failed",
-        parse_error: `Staging upsert failed: ${errorMsg}`,
-        parse_reason: `exception:${errorMsg.substring(0, 200)}`,
-      })
-      .eq("id", fileId);
+    await markIngestEmailFileParseFailed(
+      adminSupabase,
+      fileId,
+      `Staging upsert failed: ${errorMsg}`,
+      `exception:${errorMsg.substring(0, 200)}`
+    );
     throw new Error(`Staging upsert failed: ${errorMsg}`);
   }
 
@@ -493,16 +464,12 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       rowsStaged: 0,
       extra: "staging_upsert_returned_zero",
     });
-    await supabase
-      .from("ingest_email_files")
-      .update({
-        parse_outcome: "failed",
-        parse_status: "failed",
-        parse_error: "Staging upsert returned 0 rows",
-        parse_reason: parseReason,
-        parser_key: winningParserKey,
-      })
-      .eq("id", fileId);
+    await markIngestEmailFileParseFailed(
+      adminSupabase,
+      fileId,
+      "Staging upsert returned 0 rows",
+      parseReason
+    );
     throw new Error("Staging upsert returned 0 rows");
   }
 
@@ -568,12 +535,14 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     rowsErrors: errorCount,
     duplicateDedupeKeys,
   });
-  const parseOutcome = resolveParseOutcome({
+  const resolvedOutcome = resolveParseOutcome({
     rowsAccepted,
     rowsStaged: stagedData.length,
     rowsUpserted: upsertedCount,
     rowsCancelled: cancelledCount,
   });
+  const parseOutcome =
+    upsertedCount > 0 || cancelledCount > 0 ? "parsed" : resolvedOutcome;
 
   if (run?.id) {
     await adminSupabase
@@ -596,33 +565,20 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       .eq("id", run.id);
   }
 
-  const { error: updateError, data: updatedFile } = await supabase
-    .from("ingest_email_files")
-    .update({ 
-      parse_outcome: parseOutcome,
-      parse_status: "parsed",
-      parsed_at: new Date().toISOString(),
-      parse_error: null,
-      parse_reason: parseReasonSummary,
-      // Set attribution fields (single source of truth)
-      parser_key: winningParserKey,
-      detected_source: attribution.detectedSource,
-      external_source: attribution.externalSource,
-      attribution_confidence: winningParserKey === "unknown" ? "fallback" : "parser",
-    })
-    .eq("id", fileId)
-    .select("id, parse_status, parsed_at, parser_key, external_source")
-    .single();
-  
-  if (updateError) {
-    console.error(`[parseEmailFile] ❌ Failed to update file status:`, updateError);
-  } else {
-    console.log(`[parseEmailFile] ✅ File status updated to parsed:`, {
-      fileId: updatedFile?.id,
-      parse_status: updatedFile?.parse_status,
-      parsed_at: updatedFile?.parsed_at,
-    });
-  }
+  await finalizeIngestEmailFileParseSuccess(adminSupabase, {
+    fileId,
+    parseReason: parseReasonSummary,
+    parseOutcome: parseOutcome === "empty" ? "empty" : "parsed",
+    parserKey: winningParserKey,
+    detectedSource: attribution.detectedSource,
+    externalSource: attribution.externalSource,
+    attributionConfidence: winningParserKey === "unknown" ? "fallback" : "parser",
+  });
+  console.log(`[parseEmailFile] ✅ File status updated to parsed:`, {
+    fileId,
+    parse_outcome: parseOutcome,
+    parse_reason: parseReasonSummary,
+  });
 
   return {
     ok: true,

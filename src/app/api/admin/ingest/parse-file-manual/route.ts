@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { parseEmailFile } from "@/lib/ingest/parseEmailFile";
+import { reprocessIngestEmailFile } from "@/lib/ingest/reprocessIngestEmailFile";
 
 export const runtime = "nodejs";
 
@@ -22,7 +22,7 @@ export async function POST(req: Request) {
     console.log(`[parse-file-manual] Manual parse triggered for file ${fileId}, tenant ${tenantId}`);
 
     // Use the shared parse function
-    const result = await parseEmailFile(fileId, tenantId);
+    const result = await reprocessIngestEmailFile(fileId, tenantId);
     
     // result already has 'ok' property, so just return it
     return NextResponse.json(result);

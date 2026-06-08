@@ -119,7 +119,7 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
     setProcessing(prev => new Set(prev).add(fileId));
     try {
       console.log('[EMAIL IMPORTS] Calling parse-file API...');
-      const res = await fetch('/api/admin/ingest/parse-file', {
+      const res = await fetch('/api/admin/imports/reprocess-file', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fileId, tenantId }),
