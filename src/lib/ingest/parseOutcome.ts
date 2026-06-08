@@ -10,6 +10,7 @@ export type BuildParseReasonInput = {
   rowsUpserted?: number;
   rowsCancelled?: number;
   rowsErrors?: number;
+  duplicateDedupeKeys?: number;
   extra?: string;
 };
 
@@ -23,6 +24,9 @@ export function buildParseReasonSummary(input: BuildParseReasonInput): string {
   if (input.rowsUpserted != null) parts.push(`rows_upserted=${input.rowsUpserted}`);
   if (input.rowsCancelled != null) parts.push(`rows_cancelled=${input.rowsCancelled}`);
   if (input.rowsErrors != null) parts.push(`rows_errors=${input.rowsErrors}`);
+  if (input.duplicateDedupeKeys != null && input.duplicateDedupeKeys > 0) {
+    parts.push(`duplicate_dedupe_keys=${input.duplicateDedupeKeys}`);
+  }
   if (input.extra) parts.push(input.extra);
   return parts.join("; ");
 }

@@ -9,6 +9,7 @@ import {
 } from "@/lib/ingest/logBookingPromotionError";
 import { promoteStagingToBookings } from "@/lib/ingest/promoteStagingToBookings";
 import { makeStagingDedupeKey } from "@/lib/ingest/bookingFromStaging";
+import { dedupeStagingRowsByKey } from "@/lib/ingest/dedupeStagingRows";
 import {
   mapSupplierStatusToBookingStatus,
   normalizeSupplierStatus,
@@ -354,7 +355,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   });
 
   // Prepare staging inserts (run_id links to import_runs for apply_import_run RPC)
-  const stagingInserts = parsedData.rows.map((raw) => {
+  const stagingInsertsRaw = parsedData.rows.map((raw) => {
     const channel = (raw as any).channel || "APH";
 
     // Generate dedupe_key (required by staging table)
@@ -413,6 +414,18 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       },
     };
   });
+
+  const {
+    rows: stagingInserts,
+    duplicateDedupeKeys,
+    duplicateRowsCollapsed,
+  } = dedupeStagingRowsByKey(stagingInsertsRaw);
+
+  if (duplicateRowsCollapsed > 0) {
+    console.log(
+      `[parseEmailFile] Collapsed ${duplicateRowsCollapsed} duplicate staging row(s) across ${duplicateDedupeKeys} dedupe_key(s) before upsert`
+    );
+  }
 
   let stagedData: { id: string; external_reference?: string }[] = [];
 
@@ -500,7 +513,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   let errorCount = 0;
 
   const rowIndexByDedupeKey: Record<string, number> = {};
-  stagingInserts.forEach((s, idx) => {
+  stagingInsertsRaw.forEach((s, idx) => {
     rowIndexByDedupeKey[s.dedupe_key as string] = idx;
   });
 
@@ -553,6 +566,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     rowsUpserted: upsertedCount,
     rowsCancelled: cancelledCount,
     rowsErrors: errorCount,
+    duplicateDedupeKeys,
   });
   const parseOutcome = resolveParseOutcome({
     rowsAccepted,
