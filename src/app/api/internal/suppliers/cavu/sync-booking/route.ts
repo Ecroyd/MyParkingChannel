@@ -4,6 +4,20 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { getCavuConfigForTenant } from '@/lib/suppliers/getTenantSupplierConfig';
 import { getBookingDetails } from '@/lib/suppliers/cavu';
 
+const SUPPLIER_CODE = 'cavu';
+const BOOKING_SOURCE = 'cavu';
+const BOOKING_CONFLICT_TARGET = 'tenant_id,source,reference';
+
+function formatUpsertError(tableName: string, reference: string, error: { message?: string } | null) {
+  return [
+    `supplier_code=${SUPPLIER_CODE}`,
+    `reference=${reference}`,
+    `table=${tableName}`,
+    `conflict_target=${BOOKING_CONFLICT_TARGET}`,
+    `postgres_error=${error?.message ?? 'Unknown Postgres error'}`,
+  ].join(' ');
+}
+
 export async function POST(req: NextRequest) {
   const tenantId = req.nextUrl.searchParams.get('tenantId');
   const reference = req.nextUrl.searchParams.get('reference');
@@ -89,6 +103,7 @@ export async function POST(req: NextRequest) {
     const row = {
       tenant_id: tenantId,
       reference: booking.Reference,
+      external_source: SUPPLIER_CODE,
       start_at: booking.ArrivalDate,
       end_at: booking.DepartureDate,
       customer_name: customerName,
@@ -104,27 +119,30 @@ export async function POST(req: NextRequest) {
       outbound_terminal: booking.OutboundTerminal ?? null,
       return_terminal: booking.ReturnTerminal ?? null,
       flight_date: flightDate,
-      source: 'cavu',
+      source: BOOKING_SOURCE,
       status: mapCavuStatus(booking.Status),
       money_received: booking.AmountPaid ?? 0,
       money_charged: booking.AmountPaid ?? 0,
       notes: booking.SpecialRequests ?? null,
       is_incomplete: isIncomplete,
       missing_fields: missingFields,
+      updated_at: new Date().toISOString(),
     };
 
     const { data: upsertedBooking, error } = await supabase
       .from('bookings')
       .upsert(row as any, {
-        onConflict: 'tenant_id,reference',
+        onConflict: BOOKING_CONFLICT_TARGET,
+        ignoreDuplicates: false,
       } as any)
       .select('id, tenant_id, reference')
       .single();
 
     if (error) {
-      console.error('[CAVU SYNC BOOKING] Upsert failed', error);
+      const msg = formatUpsertError('bookings', reference, error);
+      console.error('[CAVU SYNC BOOKING] Upsert failed', msg, error);
       return NextResponse.json(
-        { ok: false, error: `Failed to upsert booking: ${error.message}` },
+        { ok: false, error: `Failed to upsert booking: ${msg}` },
         { status: 500 }
       );
     }
@@ -136,16 +154,18 @@ export async function POST(req: NextRequest) {
         .upsert({
           tenant_id: upsertedBooking.tenant_id,
           booking_id: upsertedBooking.id,
-          source: 'cavu',
+          source: BOOKING_SOURCE,
           reference: upsertedBooking.reference,
           payload: booking as any,
           fetched_at: new Date().toISOString(),
         } as any, {
-          onConflict: 'tenant_id,source,reference',
+          onConflict: BOOKING_CONFLICT_TARGET,
+          ignoreDuplicates: false,
         } as any);
 
       if (payloadError) {
-        console.warn('[CAVU SYNC BOOKING] Failed to save payload:', payloadError.message);
+        const msg = formatUpsertError('booking_external_payloads', reference, payloadError);
+        console.warn('[CAVU SYNC BOOKING] Failed to save payload:', msg, payloadError);
         // Don't fail the request if payload save fails
       }
     }

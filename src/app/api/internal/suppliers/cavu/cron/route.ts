@@ -7,6 +7,10 @@ import { deliverAlert } from '@/lib/suppliers/alertDelivery';
 import { logRequestAttribution, validateCronAuth } from '@/lib/jobSecret';
 import { writeCavuHealthForTenant } from '@/lib/health/cavuWrite';
 
+const SUPPLIER_CODE = 'cavu';
+const BOOKING_SOURCE = 'cavu';
+const BOOKING_CONFLICT_TARGET = 'tenant_id,source,reference';
+
 /**
  * Calculate hours to sync based on last_synced_at.
  * Returns null if no last_synced_at exists.
@@ -58,6 +62,16 @@ async function updateLastSyncedAt(tenantId: string, supabase: ReturnType<typeof 
   if (updateError) {
     console.error('[CAVU CRON] Failed to update last_synced_at', tenantId, updateError);
   }
+}
+
+function formatUpsertError(tableName: string, reference: string, error: { message?: string } | null) {
+  return [
+    `supplier_code=${SUPPLIER_CODE}`,
+    `reference=${reference}`,
+    `table=${tableName}`,
+    `conflict_target=${BOOKING_CONFLICT_TARGET}`,
+    `postgres_error=${error?.message ?? 'Unknown Postgres error'}`,
+  ].join(' ');
 }
 
 async function runCavuCron(req?: NextRequest) {
@@ -199,7 +213,7 @@ async function runCavuCron(req?: NextRequest) {
             .from('bookings')
             .select('reference')
             .eq('tenant_id', tenantId)
-            .eq('source', 'cavu')
+            .eq('source', BOOKING_SOURCE)
             .eq('is_incomplete', true)
             .limit(25);
 
@@ -260,6 +274,7 @@ async function runCavuCron(req?: NextRequest) {
                       .upsert({
                         tenant_id: tenantId,
                         reference: healBooking.Reference,
+                        external_source: SUPPLIER_CODE,
                         start_at: healBooking.ArrivalDate,
                         end_at: healBooking.DepartureDate,
                         customer_name: customerName,
@@ -275,37 +290,46 @@ async function runCavuCron(req?: NextRequest) {
                         outbound_terminal: healBooking.OutboundTerminal ?? null,
                         return_terminal: healBooking.ReturnTerminal ?? null,
                         flight_date: flightDate,
-                        source: 'cavu',
+                        source: BOOKING_SOURCE,
                         status: mapCavuStatus(healBooking.Status),
                         money_received: healBooking.AmountPaid ?? 0,
                         money_charged: healBooking.AmountPaid ?? 0,
                         notes: healBooking.SpecialRequests ?? null,
                         is_incomplete: healIsIncomplete,
                         missing_fields: healMissingFields,
+                        updated_at: new Date().toISOString(),
                       } as any, {
-                        onConflict: 'tenant_id,reference',
+                        onConflict: BOOKING_CONFLICT_TARGET,
+                        ignoreDuplicates: false,
                       } as any)
                       .select('id, tenant_id, reference')
                       .single();
 
                     if (!healError && healedBooking?.id) {
                       // Save full booking payload to booking_external_payloads
-                      await supabase
+                      const { error: payloadError } = await supabase
                         .from('booking_external_payloads')
                         .upsert({
                           tenant_id: tenantId,
                           booking_id: healedBooking.id,
-                          source: 'cavu',
+                          source: BOOKING_SOURCE,
                           reference: healBooking.Reference,
                           payload: healBooking as any,
                           fetched_at: new Date().toISOString(),
                         } as any, {
-                          onConflict: 'tenant_id,source,reference',
+                          onConflict: BOOKING_CONFLICT_TARGET,
+                          ignoreDuplicates: false,
                         } as any);
+
+                      if (payloadError) {
+                        console.warn('[CAVU CRON] Heal payload upsert failed', formatUpsertError('booking_external_payloads', healBooking.Reference, payloadError), payloadError);
+                      }
                     }
 
                     if (!healError) {
                       healedCount++;
+                    } else {
+                      console.warn('[CAVU CRON] Heal booking upsert failed', formatUpsertError('bookings', healBooking.Reference, healError), healError);
                     }
                   }
                   // Small delay to avoid rate limits

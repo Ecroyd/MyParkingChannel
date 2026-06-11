@@ -9,6 +9,10 @@ import {
   CavuEvent,
 } from './cavu';
 
+const SUPPLIER_CODE = 'cavu';
+const BOOKING_SOURCE = 'cavu';
+const BOOKING_CONFLICT_TARGET = 'tenant_id,source,reference';
+
 export type CavuEventsSyncOptions = {
   hours?: number; // how far back to look
 };
@@ -58,6 +62,16 @@ function getCavuEventReference(event: any): string | null {
   }
   
   return null;
+}
+
+function formatUpsertError(tableName: string, reference: string, error: { message?: string } | null) {
+  return [
+    `supplier_code=${SUPPLIER_CODE}`,
+    `reference=${reference}`,
+    `table=${tableName}`,
+    `conflict_target=${BOOKING_CONFLICT_TARGET}`,
+    `postgres_error=${error?.message ?? 'Unknown Postgres error'}`,
+  ].join(' ');
 }
 
 export async function syncCavuEventsForTenant(
@@ -139,6 +153,7 @@ export async function syncCavuEventsForTenant(
         .from('bookings')
         .update({ status: 'cancelled' })
         .eq('tenant_id', tenantId)
+        .eq('source', BOOKING_SOURCE)
         .eq('reference', ref);
 
       if (error) {
@@ -224,6 +239,7 @@ export async function syncCavuEventsForTenant(
     const row = {
       tenant_id: tenantId,
       reference: booking.Reference,
+      external_source: SUPPLIER_CODE,
       start_at: booking.ArrivalDate,
       end_at: booking.DepartureDate,
       customer_name: customerName,
@@ -239,25 +255,29 @@ export async function syncCavuEventsForTenant(
       outbound_terminal: booking.OutboundTerminal ?? null,
       return_terminal: booking.ReturnTerminal ?? null,
       flight_date: flightDate,
-      source: 'cavu',
+      source: BOOKING_SOURCE,
       status: mapCavuStatus(booking.Status),
       money_received: booking.AmountPaid ?? 0,
       money_charged: booking.AmountPaid ?? 0,
       notes: booking.SpecialRequests ?? null,
       is_incomplete: isIncomplete,
       missing_fields: missingFields,
+      updated_at: new Date().toISOString(),
     };
 
     const { data: upsertedBooking, error } = await supabase
       .from('bookings')
       .upsert(row as any, {
-        onConflict: 'tenant_id,reference',
+        onConflict: BOOKING_CONFLICT_TARGET,
+        ignoreDuplicates: false,
       } as any)
       .select('id, tenant_id, reference')
       .single();
 
     if (error) {
-      errors.push(`Upsert failed for ${ref}: ${error.message}`);
+      const msg = formatUpsertError('bookings', ref, error);
+      console.error('[CAVU SYNC] Upsert failed', msg, error);
+      errors.push(`Upsert failed: ${msg}`);
     } else {
       bookingsUpserted++;
 
@@ -268,17 +288,19 @@ export async function syncCavuEventsForTenant(
           .upsert({
             tenant_id: upsertedBooking.tenant_id,
             booking_id: upsertedBooking.id,
-            source: 'cavu',
+            source: BOOKING_SOURCE,
             reference: upsertedBooking.reference,
             payload: booking as any,
             fetched_at: new Date().toISOString(),
           } as any, {
-            onConflict: 'tenant_id,source,reference',
+            onConflict: BOOKING_CONFLICT_TARGET,
+            ignoreDuplicates: false,
           } as any);
 
         if (payloadError) {
           // Log but don't fail the sync if payload save fails
-          console.warn(`[CAVU SYNC] Failed to save payload for ${ref}:`, payloadError.message);
+          const msg = formatUpsertError('booking_external_payloads', ref, payloadError);
+          console.warn('[CAVU SYNC] Failed to save payload', msg, payloadError);
         }
       }
     }

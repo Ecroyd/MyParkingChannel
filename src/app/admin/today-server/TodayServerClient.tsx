@@ -321,41 +321,49 @@ export default function TodayServerClient({
     return sortBookings(departures, departuresSort, 'end_at');
   }, [departures, departuresSort]);
 
-  // One central filter: hidden (Show hidden), cancelled, then Keys Taken / Arrived & Key Taken.
-  // Bookings with status cancelled or ops_hidden are hidden by default; "Show hidden" reveals them.
-  function applyStatusFilters<T extends { ops_hidden?: boolean; gate_status?: string | null; status?: string }>(bookings: T[]): T[] {
+  function isCancelledBooking(b: { gate_status?: string | null; status?: string }) {
+    return b.status === 'cancelled' || b.gate_status === GATE_STATUS.CANCELLED;
+  }
+
+  function isNoShowBooking(b: { gate_status?: string | null }) {
+    return b.gate_status === GATE_STATUS.NO_SHOW;
+  }
+
+  function matchesKeyFilters<T extends { gate_status?: string | null }>(b: T) {
+    if (filterArrivedKeyTaken) return b.gate_status === GATE_STATUS.ARRIVED_KEY_TAKEN;
+    if (filterKeysTaken) return b.gate_status === GATE_STATUS.TAKE_KEY || b.gate_status === GATE_STATUS.ARRIVED_KEY_TAKEN;
+    return true;
+  }
+
+  // Operational lists hide cancelled bookings permanently; reports still retain the records.
+  function applyStatusFilters<T extends { ops_hidden?: boolean; gate_status?: string | null; status?: string }>(
+    bookings: T[],
+    section: 'arrivals' | 'departures'
+  ): T[] {
     return bookings.filter((b) => {
-      if (!showHidden && (b.ops_hidden || b.status === 'cancelled')) return false;
-      if (filterArrivedKeyTaken) return b.gate_status === 'arrived_key_taken';
-      if (filterKeysTaken) return b.gate_status === 'take_key' || b.gate_status === 'arrived_key_taken';
-      return true;
+      if (isCancelledBooking(b)) return false;
+      if (section === 'departures' && isNoShowBooking(b)) return false;
+      if (!showHidden && b.ops_hidden && !(section === 'arrivals' && isNoShowBooking(b))) return false;
+      return matchesKeyFilters(b);
     });
   }
 
   const visibleArrivals = useMemo(() => {
-    const filtered = applyStatusFilters(sortedArrivals);
-    // Always show cancelled arrivals (red row); they are removed from departures below
-    const cancelledArrivals = sortedArrivals.filter((b) => b.gate_status === GATE_STATUS.CANCELLED);
-    const filteredIds = new Set(filtered.map((b) => b.id));
-    const extra = cancelledArrivals.filter((b) => !filteredIds.has(b.id));
-    return [...filtered, ...extra];
+    return applyStatusFilters(sortedArrivals, 'arrivals');
   }, [sortedArrivals, showHidden, filterKeysTaken, filterArrivedKeyTaken]);
 
   const visibleDepartures = useMemo(() => {
-    const filtered = applyStatusFilters(sortedDepartures);
+    const filtered = applyStatusFilters(sortedDepartures, 'departures');
     // Hide departures marked as "Departed" unless "Show hidden" is on
-    const withoutDeparted = showHidden ? filtered : filtered.filter((b) => b.gate_status !== GATE_STATUS.DEPARTED);
-    // Remove cancelled from departures list (they stay on arrivals only, highlighted red)
-    return withoutDeparted.filter((b) => b.gate_status !== GATE_STATUS.CANCELLED);
+    return showHidden ? filtered : filtered.filter((b) => b.gate_status !== GATE_STATUS.DEPARTED);
   }, [sortedDepartures, showHidden, filterKeysTaken, filterArrivedKeyTaken]);
 
-  // Counts for filter buttons (among rows visible when Show hidden is considered; cancelled hidden by default)
+  // Counts for filter buttons (among rows visible when Show hidden is considered; cancelled/no-show departures excluded)
   const allVisibleToday = useMemo(() => {
-    const hide = (b: Booking) => b.ops_hidden || b.status === 'cancelled';
-    const a = showHidden ? sortedArrivals : sortedArrivals.filter((b) => !hide(b as Booking));
-    const d = showHidden ? sortedDepartures : sortedDepartures.filter((b) => !hide(b as Booking));
+    const a = applyStatusFilters(sortedArrivals, 'arrivals');
+    const d = applyStatusFilters(sortedDepartures, 'departures');
     return [...a, ...d];
-  }, [sortedArrivals, sortedDepartures, showHidden]);
+  }, [sortedArrivals, sortedDepartures, showHidden, filterKeysTaken, filterArrivedKeyTaken]);
 
   const keysTakenCount = useMemo(
     () => allVisibleToday.filter((b) => b.gate_status === 'take_key' || b.gate_status === 'arrived_key_taken').length,
@@ -646,10 +654,14 @@ export default function TodayServerClient({
               ? { ops_hidden: Boolean(b.ops_hidden), ops_hidden_reason: (b.ops_hidden_reason as string | null) ?? null }
               : {}),
           };
-          setArrivals((prev) => prev.map((x) => (x.id === booking.id ? updated : x)));
+          setArrivals((prev) => {
+            const nextList = prev.map((x) => (x.id === booking.id ? updated : x));
+            if (next === GATE_STATUS.CANCELLED) return nextList.filter((x) => x.id !== booking.id);
+            return nextList;
+          });
           setDepartures((prev) => {
             const nextList = prev.map((x) => (x.id === booking.id ? updated : x));
-            if (next === GATE_STATUS.DEPARTED || next === GATE_STATUS.CANCELLED) return nextList.filter((x) => x.id !== booking.id);
+            if (next === GATE_STATUS.DEPARTED || next === GATE_STATUS.CANCELLED || next === GATE_STATUS.NO_SHOW) return nextList.filter((x) => x.id !== booking.id);
             return nextList;
           });
           setCurrentlyParked((prev) => prev.map((x) => (x.id === booking.id ? updated : x)));

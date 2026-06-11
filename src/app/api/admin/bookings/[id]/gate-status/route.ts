@@ -95,10 +95,10 @@ export async function PATCH(
       case 'no_show':
         updates = {
           ...updates,
-          ops_hidden: true,
-          ops_hidden_reason: 'no_show',
-          ops_hidden_at: now,
-          ops_hidden_by: userId,
+          ops_hidden: false,
+          ops_hidden_reason: null,
+          ops_hidden_at: null,
+          ops_hidden_by: null,
         };
         break;
       case 'take_key':
@@ -186,4 +186,3 @@ export async function PATCH(
     );
   }
 }
-

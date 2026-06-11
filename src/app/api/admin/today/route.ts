@@ -6,6 +6,14 @@ import { calculateCapacityForDate } from '@/lib/capacity/rolling';
 
 export const dynamic = "force-dynamic";
 
+function isCancelledBooking(booking: { status?: string | null; gate_status?: string | null }) {
+  return booking.status === 'cancelled' || booking.gate_status === 'cancelled';
+}
+
+function isNoShowBooking(booking: { gate_status?: string | null }) {
+  return booking.gate_status === 'no_show';
+}
+
 export async function GET(request: NextRequest) {
   try {
     const url = new URL(request.url);
@@ -93,7 +101,7 @@ export async function GET(request: NextRequest) {
     const now = new Date();
     const { data: currentlyParkedNow } = await adminClient
       .from('bookings')
-      .select('id')
+      .select('id, status, gate_status')
       .eq('tenant_id', tenantId)
       .lte('start_at', now.toISOString())
       .gte('end_at', now.toISOString())
@@ -115,12 +123,23 @@ export async function GET(request: NextRequest) {
     const todayCapacity = await calculateCapacityForDate(tenantId, todayStr);
     const totalCapacity = todayCapacity ?? 0;
 
+    const operationalArrivals = (arrivals || []).filter((booking) => !isCancelledBooking(booking));
+    const operationalDepartures = (departures || []).filter(
+      (booking) => !isCancelledBooking(booking) && !isNoShowBooking(booking)
+    );
+    const operationalCurrentlyParked = (currentlyParked || []).filter(
+      (booking) => !isCancelledBooking(booking) && !isNoShowBooking(booking)
+    );
+    const operationalCurrentlyParkedNow = (currentlyParkedNow || []).filter(
+      (booking) => !isCancelledBooking(booking) && !isNoShowBooking(booking)
+    );
+
     // Calculate KPIs
     const kpis = {
-      arrivals: arrivals?.length || 0,
-      departures: departures?.length || 0,
-      checkedIn: currentlyParkedNow?.length || 0, // Currently parked right now
-      capacityLeft: Math.max(0, totalCapacity - (currentlyParkedNow?.length || 0)),
+      arrivals: operationalArrivals.length,
+      departures: operationalDepartures.length,
+      checkedIn: operationalCurrentlyParkedNow.length, // Currently parked right now
+      capacityLeft: Math.max(0, totalCapacity - operationalCurrentlyParkedNow.length),
       totalRevenue
     };
 
@@ -128,9 +147,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       tenant,
       kpis,
-      arrivals: arrivals || [],
-      departures: departures || [],
-      currentlyParked: currentlyParked || []
+      arrivals: operationalArrivals,
+      departures: operationalDepartures,
+      currentlyParked: operationalCurrentlyParked
     });
 
   } catch (error) {

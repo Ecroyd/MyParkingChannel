@@ -59,12 +59,17 @@ export async function PATCH(
         (updates as Record<string, string>).highlight_code = 'key';
       }
 
-      // Soft-hide: when Departed or No Show, set ops_hidden so UI filters by default; "Show hidden" reveals
-      if (opsStatus === OPS_STATUS.DEPARTED || opsStatus === OPS_STATUS.NO_SHOW) {
+      // Soft-hide departed rows. No Show remains visible in arrivals with red row styling.
+      if (opsStatus === OPS_STATUS.DEPARTED) {
         updates.ops_hidden = true;
         updates.ops_hidden_reason = opsStatus;
         updates.ops_hidden_at = now;
         updates.ops_hidden_by = userId;
+      } else if (opsStatus === OPS_STATUS.NO_SHOW) {
+        updates.ops_hidden = false;
+        updates.ops_hidden_reason = null;
+        updates.ops_hidden_at = null;
+        updates.ops_hidden_by = null;
       }
     }
 

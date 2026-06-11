@@ -4,6 +4,10 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { getCavuConfigForTenant } from '@/lib/suppliers/getTenantSupplierConfig';
 import { getRecentEvents, getBookingDetails } from '@/lib/suppliers/cavu';
 
+const SUPPLIER_CODE = 'cavu';
+const BOOKING_SOURCE = 'cavu';
+const BOOKING_CONFLICT_TARGET = 'tenant_id,source,reference';
+
 /**
  * Robustly extract booking reference from a CAVU event.
  * Checks multiple possible property names and nested structures.
@@ -40,6 +44,16 @@ function getCavuEventReference(event: any): string | null {
   }
   
   return null;
+}
+
+function formatUpsertError(tableName: string, reference: string, error: { message?: string } | null) {
+  return [
+    `supplier_code=${SUPPLIER_CODE}`,
+    `reference=${reference}`,
+    `table=${tableName}`,
+    `conflict_target=${BOOKING_CONFLICT_TARGET}`,
+    `postgres_error=${error?.message ?? 'Unknown Postgres error'}`,
+  ].join(' ');
 }
 
 const DEFAULT_HOURS = 4;
@@ -119,6 +133,7 @@ export async function GET(req: NextRequest) {
           {
             tenant_id: tenantId,
             reference: booking.Reference,
+            external_source: SUPPLIER_CODE,
             customer_name: customerName,
             customer_email: booking.Customer?.Email ?? null,
             plate: plate,
@@ -128,18 +143,21 @@ export async function GET(req: NextRequest) {
             start_at: booking.ArrivalDate,
             end_at: booking.DepartureDate,
             status: mapCavuStatus(booking.Status),
-            source: 'cavu',
+            source: BOOKING_SOURCE,
             money_received: 0,
             money_charged: 0,
             notes: booking.SpecialRequests ?? null,
+            updated_at: new Date().toISOString(),
           },
           {
-            onConflict: 'tenant_id,reference',
+            onConflict: BOOKING_CONFLICT_TARGET,
+            ignoreDuplicates: false,
           } as any // Supabase type quirk
         );
 
         if (error) {
-          console.error('[CAVU] Upsert booking error', error);
+          const msg = formatUpsertError('bookings', ref, error);
+          console.error('[CAVU] Upsert booking error', msg, error);
         } else {
           processed++;
         }
@@ -150,6 +168,7 @@ export async function GET(req: NextRequest) {
           .from('bookings')
           .update({ status: 'cancelled' })
           .eq('tenant_id', tenantId)
+          .eq('source', BOOKING_SOURCE)
           .eq('reference', ref);
 
         if (error) {
@@ -171,4 +190,3 @@ export async function GET(req: NextRequest) {
     );
   }
 }
-

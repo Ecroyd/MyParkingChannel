@@ -4,6 +4,14 @@ import TodayServerClient from './TodayServerClient';
 import { getTenantDateRange } from '@/lib/timezone';
 import { calculateCapacityForDate } from '@/lib/capacity/rolling';
 
+function isCancelledBooking(booking: { status?: string | null; gate_status?: string | null }) {
+  return booking.status === 'cancelled' || booking.gate_status === 'cancelled';
+}
+
+function isNoShowBooking(booking: { gate_status?: string | null }) {
+  return booking.gate_status === 'no_show';
+}
+
 export default async function TodayServerPage() {
   const supabase = await createServerClient();
   const adminClient = await createAdminClient();
@@ -89,12 +97,20 @@ export default async function TodayServerPage() {
     const todayCapacity = await calculateCapacityForDate(tenant.id, todayStr);
     const totalCapacity = todayCapacity ?? 0;
 
+    const operationalArrivals = (arrivals || []).filter((booking) => !isCancelledBooking(booking));
+    const operationalDepartures = (departures || []).filter(
+      (booking) => !isCancelledBooking(booking) && !isNoShowBooking(booking)
+    );
+    const operationalCurrentlyParked = (currentlyParked || []).filter(
+      (booking) => !isCancelledBooking(booking) && !isNoShowBooking(booking)
+    );
+
     // Calculate KPIs
     const kpis = {
-      arrivals: arrivals?.length || 0,
-      departures: departures?.length || 0,
-      checkedIn: currentlyParked?.length || 0,
-      capacityLeft: Math.max(0, totalCapacity - (currentlyParked?.length || 0)),
+      arrivals: operationalArrivals.length,
+      departures: operationalDepartures.length,
+      checkedIn: operationalCurrentlyParked.length,
+      capacityLeft: Math.max(0, totalCapacity - operationalCurrentlyParked.length),
       totalRevenue
     };
 
@@ -102,9 +118,9 @@ export default async function TodayServerPage() {
       <TodayServerClient 
         tenant={tenant}
         kpis={kpis}
-        arrivals={arrivals || []}
-        departures={departures || []}
-        currentlyParked={currentlyParked || []}
+        arrivals={operationalArrivals}
+        departures={operationalDepartures}
+        currentlyParked={operationalCurrentlyParked}
       />
     );
 
