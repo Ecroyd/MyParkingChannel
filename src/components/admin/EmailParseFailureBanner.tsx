@@ -26,10 +26,12 @@ interface ParseHealthStatus {
   failedFiles: ParseFailure[];
   pendingFiles: ParseFailure[];
   emptyParsedFiles: ParseFailure[];
+  unparsedReceivedGroups?: Record<string, unknown[]>;
   summary: {
     failedCount: number;
     stuckPendingCount: number;
     emptyParsedCount: number;
+    unparsedReceivedCount?: number;
   };
 }
 
@@ -58,7 +60,11 @@ export function EmailParseFailureBanner({ emailParse, isLoading, onRefetch }: Em
   if (!emailParse || !emailParse.hasIssues || !isVisible) return null;
 
   const status = emailParse;
-  const totalIssues = status.summary.failedCount + status.summary.stuckPendingCount + status.summary.emptyParsedCount;
+  const totalIssues =
+    status.summary.failedCount +
+    status.summary.stuckPendingCount +
+    status.summary.emptyParsedCount +
+    (status.summary.unparsedReceivedCount ?? 0);
   const recentFailures = status.failedFiles.slice(0, 3);
   const recentStuck = status.pendingFiles.slice(0, 2);
   const recentEmpty = status.emptyParsedFiles.slice(0, 2);

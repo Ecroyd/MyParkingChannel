@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/server-admin';
 import { isBookingCapableFile, isImageFile } from '@/lib/ingest/fileTypeUtils';
 import { isFileParseFailedForBanner } from '@/lib/ingest/ingestEmailFileStatus';
+import { looksLikeFlyparksDirectEmail } from '@/lib/ingest/flyparksTextToStaging';
 
 function getEmailTenantMap(): Record<string, string> {
   if (process.env.EMAIL_TENANT_MAP) {
@@ -33,7 +34,27 @@ export interface EmailParseHealthResult {
   failedFiles: any[];
   pendingFiles: any[];
   emptyParsedFiles: any[];
-  summary: { failedCount: number; stuckPendingCount: number; emptyParsedCount: number };
+  unparsedReceivedGroups: Record<string, any[]>;
+  summary: {
+    failedCount: number;
+    stuckPendingCount: number;
+    emptyParsedCount: number;
+    unparsedReceivedCount: number;
+  };
+}
+
+function classifyUnparsedEmail(email: any): string {
+  const subject = String(email.subject ?? '');
+  const files = (email.ingest_email_files ?? []) as any[];
+  const filenames = files.map((f) => String(f.filename ?? '').toLowerCase()).join(' ');
+  const contentTypes = files.map((f) => String(f.content_type ?? '').toLowerCase()).join(' ');
+  const haystack = `${subject} ${filenames} ${contentTypes}`;
+
+  if (looksLikeFlyparksDirectEmail(subject, haystack)) return 'direct Flyparks text email';
+  if (/ext\d|holiday\s*extras/i.test(haystack)) return 'Holiday Extras attachment';
+  if (/\baph\b/i.test(haystack)) return 'APH attachment';
+  if (/cavu|hourly|hourly order report/i.test(haystack)) return 'CAVU/hourly report';
+  return 'unknown';
 }
 
 export async function getEmailParseHealth(tenantId: string): Promise<EmailParseHealthResult> {
@@ -215,16 +236,53 @@ export async function getEmailParseHealth(tenantId: string): Promise<EmailParseH
   const hasStuckPending = pendingFiles.length > 0;
   const hasEmptyParses = parsedWithIssues.length > 0;
 
+  const { data: receivedEmails } = await adminClient
+    .from('ingest_emails')
+    .select(`
+      id, from_address, to_address, subject, status, created_at,
+      ingest_email_files(id, filename, content_type, parse_status, parse_outcome, parse_error, created_at),
+      ingest_email_parses(id, parse_status, parse_error, parsed_at)
+    `)
+    .eq('status', 'received')
+    .lt('created_at', new Date(Date.now() - 5 * 60 * 1000).toISOString())
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  const unparsedReceivedGroups: Record<string, any[]> = {
+    'direct Flyparks text email': [],
+    'Holiday Extras attachment': [],
+    'APH attachment': [],
+    'CAVU/hourly report': [],
+    unknown: [],
+  };
+
+  for (const email of receivedEmails || []) {
+    const emailTenantId = detectTenantFromEmail(email);
+    if (emailTenantId !== tenantId) continue;
+    const parses = (email as any).ingest_email_parses ?? [];
+    const hasTerminalParse = parses.some((p: any) => p.parse_status === 'parsed' || p.parse_status === 'failed');
+    if (hasTerminalParse) continue;
+    const group = classifyUnparsedEmail(email);
+    unparsedReceivedGroups[group].push(email);
+  }
+
+  const unparsedReceivedCount = Object.values(unparsedReceivedGroups).reduce(
+    (sum, group) => sum + group.length,
+    0
+  );
+
   return {
     ok: true,
-    hasIssues: hasFailures || hasStuckPending || hasEmptyParses,
+    hasIssues: hasFailures || hasStuckPending || hasEmptyParses || unparsedReceivedCount > 0,
     failedFiles,
     pendingFiles,
     emptyParsedFiles: parsedWithIssues,
+    unparsedReceivedGroups,
     summary: {
       failedCount: failedFiles.length,
       stuckPendingCount: pendingFiles.length,
       emptyParsedCount: parsedWithIssues.length,
+      unparsedReceivedCount,
     },
   };
 }

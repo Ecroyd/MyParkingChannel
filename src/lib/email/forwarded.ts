@@ -5,7 +5,7 @@ type ForwardExtractInput = {
 };
 
 const FORWARD_SUBJECT_RE = /^\s*(fw|fwd)\s*:\s*/i;
-const FLYPARKS_PAYMENT_SUBJECT_RE = /flyparks\s+payment\s+successful/i;
+const FLYPARKS_DIRECT_SUBJECT_RE = /flyparks\s+(payment\s+successful|booking\s+confirmation)/i;
 
 // Common markers used by Gmail/Outlook/clients when forwarding
 const FORWARD_BODY_MARKERS = [
@@ -104,9 +104,9 @@ export function getParsableBodyForDirectBooking(input: ForwardExtractInput) {
 
   // Only apply forward-extraction for the specific flow you described
   const isForward = FORWARD_SUBJECT_RE.test(subject);
-  const isFlyparksPayment = FLYPARKS_PAYMENT_SUBJECT_RE.test(subject);
+  const isFlyparksDirect = FLYPARKS_DIRECT_SUBJECT_RE.test(subject);
 
-  if (!isForward || !isFlyparksPayment) {
+  if (!isForward || !isFlyparksDirect) {
     // still strip obvious noise
     return stripSignatureAndNoise(rawText);
   }

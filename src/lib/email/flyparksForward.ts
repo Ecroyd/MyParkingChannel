@@ -3,14 +3,10 @@ type ExtractInput = {
   text: string;
 };
 
+import { normalizeFlyparksEmailText } from "@/lib/ingest/flyparksTextToStaging";
+
 const normalize = (s: string) =>
-  s
-    .replace(/\r\n/g, "\n")
-    .replace(/\u00A0/g, " ")
-    .replace(/=\n/g, "") // quoted-printable soft line breaks
-    .replace(/=([0-9A-F]{2})/gi, (_, hex) =>
-      String.fromCharCode(parseInt(hex, 16))
-    );
+  normalizeFlyparksEmailText(s);
 
 /**
  * Extract the *actual* Flyparks booking receipt from a forwarded email.
@@ -21,7 +17,7 @@ export function extractFlyparksReceiptFromForward(input: ExtractInput): string {
   const text = normalize(input.text || "");
 
   const isFlyparksFw =
-    /^fwd?:/i.test(subject) && /flyparks payment successful/i.test(subject);
+    /^fwd?:/i.test(subject) && /flyparks\s+(payment successful|booking confirmation)/i.test(subject);
 
   if (!isFlyparksFw) {
     // If it's not a forward, just return the whole text.
@@ -48,8 +44,7 @@ export function extractFlyparksReceiptFromForward(input: ExtractInput): string {
   // Final fallback: if we can find "Vehicle registration:" which is a stable field
   const idxVehicle = text.toLowerCase().indexOf("vehicle registration:");
   if (idxVehicle >= 0) {
-    // go a bit earlier so you still capture the other fields above
-    return text.slice(Math.max(0, idxVehicle - 800)).trim();
+    return text.trim();
   }
 
   return text.trim();
@@ -68,8 +63,8 @@ export function guessFlyparksFields(receipt: string): {
     receipt.match(/\b([A-Z0-9]{6,8})\b/)?.[1];
 
   const reference =
-    receipt.match(/^\s*Reference:\s*\n?\s*([0-9]{3,12})\s*$/im)?.[1] ||
-    receipt.match(/\bReference:\s*([0-9]{3,12})\b/i)?.[1];
+    receipt.match(/^\s*(?:Booking\s+)?Reference:\s*\n?\s*([A-Z0-9-]{3,20})\s*$/im)?.[1] ||
+    receipt.match(/\b(?:Booking\s+)?Reference:\s*([A-Z0-9-]{3,20})\b/i)?.[1];
 
   return { plate, reference };
 }

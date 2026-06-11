@@ -37,10 +37,25 @@ interface ParseHealthStatus {
   failedFiles: EmailFile[];
   pendingFiles: EmailFile[];
   emptyParsedFiles: EmailFile[];
+  unparsedReceivedGroups?: Record<string, Array<{
+    id: string;
+    from_address: string | null;
+    to_address?: string | null;
+    subject: string | null;
+    status: string;
+    created_at: string;
+    ingest_email_files?: Array<{
+      id: string;
+      filename: string;
+      parse_status: string;
+      parse_error?: string | null;
+    }>;
+  }>>;
   summary: {
     failedCount: number;
     stuckPendingCount: number;
     emptyParsedCount: number;
+    unparsedReceivedCount?: number;
   };
 }
 
@@ -85,6 +100,7 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
         failedCount: data.failedFiles?.length || 0,
         pendingCount: data.pendingFiles?.length || 0,
         emptyCount: data.emptyParsedFiles?.length || 0,
+        unparsedReceivedCount: data.summary?.unparsedReceivedCount || 0,
       });
       if (data.ok) {
         setStatus(data);
@@ -317,7 +333,7 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
       </Card>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card className="bg-white shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-medium text-slate-500">Failed Files</CardTitle>
@@ -342,7 +358,56 @@ export default function EmailImportsClient({ tenantId }: { tenantId: string }) {
             <div className="text-2xl font-bold text-orange-600">{status.summary.emptyParsedCount}</div>
           </CardContent>
         </Card>
+        <Card className="bg-white shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium text-slate-500">Received Not Parsed</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-purple-600">{status.summary.unparsedReceivedCount ?? 0}</div>
+          </CardContent>
+        </Card>
       </div>
+
+      {(status.summary.unparsedReceivedCount ?? 0) > 0 && (
+        <Card className="bg-white shadow-sm border-purple-200">
+          <CardHeader>
+            <CardTitle className="text-lg">Received but not parsed after 5 minutes</CardTitle>
+            <CardDescription>
+              Emails grouped by likely parser path. These need a parse outcome rather than staying as received.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {Object.entries(status.unparsedReceivedGroups ?? {}).map(([group, emails]) => {
+              if (!emails.length) return null;
+              return (
+                <div key={group} className="rounded-md border border-purple-100 p-3">
+                  <div className="font-medium text-sm text-purple-900 mb-2">
+                    {group} ({emails.length})
+                  </div>
+                  <ul className="space-y-2">
+                    {emails.slice(0, 10).map((email) => (
+                      <li key={email.id} className="text-xs text-slate-700">
+                        <div className="font-medium">{email.subject || '(no subject)'}</div>
+                        <div className="text-slate-500">
+                          From: {email.from_address || '—'} · Received: {formatDate(email.created_at)}
+                        </div>
+                        {email.ingest_email_files && email.ingest_email_files.length > 0 && (
+                          <div className="text-slate-500">
+                            Files: {email.ingest_email_files.map((file) => `${file.filename} (${file.parse_status})`).join(', ')}
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                    {emails.length > 10 && (
+                      <li className="text-xs text-slate-500">... and {emails.length - 10} more</li>
+                    )}
+                  </ul>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Files List */}
       {allFiles.length === 0 ? (

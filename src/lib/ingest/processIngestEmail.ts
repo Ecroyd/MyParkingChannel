@@ -16,6 +16,11 @@ import {
 
 export { clearIngestEmailForReprocess };
 import { detectTenantFromEmail } from "@/lib/ingest/detectTenantFromEmail";
+import {
+  getFlyparksRequiredMissing,
+  looksLikeFlyparksDirectEmail,
+  normalizeFlyparksEmailText,
+} from "@/lib/ingest/flyparksTextToStaging";
 
 export type IngestAttachment = {
   filename: string;
@@ -58,14 +63,7 @@ function hasBookingFileAttachment(atts: { contentType?: string; contentDispositi
 }
 
 function looksLikeFlyparksReceipt(subject: string | null | undefined, text: string | null | undefined): boolean {
-  const s = (subject ?? "").toLowerCase();
-  const t = (text ?? "").toLowerCase();
-  if (s.includes("flyparks") && (s.includes("payment") || s.includes("booking") || s.includes("successful"))) return true;
-  if (t.includes("booking receipt")) return true;
-  if (t.includes("your transaction has been completed")) return true;
-  if (t.includes("reference:")) return true;
-  if (t.includes("vehicle registration:")) return true;
-  return false;
+  return looksLikeFlyparksDirectEmail(subject, text);
 }
 
 async function resolveTenantFromInbox(
@@ -133,12 +131,9 @@ export async function processIngestEmail(
       const parsed = await simpleParser(rawEmailBuffer);
       parsedEmail = parsed;
       const subject = parsed.subject ?? bodySubject ?? "";
-      const text = parsed.text ?? "";
+      const text = normalizeFlyparksEmailText([parsed.text ?? "", parsed.html ?? ""].filter(Boolean).join("\n"));
       parsedForReceipt = { subject, text };
-      emailBodyText = parsed.textAsHtml ? null : (parsed.text || parsed.html || null);
-      if (!emailBodyText && parsed.html) {
-        emailBodyText = parsed.html;
-      }
+      emailBodyText = text || parsed.text || parsed.html || null;
       parsedHtml = parsed.html ?? null;
 
       if (!workerAttachments || workerAttachments.length === 0) {
@@ -233,9 +228,19 @@ export async function processIngestEmail(
         const { promoteStagingRowToBooking } = await import("@/lib/ingest/promoteStagingToBooking");
         const staging = flyparksTextToStaging(forwarded_text ?? "");
         const reference = staging.reference ?? guessed?.reference ?? null;
+        const missingFields = getFlyparksRequiredMissing({ ...staging, reference });
+        const bodyPreview = String(staging.raw_json?.body_preview ?? forwarded_text ?? "").slice(0, 1000);
 
         if (!reference) {
-          throw new Error("Flyparks text-only: no reference extracted");
+          throw new Error(
+            `Flyparks text-only: no reference extracted; missing=${missingFields.join(",") || "reference"}; extracted=${JSON.stringify(staging.raw_json?.extracted ?? {})}; body_preview=${bodyPreview}`
+          );
+        }
+
+        if (missingFields.length > 0) {
+          throw new Error(
+            `Flyparks text-only: missing required fields ${missingFields.join(",")}; reference=${reference}; extracted=${JSON.stringify(staging.raw_json?.extracted ?? {})}; body_preview=${bodyPreview}`
+          );
         }
 
         const dedupe_key = `${tenantId}|flyparks_text|${reference}`;
@@ -400,6 +405,18 @@ export async function processIngestEmail(
     if (fileIds.length > 0 && tenantIdForFiles) {
       autoParseTriggered = true;
       await parseFilesAsync(fileIds, tenantIdForFiles);
+    } else if (fileIds.length > 0 && !tenantIdForFiles) {
+      const noTenantParseError = "Attachment received but tenant could not be resolved for parsing";
+      await supabase
+        .from("ingest_email_files")
+        .update({
+          parse_status: "failed",
+          parse_outcome: "failed",
+          parse_error: noTenantParseError,
+          parsed_at: new Date().toISOString(),
+        })
+        .in("id", fileIds);
+      throw new Error(noTenantParseError);
     }
 
     if (textPromoted || bookingId) {

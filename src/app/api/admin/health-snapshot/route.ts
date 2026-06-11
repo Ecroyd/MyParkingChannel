@@ -26,7 +26,14 @@ const EMAIL_PARSE_FALLBACK = {
   failedFiles: [],
   pendingFiles: [],
   emptyParsedFiles: [],
-  summary: { failedCount: 0, stuckPendingCount: 0, emptyParsedCount: 0 },
+  unparsedReceivedGroups: {
+    'direct Flyparks text email': [],
+    'Holiday Extras attachment': [],
+    'APH attachment': [],
+    'CAVU/hourly report': [],
+    unknown: [],
+  },
+  summary: { failedCount: 0, stuckPendingCount: 0, emptyParsedCount: 0, unparsedReceivedCount: 0 },
 };
 
 const CAVU_FALLBACK: CavuHealthPayload = {
