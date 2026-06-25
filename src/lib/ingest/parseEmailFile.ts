@@ -29,7 +29,7 @@ import {
 } from "@/lib/ingest/parseOutcome";
 
 function isHolidayExtrasFilename(filename: string): boolean {
-  return /^ext\d+.*\.txt$/i.test(filename.trim());
+  return /^(ext\d+|extz10).*\.txt$/i.test(filename.trim());
 }
 
 /**
@@ -84,6 +84,7 @@ function parseFileWithCanonicalMappers(
       customer_lastname: canonical.customer_lastname,
       customer_title: null,
       customer_firstname: canonical.customer_firstname,
+      customer_email: canonical.customer_email,
       start_at: canonical.start_at,
       end_at: canonical.end_at,
       vehicle_reg: canonical.vehicle_registration,
@@ -95,12 +96,12 @@ function parseFileWithCanonicalMappers(
       status: mappedStatus,
       price: canonical.money_charged ?? canonical.total_price ?? 0,
       money_received: canonical.money_received ?? 0,
-      notes: null,
+      notes: canonical.notes ?? null,
       // Additional fields
       external_reference: canonical.third_party_reference || canonical.booking_reference,
       external_status: supplierToken ?? external_status,
       return_flight_no: canonical.return_flight_number,
-      product_code: null,
+      product_code: canonical.product_code ?? null,
       currency: canonical.currency || "GBP",
       total_price: canonical.total_price,
       raw_fields: canonical.raw ?? {},
@@ -219,7 +220,9 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     parsedData = parseFileWithCanonicalMappers(buffer, file.filename);
     console.log(`[parseEmailFile] Parsed ${parsedData.rows.length} rows from ${file.filename}`);
 
-    if (parsedData.detectedFormat === "HOLIDAY_EXTRAS" || isHolidayExtrasFilename(file.filename)) {
+    if (parsedData.rows.length > 0 && (parsedData.rows[0] as { channel?: string }).channel === "HOLIDAY_EXTRAS_EXTZ10") {
+      winningParserKey = "holiday_extras_extz10_tab";
+    } else if (parsedData.detectedFormat === "HOLIDAY_EXTRAS" || isHolidayExtrasFilename(file.filename)) {
       winningParserKey = "holiday_extras_email_import";
     } else if (parsedData.rows.length > 0) {
       const detectedChannel = (parsedData.rows[0] as { channel?: string }).channel;
@@ -239,7 +242,9 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     // Determine parse_reason based on error type
     let parseReason: string | null = null;
     if (parseErr.message?.includes("Could not detect format")) {
-      parseReason = "format_not_detected";
+      parseReason = file.filename.toLowerCase().includes("extz10")
+        ? "no_parser_matched_extz10_attachment"
+        : "format_not_detected";
     } else {
       // For other exceptions, use "exception:<message>" (truncated to 200 chars)
       const errorMsg = parseErr.message || "unknown error";
@@ -249,7 +254,9 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     await markIngestEmailFileParseFailed(
       adminSupabase,
       fileId,
-      `Parse failed: ${parseErr.message}`,
+      parseReason === "no_parser_matched_extz10_attachment"
+        ? `No parser matched EXTZ10 attachment: ${file.filename}`
+        : `Parse failed: ${parseErr.message}`,
       parseReason ?? undefined
     );
     throw parseErr;
@@ -366,6 +373,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       customer_lastname: raw.customer_lastname,
       customer_name: raw.customer_name,
       phone: raw.phone,
+      customer_email: raw.customer_email,
       flight_number: raw.flight_number,
       return_flight_no: raw.return_flight_no,
       product_code: raw.product_code,
@@ -374,7 +382,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       price: raw.price || raw.total_price || 0, // For compatibility
       status: mappedStatus,
       money_received: raw.money_received || 0,
-      notes: null,
+      notes: raw.notes ?? null,
       dedupe_key: dedupe_key, // Required field
       // Store raw data for debugging (never null – required for cancellation detection)
       raw_json: {
@@ -383,8 +391,10 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
             ? "cavuV1"
             : channel === "FLYPARKS_EMAIL"
               ? "flyparksV1"
-              : channel === "HOLIDAY_EXTRAS"
+              : channel === "HOLIDAY_EXTRAS" || channel === "HOLIDAY_EXTRAS_EXTZ10"
                 ? "holidayExtrasV1"
+                : channel === "PARKVIA_EMAIL"
+                  ? "parkviaEmailBodyV1"
                 : "aphV1",
         channel: channel,
         raw_fields: raw.raw_fields ?? [],

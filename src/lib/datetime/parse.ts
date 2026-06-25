@@ -79,6 +79,54 @@ export async function parseDateTimeToUtc(
 }
 
 /**
+ * Convert a tenant-local date/time pair into a UTC ISO string.
+ * Accepts common import shapes such as DD/MM/YYYY, YYYY-MM-DD, HH:mm, and HHmm.
+ */
+export function parseTenantLocalDateTimeToUtc(
+  dateRaw: string,
+  timeRaw: string,
+  tenantTimezone: string = 'Europe/London'
+): string | null {
+  const dateText = String(dateRaw || '').trim();
+  const timeText = String(timeRaw || '').trim();
+  const dateMatch =
+    dateText.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/) ||
+    dateText.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  const timeMatch = timeText.match(/^(\d{1,2}):?(\d{2})$/);
+
+  if (!dateMatch || !timeMatch) return null;
+
+  const ymd = dateText.includes('-')
+    ? { year: Number(dateMatch[1]), month: Number(dateMatch[2]), day: Number(dateMatch[3]) }
+    : {
+        year: Number(dateMatch[3].length === 2 ? `20${dateMatch[3]}` : dateMatch[3]),
+        month: Number(dateMatch[2]),
+        day: Number(dateMatch[1]),
+      };
+
+  const hour = Number(timeMatch[1]);
+  const minute = Number(timeMatch[2]);
+  if (
+    ymd.month < 1 ||
+    ymd.month > 12 ||
+    ymd.day < 1 ||
+    ymd.day > 31 ||
+    hour > 23 ||
+    minute > 59
+  ) {
+    return null;
+  }
+
+  const localIso = `${ymd.year.toString().padStart(4, '0')}-${ymd.month
+    .toString()
+    .padStart(2, '0')}-${ymd.day.toString().padStart(2, '0')}T${hour
+    .toString()
+    .padStart(2, '0')}:${minute.toString().padStart(2, '0')}:00`;
+
+  return zonedTimeToUtc(localIso, tenantTimezone).toISOString();
+}
+
+/**
  * Override start time to midnight (00:00) for EXTZ10 files (hotel+parking bundle)
  * 
  * EXTZ10 files represent hotel+parking bundles where parking access starts at midnight

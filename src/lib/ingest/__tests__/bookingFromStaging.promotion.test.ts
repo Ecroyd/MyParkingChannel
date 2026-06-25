@@ -14,35 +14,41 @@ function mockSupabaseForPromotion(opts: {
   insertError?: string | null;
 }) {
   const updatePayloads: Record<string, unknown>[] = [];
+  const existingRows = opts.existingBooking
+    ? [{ ...opts.existingBooking, source: "holiday_extras" }]
+    : [];
+
+  function selectExistingChain(filters: Record<string, string> = {}): any {
+    const resolve = () => {
+      if (filters.source) {
+        return { data: existingRows.filter((r) => r.source === filters.source), error: null };
+      }
+      return { data: existingRows, error: null };
+    };
+    const chain: any = {
+      eq: vi.fn((col: string, val: string) => selectExistingChain({ ...filters, [col]: val })),
+      then: vi.fn((onFulfilled: any, onRejected: any) =>
+        Promise.resolve(resolve()).then(onFulfilled, onRejected)
+      ),
+    };
+    return chain;
+  }
+
+  function updateChain() {
+    return {
+      eq: vi.fn(() => updateChain()),
+      select: vi.fn(async () => ({
+        data: opts.existingBooking ? [{ id: opts.existingBooking.id }] : [],
+        error: opts.updateError ? { message: opts.updateError } : null,
+      })),
+    };
+  }
 
   const bookingsChain = {
-    select: vi.fn(() => ({
-      eq: vi.fn(function (this: unknown, col: string, val: string) {
-        return {
-          eq: vi.fn(async (col2: string, val2: string) => {
-            if (col === "tenant_id" && col2 === "reference") {
-              return {
-                data: opts.existingBooking ? [opts.existingBooking] : [],
-                error: null,
-              };
-            }
-            return { data: [], error: null };
-          }),
-        };
-      }),
-    })),
+    select: vi.fn(() => selectExistingChain()),
     update: vi.fn((payload: Record<string, unknown>) => {
       updatePayloads.push(payload);
-      return {
-        eq: vi.fn(() => ({
-          eq: vi.fn(() => ({
-            select: vi.fn(async () => ({
-              data: opts.existingBooking ? [{ id: opts.existingBooking.id }] : [],
-              error: opts.updateError ? { message: opts.updateError } : null,
-            })),
-          })),
-        })),
-      };
+      return updateChain();
     }),
     insert: vi.fn(() => ({
       select: vi.fn(() => ({
@@ -117,7 +123,7 @@ describe("staging → bookings promotion", () => {
       end_at: "2026-06-01T09:00:00.000Z",
     });
     expect(payload.status).toBe("cancelled");
-    expect(payload.external_status).toBe("CANX");
+    expect(payload.external_status).toBe("cancelled");
     expect(payload.external_source).toBe("holiday_extras");
     expect(payload.source).toBe("holiday_extras");
     expect(payload.customer_email).toContain("@");
@@ -137,7 +143,7 @@ describe("staging → bookings promotion", () => {
     expect(result.log.mapped_status).toBe("cancelled");
     expect(updatePayloads.length).toBe(1);
     expect(updatePayloads[0].status).toBe("cancelled");
-    expect(updatePayloads[0].external_status).toBe("CANX");
+    expect(updatePayloads[0].external_status).toBe("cancelled");
     expect(updatePayloads[0].external_source).toBe("holiday_extras");
     expect(updatePayloads[0].source).toBe("holiday_extras");
     expect(updatePayloads[0].status).toBe("cancelled");

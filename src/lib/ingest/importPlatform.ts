@@ -8,6 +8,8 @@ export type ImportPlatformId =
   | "aph"
   | "cavu"
   | "flyparks_email"
+  | "parkvia"
+  | "holiday_extras_extz10"
   | "unknown";
 
 export type ImportPlatformAttribution = {
@@ -39,6 +41,16 @@ const PLATFORM_BY_CHANNEL: Record<string, ImportPlatformAttribution> = {
     platformId: "flyparks_email",
     parserKey: "flyparks_email_import",
   },
+  PARKVIA_EMAIL: {
+    bookingSource: "parkvia",
+    platformId: "parkvia",
+    parserKey: "parkvia_email_body",
+  },
+  HOLIDAY_EXTRAS_EXTZ10: {
+    bookingSource: "holiday_extras",
+    platformId: "holiday_extras_extz10",
+    parserKey: "holiday_extras_extz10_tab",
+  },
 };
 
 /**
@@ -61,12 +73,16 @@ export function resolveImportPlatform(opts: {
   const platformFromParser: ImportPlatformId =
     parserKey === "holiday_extras_email_import"
       ? "holiday_extras"
+      : parserKey === "holiday_extras_extz10_tab"
+        ? "holiday_extras_extz10"
       : parserKey === "aph_email_import"
         ? "aph"
         : parserKey === "cavu_email_import"
           ? "cavu"
           : parserKey === "flyparks_email_import"
             ? "flyparks_email"
+            : parserKey === "parkvia_email_body"
+              ? "parkvia"
             : "unknown";
 
   return {

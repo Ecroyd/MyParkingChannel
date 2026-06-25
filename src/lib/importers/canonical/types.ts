@@ -2,7 +2,13 @@
  * Canonical booking format - unified shape for all import sources
  */
 export type CanonicalBooking = {
-  channel: "CAVU" | "APH" | "FLYPARKS_EMAIL" | "HOLIDAY_EXTRAS";
+  channel:
+    | "CAVU"
+    | "APH"
+    | "FLYPARKS_EMAIL"
+    | "HOLIDAY_EXTRAS"
+    | "HOLIDAY_EXTRAS_EXTZ10"
+    | "PARKVIA_EMAIL";
   booking_reference: string | null;
   third_party_reference: string | null;
 
@@ -23,6 +29,8 @@ export type CanonicalBooking = {
   return_flight_number: string | null;
 
   total_price: number | null;
+  notes?: string | null;
+  product_code?: string | null;
   /** Optional: left money column (e.g. Holiday Extras net/received). */
   money_received?: number | null;
   /** Optional: right money column (e.g. Holiday Extras gross/charged). */

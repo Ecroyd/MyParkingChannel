@@ -21,6 +21,10 @@ import {
   looksLikeFlyparksDirectEmail,
   normalizeFlyparksEmailText,
 } from "@/lib/ingest/flyparksTextToStaging";
+import {
+  looksLikeParkViaEmail,
+  parkViaEmailBodyToStaging,
+} from "@/lib/ingest/parkviaEmailBodyToStaging";
 
 export type IngestAttachment = {
   filename: string;
@@ -208,6 +212,11 @@ export async function processIngestEmail(
         forwarded_text ?? null
       );
       const shouldTryTextPromote = !bookingFilePresent && looksLikeFlyparks;
+      const looksLikeParkVia = looksLikeParkViaEmail({
+        from_address: fromAddress,
+        subject: parsedForReceipt.subject,
+        body: parsedForReceipt.text,
+      });
 
       if (shouldTryTextPromote) {
         const tenantId =
@@ -288,6 +297,94 @@ export async function processIngestEmail(
           throw new Error(promoteResult.error ?? "promote staging failed");
         }
 
+        textPromoted = true;
+        bookingId = promoteResult.bookingId ?? null;
+      } else if (!bookingFilePresent && looksLikeParkVia) {
+        const tenantId =
+          tenantIdFromInbox ??
+          detectTenantFromEmail({
+            from_address: fromAddress,
+            subject: parsedForReceipt.subject,
+            raw_rfc822_base64: raw,
+          });
+
+        if (!tenantId) {
+          throw new Error(
+            "ParkVia text-only: no tenant (to_address not in tenant_inbound_inboxes and detectTenantFromEmail returned null)"
+          );
+        }
+
+        const { promoteStagingRowToBooking } = await import("@/lib/ingest/promoteStagingToBooking");
+        const staging = parkViaEmailBodyToStaging(forwarded_text ?? parsedForReceipt.text ?? "");
+        const reference = staging.reference;
+        const missingFields = [
+          !reference ? "reference" : null,
+          !staging.start_at ? "start_at" : null,
+          !staging.end_at ? "end_at" : null,
+          !staging.vehicle_reg ? "vehicle_reg" : null,
+        ].filter(Boolean);
+
+        if (missingFields.length > 0) {
+          throw new Error(
+            `ParkVia text-only: missing required fields ${missingFields.join(",")}; extracted=${JSON.stringify(staging.raw_json?.fields ?? {})}`
+          );
+        }
+
+        const dedupe_key = `${tenantId}|ref|${reference}`;
+        const { error: stagingErr } = await supabase.from("booking_import_staging").upsert(
+          {
+            tenant_id: tenantId,
+            source: "parkvia",
+            source_email_id: emailId,
+            source_filename: "parkvia_email_body",
+            reference,
+            external_reference: reference,
+            external_status: "new",
+            start_at: staging.start_at,
+            end_at: staging.end_at,
+            vehicle_reg: staging.vehicle_reg,
+            vehicle_make: null,
+            vehicle_model: null,
+            vehicle_colour: null,
+            customer_title: null,
+            customer_firstname: null,
+            customer_lastname: null,
+            customer_name: staging.customer_name,
+            customer_email: staging.customer_email,
+            phone: staging.customer_phone,
+            flight_number: null,
+            return_flight_no: null,
+            product_code: staging.product_code,
+            currency: "GBP",
+            total_price: staging.total_price,
+            price: staging.total_price ?? 0,
+            status: "reserved",
+            money_received: staging.money_received ?? staging.total_price ?? 0,
+            notes: staging.notes,
+            dedupe_key,
+            raw_json: {
+              ...staging.raw_json,
+              channel: "PARKVIA_EMAIL",
+              external_status: "new",
+            },
+          },
+          { onConflict: "dedupe_key" }
+        );
+
+        if (stagingErr) {
+          throw new Error(`booking_import_staging upsert failed: ${stagingErr.message}`);
+        }
+
+        const promoteResult = await promoteStagingRowToBooking(supabase, tenantId, dedupe_key);
+        if (!promoteResult.ok) {
+          throw new Error(promoteResult.error ?? "promote staging failed");
+        }
+
+        parseSuccessPatch = {
+          ...parseSuccessPatch,
+          booking_plate_guess: staging.vehicle_reg,
+          booking_reference_guess: reference,
+        };
         textPromoted = true;
         bookingId = promoteResult.bookingId ?? null;
       }

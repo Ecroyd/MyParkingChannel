@@ -160,6 +160,24 @@ export async function PATCH(
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
+    const { error: auditError } = await adminClient
+      .from('audit_logs')
+      .insert({
+        actor_user_id: user.id,
+        action: 'booking_gate_status_updated',
+        target: {
+          tenantId,
+          bookingId,
+          reference: data.reference,
+          gateStatus,
+          status: data.status,
+        },
+        created_at: now,
+      });
+    if (auditError) {
+      console.error('Failed to write gate status audit log', auditError);
+    }
+
     // Sync to Videofit if configured (fire and forget)
     if (data && (gateStatus === 'cancelled' || updates.status === 'cancelled')) {
       const { syncBookingToVideofit } = await import('@/lib/videofit/bookingSync');

@@ -71,7 +71,7 @@ function resolveCustomerEmail(row: StagingRow, reference: string): string {
 
 function cleanPlate(reg: string | null | undefined): string | null {
   if (!reg) return null;
-  const s = String(reg).trim().toUpperCase();
+  const s = String(reg).trim().toUpperCase().replace(/\s+/g, "");
   if (!s || s === "-") return null;
   return s;
 }
@@ -176,7 +176,7 @@ export function buildBookingPayloadFromStaging(
   const returnFlight =
     row.return_flight_no ?? (row as { return_flight_number?: string }).return_flight_number ?? null;
 
-  return {
+  const payload: Record<string, unknown> = {
     tenant_id: row.tenant_id,
     reference,
     customer_name: row.customer_name ?? null,
@@ -210,6 +210,14 @@ export function buildBookingPayloadFromStaging(
       ? { customer_email: (row.raw_json.extracted as { email?: string }).email }
       : {}),
   };
+
+  if (mappedStatus === "cancelled") {
+    payload.gate_status = "cancelled";
+    payload.ops_status = "cancelled";
+    payload.external_status = "cancelled";
+  }
+
+  return payload;
 }
 
 export type UpsertStagingResult = {
@@ -240,6 +248,17 @@ function bookingPayloadVariants(
     push(withoutSupplier);
   }
 
+  if (payload.ops_status === "cancelled") {
+    const withoutOpsStatus: Record<string, unknown> = { ...payload };
+    delete withoutOpsStatus.ops_status;
+    push(withoutOpsStatus);
+    if (withoutOpsStatus.supplier_status !== undefined) {
+      const withoutOpsAndSupplier: Record<string, unknown> = { ...withoutOpsStatus };
+      delete withoutOpsAndSupplier.supplier_status;
+      push(withoutOpsAndSupplier);
+    }
+  }
+
   const src = String(payload.source ?? "");
   if (src === "holiday_extras") {
     push({ ...payload, source: "holidayextras" });
@@ -257,7 +276,8 @@ async function updateBookingWithVariants(
   supabase: SupabaseClient,
   tenantId: string,
   reference: string,
-  updatePayload: Record<string, unknown>
+  updatePayload: Record<string, unknown>,
+  bookingId?: string | null
 ): Promise<
   | { ok: true; bookingId?: string; payload: Record<string, unknown> }
   | { ok: false; reason: string; payload: Record<string, unknown> }
@@ -266,12 +286,12 @@ async function updateBookingWithVariants(
   const errors: string[] = [];
 
   for (const variant of variants) {
-    const { data: updated, error: updateErr } = await supabase
-      .from("bookings")
-      .update(variant)
-      .eq("tenant_id", tenantId)
-      .eq("reference", reference)
-      .select("id");
+    let query = supabase.from("bookings").update(variant).eq("tenant_id", tenantId);
+    query = bookingId
+      ? query.eq("id", bookingId)
+      : query.eq("reference", reference);
+
+    const { data: updated, error: updateErr } = await query.select("id");
 
     if (!updateErr) {
       return {
@@ -288,6 +308,58 @@ async function updateBookingWithVariants(
     reason: errors.join(" → "),
     payload: variants[variants.length - 1] ?? updatePayload,
   };
+}
+
+type ExistingBookingMatch =
+  | { ok: true; row: { id: string; status?: string | null; source?: string | null } | null }
+  | { ok: false; reason: string };
+
+async function findExistingBookingForStaging(
+  supabase: SupabaseClient,
+  tenantId: string,
+  reference: string,
+  source: unknown
+): Promise<ExistingBookingMatch> {
+  const sourceText = source == null ? null : String(source);
+  if (sourceText) {
+    const { data: sourceRows, error: sourceErr } = await supabase
+      .from("bookings")
+      .select("id, status, source")
+      .eq("tenant_id", tenantId)
+      .eq("reference", reference)
+      .eq("source", sourceText);
+
+    if (sourceErr) {
+      return { ok: false, reason: `select existing by source: ${formatPostgresError(sourceErr)}` };
+    }
+    if (sourceRows && sourceRows.length === 1) {
+      return { ok: true, row: sourceRows[0] };
+    }
+    if (sourceRows && sourceRows.length > 1) {
+      return { ok: false, reason: `multiple existing bookings for tenant/source/reference (${sourceText}/${reference})` };
+    }
+  }
+
+  const { data: referenceRows, error: referenceErr } = await supabase
+    .from("bookings")
+    .select("id, status, source")
+    .eq("tenant_id", tenantId)
+    .eq("reference", reference);
+
+  if (referenceErr) {
+    return { ok: false, reason: `select existing by reference: ${formatPostgresError(referenceErr)}` };
+  }
+
+  if (!referenceRows || referenceRows.length === 0) return { ok: true, row: null };
+  if (referenceRows.length === 1) return { ok: true, row: referenceRows[0] };
+
+  const legacyRows = referenceRows.filter((r) => {
+    const s = String((r as { source?: string | null }).source ?? "").toLowerCase();
+    return s === "other" || s === "" || s === "direct";
+  });
+  if (legacyRows.length === 1) return { ok: true, row: legacyRows[0] };
+
+  return { ok: false, reason: `multiple existing bookings for tenant/reference (${reference}) and no unique source match` };
 }
 
 async function insertBookingWithVariants(
@@ -421,19 +493,20 @@ export async function upsertBookingFromStagingRow(
   const tenantId = row.tenant_id;
   const payload = safePayload.data;
 
-  const { data: existingRows, error: selectErr } = await supabase
-    .from("bookings")
-    .select("id, status")
-    .eq("tenant_id", tenantId)
-    .eq("reference", reference);
+  const existing = await findExistingBookingForStaging(
+    supabase,
+    tenantId,
+    reference,
+    payload.source
+  );
 
-  if (selectErr) {
+  if (!existing.ok) {
     return {
       log: {
         ...baseLog,
         reference,
         action: "error",
-        reason: `select existing: ${formatPostgresError(selectErr)}`,
+        reason: existing.reason,
       },
       attemptedPayload: payload,
     };
@@ -443,12 +516,13 @@ export async function upsertBookingFromStagingRow(
   delete updatePayload.tenant_id;
   delete updatePayload.reference;
 
-  if (existingRows && existingRows.length > 0) {
+  if (existing.row) {
     const updateResult = await updateBookingWithVariants(
       supabase,
       tenantId,
       reference,
-      updatePayload
+      updatePayload,
+      existing.row.id
     );
 
     if (!updateResult.ok) {
@@ -465,7 +539,7 @@ export async function upsertBookingFromStagingRow(
 
     return {
       log: { ...baseLog, reference, action: "updated", mapped_status: mappedStatus },
-      bookingId: updateResult.bookingId ?? existingRows[0].id,
+      bookingId: updateResult.bookingId ?? existing.row.id,
       attemptedPayload: updateResult.payload,
     };
   }

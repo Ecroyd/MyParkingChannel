@@ -13,6 +13,7 @@ import {
 } from 'recharts';
 import { createBrowserClient } from '@supabase/ssr';
 import { format, eachDayOfInterval } from 'date-fns';
+import { colorForSourceKey } from '@/lib/supplier/chartColors';
 import { getSourceLabel } from '@/lib/supplier/labels';
 
 type Row = { day: string; channel: string; occupancy: number };
@@ -147,13 +148,9 @@ export default function DailyOccupancyStacked({ tenantId, start, end, tz = 'UTC'
 
   // Define colors for different channels
   const channelColors: Record<string, string> = {
-    'direct': '#3b82f6',
     'booking.com': '#003580',
     'expedia': '#ff5a5f',
     'airbnb': '#ff5a5f',
-    'parkvia': '#10b981',
-    'holidayextras': '#f59e0b',
-    'other': '#6b7280'
   };
 
   return (
@@ -180,7 +177,7 @@ export default function DailyOccupancyStacked({ tenantId, start, end, tz = 'UTC'
               key={ch} 
               dataKey={ch} 
               stackId="a" 
-              fill={channelColors[ch] || '#6b7280'}
+              fill={channelColors[ch] || colorForSourceKey(ch)}
               name={getSourceLabel(ch)}
             />
           ))}

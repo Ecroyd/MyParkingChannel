@@ -16,6 +16,7 @@ import { format, eachDayOfInterval } from "date-fns";
 import DateRangeModal from '@/components/admin/DateRangeModal';
 import { useDateRangeModal } from '@/hooks/useDateRangeModal';
 import { Calendar } from 'lucide-react';
+import { colorForSourceKey } from '@/lib/supplier/chartColors';
 import { getSourceLabel } from '@/lib/supplier/labels';
 
 type Booking = {
@@ -41,18 +42,6 @@ function keyFromSource(source: string | null): string {
   return s;
 }
 
-/** Deterministic colour per key (keeps palette stable across renders/tenants) */
-const PALETTE = [
-  "#2563eb", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6",
-  "#14b8a6", "#eab308", "#f97316", "#06b6d4", "#84cc16",
-  "#ec4899", "#22c55e",
-];
-const colorFor = (key: string) => {
-  let h = 0;
-  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
-  return PALETTE[h % PALETTE.length];
-};
-
 export default function DemandCurve({
   tenantId,
   capacity, // deprecated: single capacity value (for backward compatibility)
@@ -67,7 +56,7 @@ export default function DemandCurve({
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [fetchedCapacityByDate, setFetchedCapacityByDate] = useState<Record<string, number | null>>({});
   const [loading, setLoading] = useState(true);
-  const [dateRange, setDateRange] = useState('next14days');
+  const [dateRange, setDateRange] = useState('next7days');
   const { isOpen, currentDateRange, openModal, closeModal, handleDateRangeChange } = useDateRangeModal();
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
@@ -265,7 +254,7 @@ export default function DemandCurve({
       <div className="mb-4 flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2">
           <label htmlFor="dateRange" className="text-sm font-medium text-gray-700">
-            Date Range:
+            Daily View:
           </label>
           <select
             id="dateRange"
@@ -273,10 +262,10 @@ export default function DemandCurve({
             onChange={(e) => setDateRange(e.target.value)}
             className="rounded-md border border-gray-300 px-3 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
-            <option value="next7days">Next 7 Days</option>
-            <option value="next14days">Next 14 Days</option>
-            <option value="next30days">Next 30 Days</option>
-            <option value="next90days">Next 90 Days</option>
+            <option value="next7days">Daily - Next 7 Days</option>
+            <option value="next14days">Daily - Next 14 Days</option>
+            <option value="next30days">Daily - Next 30 Days</option>
+            <option value="next90days">Daily - Next 90 Days</option>
             <option value="custom">Custom Range</option>
           </select>
         </div>
@@ -340,7 +329,7 @@ export default function DemandCurve({
                 key={ck}
                 dataKey={ck}
                 stackId="occ"
-                fill={colorFor(ck)}
+                fill={colorForSourceKey(ck)}
                 name={displayName}
                 maxBarSize={28}
               />

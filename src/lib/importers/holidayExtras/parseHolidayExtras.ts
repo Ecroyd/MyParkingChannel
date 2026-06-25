@@ -40,6 +40,49 @@ function parseDMY6(dmy6: string) {
   return { dd: m[1], mm: m[2], yyyy: `20${m[3]}` };
 }
 
+function parseYYMMDD(yymmdd: string): Date | null {
+  const s = trim(yymmdd);
+  const m = s.match(/^(\d{2})(\d{2})(\d{2})$/);
+  if (!m) return null;
+  const yy = Number(m[1]);
+  const mm = Number(m[2]);
+  const dd = Number(m[3]);
+  const date = new Date(Date.UTC(2000 + yy, mm - 1, dd));
+  if (
+    date.getUTCFullYear() !== 2000 + yy ||
+    date.getUTCMonth() !== mm - 1 ||
+    date.getUTCDate() !== dd
+  ) {
+    return null;
+  }
+  return date;
+}
+
+function formatUtcDate(date: Date): string {
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function toLocalIsoFromYYMMDD(
+  yymmdd: string,
+  hm: string,
+  addDays = 0
+): string | null {
+  const date = parseYYMMDD(yymmdd);
+  if (!date) return null;
+  date.setUTCDate(date.getUTCDate() + addDays);
+  const t = trim(hm);
+  if (!/^\d{3,4}$/.test(t)) return null;
+  const padded = t.padStart(4, "0");
+  const hour = padded.slice(0, 2);
+  const minute = padded.slice(2, 4);
+  if (Number(hour) > 23 || Number(minute) > 59) return null;
+  return `${formatUtcDate(date)}T${hour}:${minute}:00`;
+}
+
 function toIsoFromParts(
   yyyy: string,
   mm: string,
@@ -99,6 +142,11 @@ function parseMoney(v: string | number | null | undefined): number | null {
   if (!s) return null;
   const n = Number(s.replace(/[^0-9.-]/g, ""));
   return Number.isFinite(n) ? n : null;
+}
+
+function normalizeReg(v: string | null | undefined): string | null {
+  const reg = trim(v).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return reg || null;
 }
 
 /** Split EXT line on tabs or 2+ spaces (some exports are space-padded). */
@@ -187,7 +235,16 @@ export function looksLikeExt1Tsv(text: string): boolean {
   return extRows >= Math.max(1, Math.ceil(sample.length * 0.3));
 }
 
+export function looksLikeExtz10Tab(filename: string, text: string): boolean {
+  if (filename.toLowerCase().includes("extz10")) return true;
+  const first = text.replace(/\r\n/g, "\n").split("\n").find((l) => l.trim() !== "");
+  if (!first || !first.includes("\t")) return false;
+  const f = splitExtLine(first);
+  return f[0] === "06" && f.length >= 23 && /^[123]$/.test(f[1] ?? "");
+}
+
 export function isHolidayExtrasFile(filename: string, text: string): boolean {
+  if (looksLikeExtz10Tab(filename, text)) return true;
   if (looksLikeExt1Tsv(text)) return true;
   const name = filename.toLowerCase();
   if (/^ext\d+.*\.txt$/i.test(name)) return true;
@@ -199,6 +256,117 @@ export function isHolidayExtrasFile(filename: string, text: string): boolean {
       /\bFIRM\b/i.test(text) ||
       /\bCANX\b/i.test(text))
   );
+}
+
+function actionToStatus(action: string): {
+  status: "reserved" | "cancelled";
+  external_status: "new" | "amended" | "cancelled";
+} | null {
+  switch (trim(action)) {
+    case "1":
+      return { status: "reserved", external_status: "new" };
+    case "2":
+      return { status: "reserved", external_status: "amended" };
+    case "3":
+      return { status: "cancelled", external_status: "cancelled" };
+    default:
+      return null;
+  }
+}
+
+export function parseHolidayExtrasExtz10Text(text: string): HolidayExtrasParseResult {
+  const lines = text.replace(/\r\n/g, "\n").split("\n").filter((l) => l.trim() !== "");
+  const stats = emptyStats(lines.length);
+  const bookings: CanonicalBooking[] = [];
+
+  for (const line of lines) {
+    const f = splitExtLine(line);
+    if (f[0] !== "06" || f.length < 23) {
+      stats.skipped_unknown_format++;
+      continue;
+    }
+
+    stats.ext_rows_found++;
+    const action = actionToStatus(f[1]);
+    const ref = trim(f[2]).toUpperCase();
+    if (!ref) {
+      stats.skipped_missing_reference++;
+      continue;
+    }
+    if (!action) {
+      stats.skipped_missing_status++;
+      continue;
+    }
+
+    const startAt = toLocalIsoFromYYMMDD(f[4], f[8], 1);
+    const endAt = toLocalIsoFromYYMMDD(f[9], f[15], 0);
+    if (!startAt) {
+      stats.skipped_invalid_date++;
+      continue;
+    }
+
+    const price = parseMoney(f[12]) ?? 0;
+    const title = trim(f[5]);
+    const initial = trim(f[6]);
+    const lastName = trim(f[3]);
+    const customerName = [title, initial, lastName].filter(Boolean).join(" ") || null;
+    const vehicleReg = normalizeReg(f[17]);
+    const rawFields = Object.fromEntries(f.map((value, index) => [String(index), value]));
+
+    bookings.push({
+      channel: "HOLIDAY_EXTRAS_EXTZ10",
+      booking_reference: ref,
+      third_party_reference: ref,
+      start_at: startAt,
+      end_at: endAt ?? startAt,
+      vehicle_registration: vehicleReg,
+      vehicle_make: trim(f[19]) || null,
+      vehicle_model: trim(f[20]) || null,
+      vehicle_colour: trim(f[21]) || null,
+      customer_firstname: initial || null,
+      customer_lastname: lastName || null,
+      customer_email: null,
+      customer_phone: trim(f[22]) || null,
+      outbound_flight_number: null,
+      return_flight_number: null,
+      total_price: price,
+      money_received: price,
+      money_charged: price,
+      currency: "GBP",
+      product_code: trim(f[10]) || null,
+      notes: [
+        "EXTZ10 import",
+        f[7] ? `Passengers: ${trim(f[7])}` : null,
+        f[18] ? `Days parked: ${trim(f[18])}` : null,
+        f[11] ? `Product type code: ${trim(f[11])}` : null,
+      ].filter(Boolean).join("; "),
+      raw: {
+        fields: f,
+        numbered_fields: rawFields,
+        external_status: action.external_status,
+        mapped_status: action.status,
+        action_code: trim(f[1]),
+        source_system_code: trim(f[0]),
+        customer_title: title || null,
+        customer_firstname: initial || null,
+        customer_lastname: lastName || null,
+        customer_name: customerName,
+        passengers: trim(f[7]) || null,
+        hotel_overnight_date: trim(f[4]) || null,
+        arrival_time: trim(f[8]) || null,
+        return_date: trim(f[9]) || null,
+        return_time: trim(f[15]) || null,
+        product_code: trim(f[10]) || null,
+        product_type_code: trim(f[11]) || null,
+        days_parked: trim(f[18]) || null,
+        vehicle_registration: vehicleReg,
+      },
+    });
+    stats.rows_accepted++;
+  }
+
+  stats.skipped_unknown_format = Math.max(0, stats.total_lines - stats.ext_rows_found);
+  return { bookings, stats };
 }
 
 function emptyStats(totalLines: number): HolidayExtrasParseStats {
@@ -226,6 +394,10 @@ export function formatHolidayExtrasParseReason(stats: HolidayExtrasParseStats): 
 }
 
 export function parseHolidayExtrasText(text: string): HolidayExtrasParseResult {
+  if (looksLikeExtz10Tab("", text)) {
+    return parseHolidayExtrasExtz10Text(text);
+  }
+
   const lines = text.replace(/\r\n/g, "\n").split("\n").filter((l) => l.trim() !== "");
   const stats = emptyStats(lines.length);
   const bookings: CanonicalBooking[] = [];

@@ -12,6 +12,7 @@ import { useToast, toast as toastFn } from '@/hooks/use-toast';
 import { BookingHighlightIcon } from '@/components/bookings/BookingHighlightIcon';
 import { DynamicPricingBadge } from '@/components/bookings/DynamicPricingBadge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,6 +42,31 @@ async function parseJsonFromResponse(res: Response): Promise<unknown> {
 }
 
 type BoardSection = 'arrivals' | 'departures' | 'parked';
+type OpsAction = 'reserved' | 'arrived' | 'arrived_key_taken' | 'take_key' | 'departed' | 'no_show' | 'cancelled';
+
+function parseLocalDateTimeParts(value?: string | null) {
+  if (!value) return null;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  if (!match) return null;
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+    hour: match[4],
+    minute: match[5],
+    dateKey: `${match[1]}-${match[2]}-${match[3]}`,
+  };
+}
+
+function formatDisplayDate(dateKey: string) {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
 
 /** Spreadsheet-style row colours: row background + text colour for entire row. */
 function getRowStyleClasses(
@@ -115,6 +141,8 @@ interface Booking {
   car_color: string | null;
   start_at: string;
   end_at: string;
+  start_at_local?: string | null;
+  end_at_local?: string | null;
   status: string;
   money_received: number;
   money_charged: number;
@@ -125,6 +153,8 @@ interface Booking {
   payment_status?: string | null;
   checked_in_at: string | null;
   checked_out_at: string | null;
+  arrived_at?: string | null;
+  departed_at?: string | null;
   gate_status?: string | null;
   highlight_code: BookingHighlightCode;
   ops_hidden?: boolean;
@@ -182,6 +212,10 @@ export default function TodayServerClient({
   const [filterArrivedKeyTaken, setFilterArrivedKeyTaken] = useState(false);
   const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
   const [collapsedParkedDates, setCollapsedParkedDates] = useState<Set<string>>(new Set());
+  const [pendingById, setPendingById] = useState<Record<string, boolean>>({});
+  const pendingByIdRef = useRef<Record<string, boolean>>({});
+  const [selectedBookingIds, setSelectedBookingIds] = useState<Set<string>>(new Set());
+  const [recentlyUpdatedById, setRecentlyUpdatedById] = useState<Record<string, number>>({});
   // Initialize date range to today
   const today = new Date();
   const todayStr = today.toISOString().split('T')[0];
@@ -191,8 +225,150 @@ export default function TodayServerClient({
     setSelectedBookingId(booking.id);
   };
 
-  const handleBookingUpdated = () => {
-    router.refresh();
+  const handleBookingUpdated = () => {};
+
+  const logOpsClick = (message: string, details: Record<string, unknown>) => {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[ops-click] ${message}`, details);
+    }
+  };
+
+  const patchBookingInLists = (bookingId: string, patch: Partial<Booking>) => {
+    const apply = (b: Booking) => (b.id === bookingId ? { ...b, ...patch } : b);
+    setArrivals((prev) => prev.map(apply));
+    setDepartures((prev) => prev.map(apply));
+    setCurrentlyParked((prev) => prev.map(apply));
+  };
+
+  const restoreBookingInLists = (bookingId: string, snapshot: Booking | null) => {
+    if (!snapshot) return;
+    patchBookingInLists(bookingId, snapshot);
+  };
+
+  const findBookingById = (bookingId: string): Booking | null =>
+    [...arrivals, ...departures, ...currentlyParked].find((b) => b.id === bookingId) ?? null;
+
+  const getBookingDateKey = (booking: Booking, dateField: 'start_at' | 'end_at') => {
+    const localValue = dateField === 'start_at' ? booking.start_at_local : booking.end_at_local;
+    const localParts = parseLocalDateTimeParts(localValue);
+    if (localParts) return localParts.dateKey;
+
+    const date = new Date(booking[dateField]);
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tenant.timezone || 'Europe/London',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date);
+    const part = (type: string) => parts.find((p) => p.type === type)?.value;
+    return `${part('year')}-${part('month')}-${part('day')}`;
+  };
+
+  const formatBookingDateTime = (booking: Booking, dateField: 'start_at' | 'end_at') => {
+    const localValue = dateField === 'start_at' ? booking.start_at_local : booking.end_at_local;
+    const localParts = parseLocalDateTimeParts(localValue);
+    if (localParts) {
+      const date = new Date(localParts.year, localParts.month - 1, localParts.day);
+      return `${date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}, ${localParts.hour}:${localParts.minute}`;
+    }
+
+    const date = new Date(booking[dateField]);
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone: tenant.timezone || 'Europe/London',
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    return formatter.format(date).replace(',', ',');
+  };
+
+  const optimisticPatchForAction = (booking: Booking, action: OpsAction): Partial<Booking> => {
+    const now = new Date().toISOString();
+    switch (action) {
+      case 'reserved':
+        return {
+          gate_status: GATE_STATUS.RESERVED,
+          status: 'reserved',
+          arrived_at: null,
+          departed_at: null,
+          checked_in_at: null,
+          checked_out_at: null,
+          highlight_code: 'none',
+          ops_hidden: false,
+          ops_hidden_reason: null,
+        };
+      case 'arrived':
+        return { gate_status: GATE_STATUS.ARRIVED, status: 'checked_in', arrived_at: booking.arrived_at || now, checked_in_at: booking.checked_in_at || now, checked_out_at: null, highlight_code: 'none', ops_hidden: false, ops_hidden_reason: null };
+      case 'arrived_key_taken':
+        return { gate_status: GATE_STATUS.ARRIVED_KEY_TAKEN, status: 'checked_in', arrived_at: booking.arrived_at || now, checked_in_at: booking.checked_in_at || now, checked_out_at: null, highlight_code: 'key', ops_hidden: false, ops_hidden_reason: null };
+      case 'take_key':
+        return { gate_status: GATE_STATUS.TAKE_KEY, highlight_code: 'key' };
+      case 'departed':
+        return { gate_status: GATE_STATUS.DEPARTED, status: 'checked_out', departed_at: booking.departed_at || now, checked_in_at: booking.checked_in_at || now, checked_out_at: booking.checked_out_at || now, ops_hidden: true, ops_hidden_reason: 'departed' };
+      case 'no_show':
+        return { gate_status: GATE_STATUS.NO_SHOW, highlight_code: 'none', ops_hidden: false, ops_hidden_reason: null };
+      case 'cancelled':
+        return { gate_status: GATE_STATUS.CANCELLED, status: 'cancelled', checked_in_at: null, checked_out_at: null, highlight_code: 'none', ops_hidden: true, ops_hidden_reason: 'cancelled' };
+      default:
+        return {};
+    }
+  };
+
+  const updateBookingStatus = async (bookingId: string, action: OpsAction): Promise<boolean> => {
+    const booking = findBookingById(bookingId);
+    if (!booking || pendingByIdRef.current[bookingId]) return false;
+
+    logOpsClick('clicked', { bookingId, reference: booking.reference, action });
+    const snapshot = { ...booking };
+    pendingByIdRef.current = { ...pendingByIdRef.current, [bookingId]: true };
+    setPendingById((prev) => ({ ...prev, [bookingId]: true }));
+    setRecentlyUpdatedById((prev) => ({ ...prev, [bookingId]: Date.now() }));
+    patchBookingInLists(bookingId, optimisticPatchForAction(booking, action));
+    logOpsClick('optimistic update applied', { bookingId });
+
+    try {
+      const res = await fetch('/api/admin/bookings/ops-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookingId, action }),
+      });
+      const data = (await parseJsonFromResponse(res)) as { booking?: Partial<Booking>; error?: string };
+      if (!res.ok || !data.booking) {
+        throw new Error(data.error || 'Failed to update booking');
+      }
+
+      patchBookingInLists(bookingId, data.booking);
+      logOpsClick('save success', { bookingId, action });
+      return true;
+    } catch (err: unknown) {
+      restoreBookingInLists(bookingId, snapshot);
+      setRecentlyUpdatedById((prev) => {
+        const next = { ...prev };
+        delete next[bookingId];
+        return next;
+      });
+      const message = err instanceof Error ? err.message : 'Could not update booking';
+      logOpsClick('save failed', { bookingId, action, error: message });
+      toast({ title: 'Update failed', description: `${booking.reference}: ${message}`, variant: 'destructive' });
+      return false;
+    } finally {
+      setPendingById((prev) => {
+        const next = { ...prev };
+        delete next[bookingId];
+        pendingByIdRef.current = next;
+        return next;
+      });
+    }
+  };
+
+  const toggleSelected = (bookingId: string, checked: boolean) => {
+    setSelectedBookingIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(bookingId);
+      else next.delete(bookingId);
+      return next;
+    });
   };
 
   const handleUnhide = (booking: Booking) => {
@@ -329,6 +505,22 @@ export default function TodayServerClient({
     return b.gate_status === GATE_STATUS.NO_SHOW;
   }
 
+  function isArrivalRemaining(b: { gate_status?: string | null; status?: string }) {
+    return !isCancelledBooking(b) && !isNoShowBooking(b) && ![
+      GATE_STATUS.ARRIVED,
+      GATE_STATUS.ARRIVED_KEY_TAKEN,
+      GATE_STATUS.DEPARTED,
+    ].includes(b.gate_status as any);
+  }
+
+  function isDepartureRemaining(b: { gate_status?: string | null; status?: string }) {
+    return !isCancelledBooking(b) && !isNoShowBooking(b) && b.gate_status !== GATE_STATUS.DEPARTED;
+  }
+
+  function isKeysToTakeRemaining(b: { gate_status?: string | null; status?: string }) {
+    return !isCancelledBooking(b) && b.gate_status === GATE_STATUS.TAKE_KEY;
+  }
+
   function matchesKeyFilters<T extends { gate_status?: string | null }>(b: T) {
     if (filterArrivedKeyTaken) return b.gate_status === GATE_STATUS.ARRIVED_KEY_TAKEN;
     if (filterKeysTaken) return b.gate_status === GATE_STATUS.TAKE_KEY || b.gate_status === GATE_STATUS.ARRIVED_KEY_TAKEN;
@@ -341,29 +533,33 @@ export default function TodayServerClient({
     section: 'arrivals' | 'departures'
   ): T[] {
     return bookings.filter((b) => {
-      if (isCancelledBooking(b)) return false;
-      if (section === 'departures' && isNoShowBooking(b)) return false;
-      if (!showHidden && b.ops_hidden && !(section === 'arrivals' && isNoShowBooking(b))) return false;
+      const id = (b as { id?: string }).id;
+      const keepVisible = Boolean(id && recentlyUpdatedById[id]);
+      if (!keepVisible && isCancelledBooking(b)) return false;
+      if (!keepVisible && section === 'departures' && isNoShowBooking(b)) return false;
+      if (!keepVisible && !showHidden && b.ops_hidden && !(section === 'arrivals' && isNoShowBooking(b))) return false;
       return matchesKeyFilters(b);
     });
   }
 
   const visibleArrivals = useMemo(() => {
     return applyStatusFilters(sortedArrivals, 'arrivals');
-  }, [sortedArrivals, showHidden, filterKeysTaken, filterArrivedKeyTaken]);
+  }, [sortedArrivals, showHidden, filterKeysTaken, filterArrivedKeyTaken, recentlyUpdatedById]);
 
   const visibleDepartures = useMemo(() => {
     const filtered = applyStatusFilters(sortedDepartures, 'departures');
     // Hide departures marked as "Departed" unless "Show hidden" is on
-    return showHidden ? filtered : filtered.filter((b) => b.gate_status !== GATE_STATUS.DEPARTED);
-  }, [sortedDepartures, showHidden, filterKeysTaken, filterArrivedKeyTaken]);
+    return showHidden
+      ? filtered
+      : filtered.filter((b) => b.gate_status !== GATE_STATUS.DEPARTED);
+  }, [sortedDepartures, showHidden, filterKeysTaken, filterArrivedKeyTaken, recentlyUpdatedById]);
 
   // Counts for filter buttons (among rows visible when Show hidden is considered; cancelled/no-show departures excluded)
   const allVisibleToday = useMemo(() => {
     const a = applyStatusFilters(sortedArrivals, 'arrivals');
     const d = applyStatusFilters(sortedDepartures, 'departures');
     return [...a, ...d];
-  }, [sortedArrivals, sortedDepartures, showHidden, filterKeysTaken, filterArrivedKeyTaken]);
+  }, [sortedArrivals, sortedDepartures, showHidden, filterKeysTaken, filterArrivedKeyTaken, recentlyUpdatedById]);
 
   const keysTakenCount = useMemo(
     () => allVisibleToday.filter((b) => b.gate_status === 'take_key' || b.gate_status === 'arrived_key_taken').length,
@@ -375,6 +571,12 @@ export default function TodayServerClient({
     [allVisibleToday]
   );
 
+  const liveKpis = useMemo(() => ({
+    arrivalsRemaining: visibleArrivals.filter(isArrivalRemaining).length,
+    departuresRemaining: visibleDepartures.filter(isDepartureRemaining).length,
+    keysToTake: visibleArrivals.filter(isKeysToTakeRemaining).length,
+  }), [visibleArrivals, visibleDepartures]);
+
   const sortedCurrentlyParked = useMemo(() => {
     return sortBookings(currentlyParked, parkedSort, 'start_at');
   }, [currentlyParked, parkedSort]);
@@ -384,8 +586,7 @@ export default function TodayServerClient({
     const grouped: Record<string, Booking[]> = {};
     
     bookings.forEach(booking => {
-      const date = new Date(booking[dateField]);
-      const dateKey = date.toISOString().split('T')[0]; // YYYY-MM-DD
+      const dateKey = getBookingDateKey(booking, dateField);
       
       if (!grouped[dateKey]) {
         grouped[dateKey] = [];
@@ -399,12 +600,7 @@ export default function TodayServerClient({
     return sortedDates.map(date => ({
       date,
       bookings: grouped[date],
-      displayDate: new Date(date).toLocaleDateString('en-GB', {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
-      })
+      displayDate: formatDisplayDate(date)
     }));
   };
 
@@ -510,32 +706,76 @@ export default function TodayServerClient({
   const groupedByDay = useMemo(() => {
     const allDates = new Set<string>();
     visibleArrivals.forEach((booking) => {
-      allDates.add(new Date(booking.start_at).toISOString().split('T')[0]);
+      allDates.add(getBookingDateKey(booking, 'start_at'));
     });
     visibleDepartures.forEach((booking) => {
-      allDates.add(new Date(booking.end_at).toISOString().split('T')[0]);
+      allDates.add(getBookingDateKey(booking, 'end_at'));
     });
     const sortedDates = Array.from(allDates).sort();
     return sortedDates.map((date) => {
       const arrivalsForDate = visibleArrivals.filter(
-        (b) => new Date(b.start_at).toISOString().split('T')[0] === date
+        (b) => getBookingDateKey(b, 'start_at') === date
       );
       const departuresForDate = visibleDepartures.filter(
-        (b) => new Date(b.end_at).toISOString().split('T')[0] === date
+        (b) => getBookingDateKey(b, 'end_at') === date
       );
       return {
         date,
-        displayDate: new Date(date).toLocaleDateString('en-GB', {
-          weekday: 'long',
-          day: 'numeric',
-          month: 'long',
-          year: 'numeric'
-        }),
+        displayDate: formatDisplayDate(date),
         arrivals: arrivalsForDate,
         departures: departuresForDate
       };
     });
   }, [visibleArrivals, visibleDepartures]);
+
+  const visibleOperationalBookings = useMemo(
+    () => [...visibleArrivals, ...visibleDepartures],
+    [visibleArrivals, visibleDepartures]
+  );
+  const visibleOperationalIds = useMemo(
+    () => Array.from(new Set(visibleOperationalBookings.map((booking) => booking.id))),
+    [visibleOperationalBookings]
+  );
+  const selectedVisibleCount = visibleOperationalIds.filter((id) => selectedBookingIds.has(id)).length;
+  const allVisibleSelected = visibleOperationalIds.length > 0 && selectedVisibleCount === visibleOperationalIds.length;
+
+  const selectAllVisible = (checked: boolean) => {
+    setSelectedBookingIds((prev) => {
+      const next = new Set(prev);
+      for (const id of visibleOperationalIds) {
+        if (checked) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedBookingIds(new Set());
+
+  const runBulkAction = async (action: OpsAction) => {
+    const ids = Array.from(selectedBookingIds);
+    if (ids.length === 0) return;
+    if (action === 'cancelled' && !window.confirm(`Cancel ${ids.length} selected booking${ids.length === 1 ? '' : 's'}?`)) {
+      return;
+    }
+
+    const results = await Promise.all(ids.map(async (id) => ({ id, ok: await updateBookingStatus(id, action) })));
+    const failed = results.filter((result) => !result.ok);
+    setSelectedBookingIds((prev) => {
+      const next = new Set(prev);
+      for (const result of results) {
+        if (result.ok) next.delete(result.id);
+      }
+      return next;
+    });
+    if (failed.length > 0) {
+      toast({
+        title: 'Bulk update partially failed',
+        description: `${failed.length} booking${failed.length === 1 ? '' : 's'} could not be updated.`,
+        variant: 'destructive',
+      });
+    }
+  };
 
   const StatCard = ({ label, value, delta, variant, rightSlot }: {
     label: string;
@@ -577,20 +817,23 @@ export default function TodayServerClient({
     booking,
     type,
     section,
-    onBookingUpdated,
     showHidden,
     onUnhide,
+    isSelected,
+    isPending,
+    onSelectChange,
+    onQuickAction,
   }: {
     booking: Booking;
     type: 'arrival' | 'departure' | 'parked';
     section?: 'arrivals' | 'departures' | 'parked';
-    onBookingUpdated?: () => void;
     showHidden?: boolean;
     onUnhide?: (booking: Booking) => void;
+    isSelected: boolean;
+    isPending: boolean;
+    onSelectChange: (checked: boolean) => void;
+    onQuickAction: (action: OpsAction) => void;
   }) => {
-    const { toast } = useToast();
-    const time = type === 'arrival' ? booking.start_at : booking.end_at;
-    
     // Calculate number of days staying
     const calculateDays = () => {
       const start = new Date(booking.start_at);
@@ -600,16 +843,6 @@ export default function TodayServerClient({
       return diffDays;
     };
     
-    const [gateStatusLocal, setGateStatusLocal] = useState<string | null>(booking.gate_status ?? null);
-    const [isPending, startTransition] = useTransition();
-    const lastUpdateRef = useRef<{ gate_status: string | null } | null>(null);
-
-    useEffect(() => {
-      const next = booking.gate_status ?? null;
-      if (lastUpdateRef.current && booking.gate_status === lastUpdateRef.current.gate_status) return;
-      setGateStatusLocal(next);
-    }, [booking.gate_status]);
-
     const handleRowClick = () => {
       if (!highlightMode) handleBookingClick(booking);
     };
@@ -620,7 +853,7 @@ export default function TodayServerClient({
       booking.highlight_code === 'key'
     );
     const effectiveHighlightCode: BookingHighlightCode = isKeyTaken ? 'key' : (booking.highlight_code || 'none');
-    const displayGateStatus = gateStatusLocal ?? GATE_STATUS.NONE;
+    const displayGateStatus = booking.gate_status ?? GATE_STATUS.RESERVED;
 
     const rowClass = cn(
       'group border-b transition-colors',
@@ -629,75 +862,42 @@ export default function TodayServerClient({
     );
 
     const handleGateStatusChange = (value: string) => {
-      const next = value === GATE_STATUS.NONE ? null : value;
-      setGateStatusLocal(next);
-      startTransition(async () => {
-        try {
-          const res = await fetch(`/api/admin/bookings/${booking.id}/gate-status`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ gateStatus: next }),
-          });
-          const data = (await parseJsonFromResponse(res)) as { booking?: Record<string, unknown>; error?: string };
-          if (!res.ok) {
-            throw new Error(data.error || 'Failed to update gate status');
-          }
-          const b = data?.booking;
-          const updated: Booking = {
-            ...booking,
-            gate_status: (b?.gate_status as string | null | undefined) ?? next ?? undefined,
-            checked_in_at: (b?.checked_in_at as string | null | undefined) ?? booking.checked_in_at,
-            checked_out_at: (b?.checked_out_at as string | null | undefined) ?? booking.checked_out_at,
-            status: (b?.status as string | undefined) ?? booking.status,
-            highlight_code: (b?.highlight_code as Booking['highlight_code'] | undefined) ?? booking.highlight_code,
-            ...(b && (b.ops_hidden !== undefined || b.ops_hidden_reason !== undefined)
-              ? { ops_hidden: Boolean(b.ops_hidden), ops_hidden_reason: (b.ops_hidden_reason as string | null) ?? null }
-              : {}),
-          };
-          setArrivals((prev) => {
-            const nextList = prev.map((x) => (x.id === booking.id ? updated : x));
-            if (next === GATE_STATUS.CANCELLED) return nextList.filter((x) => x.id !== booking.id);
-            return nextList;
-          });
-          setDepartures((prev) => {
-            const nextList = prev.map((x) => (x.id === booking.id ? updated : x));
-            if (next === GATE_STATUS.DEPARTED || next === GATE_STATUS.CANCELLED || next === GATE_STATUS.NO_SHOW) return nextList.filter((x) => x.id !== booking.id);
-            return nextList;
-          });
-          setCurrentlyParked((prev) => prev.map((x) => (x.id === booking.id ? updated : x)));
-          lastUpdateRef.current = { gate_status: next };
-          toast({ title: 'Gate status updated', description: gateStatusLabel(next) });
-          onBookingUpdated?.();
-          setTimeout(() => router.refresh(), 300);
-        } catch (err: unknown) {
-          setGateStatusLocal(booking.gate_status ?? null);
-          lastUpdateRef.current = null;
-          toast({ title: 'Error', description: err instanceof Error ? err.message : 'Could not update', variant: 'destructive' });
-        }
-      });
+      if (value === GATE_STATUS.NONE) return;
+      onQuickAction(value as OpsAction);
+    };
+
+    const handleQuickKey = (event: React.KeyboardEvent<HTMLTableRowElement>) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("button,input,select,textarea,[role='button']")) return;
+      const key = event.key.toLowerCase();
+      if (key === "a" && section !== "departures") {
+        event.preventDefault();
+        handleGateStatusChange(GATE_STATUS.ARRIVED);
+      } else if (key === "k" && section !== "departures") {
+        event.preventDefault();
+        handleGateStatusChange(GATE_STATUS.ARRIVED_KEY_TAKEN);
+      } else if (key === "d") {
+        event.preventDefault();
+        handleGateStatusChange(GATE_STATUS.DEPARTED);
+      }
     };
 
     const gateStatusOptions = useMemo(() => {
-      if (section === 'departures') {
-        return GATE_STATUS_OPTIONS.filter(
-          (o) =>
-            o.value === GATE_STATUS.NONE ||
-            o.value === GATE_STATUS.NO_SHOW ||
-            o.value === GATE_STATUS.DEPARTED
-        );
-      }
-      if (section === 'arrivals') {
-        return GATE_STATUS_OPTIONS; // includes Cancelled (arrivals only)
-      }
-      // Parked: full list except Cancelled (Cancelled is for arrivals only)
-      return GATE_STATUS_OPTIONS.filter((o) => o.value !== GATE_STATUS.CANCELLED);
-    }, [section]);
+      return GATE_STATUS_OPTIONS;
+    }, []);
 
     // Single dropdown: gate_status only (— Status — / Arrived / No Show / Take Key / Arrived & Key Taken / Departed).
     return (
-      <tr className={rowClass}>
+      <tr className={rowClass} tabIndex={0} onKeyDown={handleQuickKey}>
         <td colSpan={3} className="px-1.5 py-1 cursor-pointer align-middle text-inherit" onClick={handleRowClick}>
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm">
+            <span onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} className="inline-flex items-center">
+              <Checkbox
+                checked={isSelected}
+                onCheckedChange={(checked) => onSelectChange(checked === true)}
+                aria-label={`Select booking ${booking.reference}`}
+              />
+            </span>
             {isKeyTaken && (
               <span className="inline-flex items-center text-inherit" title="Key taken">
                 <KeyRound className="h-4 w-4 shrink-0" />
@@ -756,6 +956,11 @@ export default function TodayServerClient({
                 HIDDEN
               </span>
             )}
+            {isPending && (
+              <span className="inline-flex items-center h-5 rounded-md px-1.5 py-0.5 text-xs font-medium bg-blue-50 text-blue-800">
+                Saving...
+              </span>
+            )}
             {booking.ops_hidden && showHidden && onUnhide && (
               <Button type="button" variant="outline" size="sm" className="h-6 text-xs" onClick={(e) => { e.stopPropagation(); onUnhide(booking); }}>
                 Unhide
@@ -765,12 +970,12 @@ export default function TodayServerClient({
         </td>
         <td colSpan={3} className="px-1.5 py-1 cursor-pointer align-middle text-inherit" onClick={handleRowClick}>
           <span className="text-xs font-normal">
-            {new Date(booking.start_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}, {new Date(booking.start_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+            {formatBookingDateTime(booking, 'start_at')}
           </span>
         </td>
         <td colSpan={3} className="px-1.5 py-1 cursor-pointer align-middle text-inherit" onClick={handleRowClick}>
           <span className="text-xs font-normal">
-            {new Date(booking.end_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}, {new Date(booking.end_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+            {formatBookingDateTime(booking, 'end_at')}
           </span>
         </td>
         <td colSpan={3} className="px-1.5 py-1 align-middle text-inherit" onClick={(e) => e.stopPropagation()}>
@@ -778,6 +983,35 @@ export default function TodayServerClient({
             <div className="flex flex-wrap justify-end gap-1 text-sm">
               <span>{calculateDays()}d</span>
               <span>£{booking.money_charged || 0}</span>
+            </div>
+            <div className="flex flex-wrap justify-end gap-1">
+              {section !== "departures" && (
+                <>
+                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={isPending} onClick={() => onQuickAction('arrived')}>
+                    Arrived
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={isPending} onClick={() => onQuickAction('arrived_key_taken')}>
+                    Arrived + Key
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={isPending} onClick={() => onQuickAction('take_key')}>
+                    Take Key
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={isPending} onClick={() => onQuickAction('no_show')}>
+                    No Show
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={isPending} onClick={() => onQuickAction('reserved')}>
+                    Reserved
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={isPending} onClick={() => onQuickAction('cancelled')}>
+                    Cancelled
+                  </Button>
+                </>
+              )}
+              {section !== "arrivals" && (
+                <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={isPending} onClick={() => onQuickAction('departed')}>
+                  Departed
+                </Button>
+              )}
             </div>
             <Select value={displayGateStatus === '' ? undefined : displayGateStatus} onValueChange={handleGateStatusChange} disabled={isPending}>
               <SelectTrigger className="h-7 px-1 py-0 bg-transparent border-0 shadow-none gap-1 cursor-pointer focus:ring-0 focus:ring-offset-0 min-w-0 w-auto [&>svg]:shrink-0 [&>span:first-of-type]:sr-only">
@@ -832,18 +1066,24 @@ export default function TodayServerClient({
         )}
 
         {/* KPIs */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           <StatCard 
-            label="Arrivals" 
-            value={kpis.arrivals} 
+            label="Arrivals Remaining" 
+            value={liveKpis.arrivalsRemaining} 
             variant="success" 
             rightSlot={<LogIn className="h-4 w-4 text-blue-500" />} 
           />
           <StatCard 
-            label="Departures" 
-            value={kpis.departures} 
+            label="Departures Remaining" 
+            value={liveKpis.departuresRemaining} 
             variant="danger" 
             rightSlot={<LogOut className="h-4 w-4 text-red-500" />} 
+          />
+          <StatCard
+            label="Keys to Take"
+            value={liveKpis.keysToTake}
+            variant="warning"
+            rightSlot={<KeyRound className="h-4 w-4 text-yellow-600" />}
           />
           <StatCard 
             label="Currently Parked" 
@@ -865,7 +1105,7 @@ export default function TodayServerClient({
         </div>
 
         {/* Arrivals and Departures by Day */}
-        <section className="w-full -mx-4 md:-mx-6 bg-white rounded-lg border border-gray-200 overflow-hidden">
+        <section className="bg-white rounded-lg border border-gray-200 overflow-hidden">
           <div className="p-4 md:p-6 border-b border-gray-200">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="shrink-0">
@@ -955,6 +1195,50 @@ export default function TodayServerClient({
             </div>
           </div>
           {!arrivalsDeparturesCollapsed && (
+            <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 px-4 py-3 md:px-6">
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                <Checkbox
+                  checked={allVisibleSelected}
+                  onCheckedChange={(checked) => selectAllVisible(checked === true)}
+                  disabled={visibleOperationalIds.length === 0}
+                  aria-label="Select all visible bookings"
+                />
+                <span>Select visible</span>
+              </label>
+              {selectedBookingIds.size > 0 && (
+                <div className="flex flex-wrap items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
+                  <span className="text-sm font-medium text-blue-900">
+                    {selectedBookingIds.size} selected
+                  </span>
+                  <Button type="button" size="sm" variant="outline" onClick={() => runBulkAction('arrived')}>
+                    Mark Arrived
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={() => runBulkAction('arrived_key_taken')}>
+                    Mark Arrived + Key Taken
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={() => runBulkAction('take_key')}>
+                    Mark Take Key
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={() => runBulkAction('departed')}>
+                    Mark Departed
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={() => runBulkAction('no_show')}>
+                    Mark No Show
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={() => runBulkAction('reserved')}>
+                    Reset to Reserved
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={() => runBulkAction('cancelled')}>
+                    Cancel Booking
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" onClick={clearSelection}>
+                    Clear
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+          {!arrivalsDeparturesCollapsed && (
             <div className="overflow-x-auto">
               <table className="min-w-full table-fixed divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -975,6 +1259,9 @@ export default function TodayServerClient({
                   ) : (
                     groupedByDay.map((dayGroup) => {
                       const isCollapsed = collapsedDates.has(dayGroup.date);
+                      const arrivalRemainingCount = dayGroup.arrivals.filter(isArrivalRemaining).length;
+                      const departureRemainingCount = dayGroup.departures.filter(isDepartureRemaining).length;
+                      const keysToTakeCount = dayGroup.arrivals.filter(isKeysToTakeRemaining).length;
                       return (
                         <React.Fragment key={dayGroup.date}>
                           {/* Date Header */}
@@ -1008,9 +1295,17 @@ export default function TodayServerClient({
                                     )}
                                   </Button>
                                 </div>
-                                <span className="text-xs text-gray-500">
-                                  {dayGroup.arrivals.length} {dayGroup.arrivals.length === 1 ? 'arrival' : 'arrivals'}, {dayGroup.departures.length} {dayGroup.departures.length === 1 ? 'departure' : 'departures'}
-                                </span>
+                                <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
+                                  <span className="rounded-full bg-blue-100 px-2 py-0.5 font-medium text-blue-800">
+                                    {arrivalRemainingCount} {arrivalRemainingCount === 1 ? 'arrival' : 'arrivals'}
+                                  </span>
+                                  <span className="rounded-full bg-yellow-100 px-2 py-0.5 font-medium text-yellow-900">
+                                    {keysToTakeCount} keys to take
+                                  </span>
+                                  <span className="rounded-full bg-green-100 px-2 py-0.5 font-medium text-green-800">
+                                    {departureRemainingCount} {departureRemainingCount === 1 ? 'departure' : 'departures'}
+                                  </span>
+                                </div>
                               </div>
                             </td>
                           </tr>
@@ -1026,13 +1321,24 @@ export default function TodayServerClient({
                                           Arrivals
                                         </span>
                                         <span className="absolute right-4 rounded-full bg-blue-100 text-blue-800 text-xs font-medium px-2 py-0.5">
-                                          {dayGroup.arrivals.length}
+                                          {arrivalRemainingCount}
                                         </span>
                                       </div>
                                     </td>
                                   </tr>
                                   {dayGroup.arrivals.map((booking) => (
-                                    <BookingRow key={`arrival-${booking.id}`} booking={booking} type="arrival" section="arrivals" onBookingUpdated={handleBookingUpdated} showHidden={showHidden} onUnhide={handleUnhide} />
+                                    <BookingRow
+                                      key={`arrival-${booking.id}`}
+                                      booking={booking}
+                                      type="arrival"
+                                      section="arrivals"
+                                      showHidden={showHidden}
+                                      onUnhide={handleUnhide}
+                                      isSelected={selectedBookingIds.has(booking.id)}
+                                      isPending={Boolean(pendingById[booking.id])}
+                                      onSelectChange={(checked) => toggleSelected(booking.id, checked)}
+                                      onQuickAction={(action) => updateBookingStatus(booking.id, action)}
+                                    />
                                   ))}
                                 </>
                               )}
@@ -1046,13 +1352,24 @@ export default function TodayServerClient({
                                           Departures
                                         </span>
                                         <span className="absolute right-4 rounded-full bg-white/25 text-white text-xs font-medium px-2 py-0.5">
-                                          {dayGroup.departures.length}
+                                          {departureRemainingCount}
                                         </span>
                                       </div>
                                     </td>
                                   </tr>
                                   {dayGroup.departures.map((booking) => (
-                                    <BookingRow key={`departure-${booking.id}`} booking={booking} type="departure" section="departures" onBookingUpdated={handleBookingUpdated} showHidden={showHidden} onUnhide={handleUnhide} />
+                                    <BookingRow
+                                      key={`departure-${booking.id}`}
+                                      booking={booking}
+                                      type="departure"
+                                      section="departures"
+                                      showHidden={showHidden}
+                                      onUnhide={handleUnhide}
+                                      isSelected={selectedBookingIds.has(booking.id)}
+                                      isPending={Boolean(pendingById[booking.id])}
+                                      onSelectChange={(checked) => toggleSelected(booking.id, checked)}
+                                      onQuickAction={(action) => updateBookingStatus(booking.id, action)}
+                                    />
                                   ))}
                                 </>
                               )}
@@ -1155,7 +1472,18 @@ export default function TodayServerClient({
                         {!isCollapsed && (
                           <>
                             {group.bookings.map((booking) => (
-                              <BookingRow key={booking.id} booking={booking} type="parked" section="parked" onBookingUpdated={handleBookingUpdated} showHidden={showHidden} onUnhide={handleUnhide} />
+                              <BookingRow
+                                key={booking.id}
+                                booking={booking}
+                                type="parked"
+                                section="parked"
+                                showHidden={showHidden}
+                                onUnhide={handleUnhide}
+                                isSelected={selectedBookingIds.has(booking.id)}
+                                isPending={Boolean(pendingById[booking.id])}
+                                onSelectChange={(checked) => toggleSelected(booking.id, checked)}
+                                onQuickAction={(action) => updateBookingStatus(booking.id, action)}
+                              />
                             ))}
                           </>
                         )}

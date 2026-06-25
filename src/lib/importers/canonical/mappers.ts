@@ -3,10 +3,13 @@ import type { CanonicalBooking } from "./types";
 import type { HolidayExtrasParseStats } from "@/lib/importers/holidayExtras/parseHolidayExtras";
 import {
   isHolidayExtrasFile,
+  looksLikeExtz10Tab,
   looksLikeExt1Tsv,
+  parseHolidayExtrasExtz10Text,
   parseHolidayExtrasText,
 } from "@/lib/importers/holidayExtras/parseHolidayExtras";
 import { flyparksTextToStaging, looksLikeFlyparksDirectEmail } from "@/lib/ingest/flyparksTextToStaging";
+import { parkViaEmailBodyToStaging, looksLikeParkViaEmail } from "@/lib/ingest/parkviaEmailBodyToStaging";
 
 /**
  * Convert UK date/time format to ISO string
@@ -152,6 +155,38 @@ export function mapFlyparksEmailText(emailText: string): CanonicalBooking[] {
   ];
 }
 
+export function mapParkViaEmailText(emailText: string): CanonicalBooking[] {
+  const staging = parkViaEmailBodyToStaging(emailText);
+  const name = splitName(staging.customer_name);
+
+  return [
+    {
+      channel: "PARKVIA_EMAIL",
+      booking_reference: staging.reference,
+      third_party_reference: staging.reference,
+      start_at: staging.start_at,
+      end_at: staging.end_at,
+      vehicle_registration: staging.vehicle_reg,
+      vehicle_make: null,
+      vehicle_model: null,
+      vehicle_colour: null,
+      customer_firstname: name.first,
+      customer_lastname: name.last,
+      customer_email: staging.customer_email,
+      customer_phone: staging.customer_phone,
+      outbound_flight_number: null,
+      return_flight_number: null,
+      total_price: staging.total_price,
+      money_received: staging.money_received,
+      money_charged: staging.total_price,
+      currency: "GBP",
+      product_code: staging.product_code,
+      notes: staging.notes,
+      raw: staging.raw_json,
+    },
+  ];
+}
+
 export type DetectResult =
   | {
       bookings: CanonicalBooking[];
@@ -166,6 +201,11 @@ export type DetectResult =
  */
 export function detectAndMapFromAttachment(filename: string, text: string): DetectResult {
   const name = filename.toLowerCase();
+
+  if (looksLikeExtz10Tab(filename, text)) {
+    const { bookings, stats } = parseHolidayExtrasExtz10Text(text);
+    return { bookings, format: "HOLIDAY_EXTRAS", holidayExtrasStats: stats };
+  }
 
   // Holiday Extras EXT1 TSV - detect by content first (not extension), then parse
   try {
@@ -186,6 +226,17 @@ export function detectAndMapFromAttachment(filename: string, text: string): Dete
       }
     } catch (err) {
       console.error("[detectAndMap] Flyparks parse failed:", err);
+    }
+  }
+
+  if (name === "email-body.txt" || name.includes("email-body") || looksLikeParkViaEmail({ subject: filename, body: text })) {
+    try {
+      const parkvia = mapParkViaEmailText(text);
+      if (parkvia && parkvia.length > 0 && parkvia[0].booking_reference) {
+        return { bookings: parkvia, format: null };
+      }
+    } catch (err) {
+      console.error("[detectAndMap] ParkVia parse failed:", err);
     }
   }
 

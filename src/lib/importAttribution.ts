@@ -13,6 +13,7 @@
 export type BookingSource =
   | "holiday_extras"
   | "holidayextras"
+  | "parkvia"
   | "aph"
   | "cavu"
   | "direct"
@@ -23,6 +24,8 @@ export type ParserKey =
   | "holiday_extras_email_import"
   | "cavu_email_import"
   | "flyparks_email_import"
+  | "parkvia_email_body"
+  | "holiday_extras_extz10_tab"
   | "unknown";
 
 type Attribution = {
@@ -42,6 +45,11 @@ export const ATTRIBUTION_BY_PARSER: Record<ParserKey, Attribution> = {
     externalSource: "holiday_extras",
     detectedSource: "HOLIDAY_EXTRAS",
   },
+  holiday_extras_extz10_tab: {
+    bookingSource: "holiday_extras",
+    externalSource: "Holiday Extras EXTZ10",
+    detectedSource: "HOLIDAY_EXTRAS_EXTZ10",
+  },
   cavu_email_import: {
     bookingSource: "cavu",
     externalSource: "cavu",
@@ -51,6 +59,11 @@ export const ATTRIBUTION_BY_PARSER: Record<ParserKey, Attribution> = {
     bookingSource: "other",
     externalSource: "Flyparks Email Import",
     detectedSource: "FLYPARKS_EMAIL",
+  },
+  parkvia_email_body: {
+    bookingSource: "parkvia",
+    externalSource: "ParkVia",
+    detectedSource: "PARKVIA_EMAIL",
   },
   unknown: {
     bookingSource: "other",
@@ -76,6 +89,10 @@ export function channelToParserKey(channel: string | null | undefined): ParserKe
       return "cavu_email_import";
     case "FLYPARKS_EMAIL":
       return "flyparks_email_import";
+    case "PARKVIA_EMAIL":
+      return "parkvia_email_body";
+    case "HOLIDAY_EXTRAS_EXTZ10":
+      return "holiday_extras_extz10_tab";
     default:
       return "unknown";
   }
