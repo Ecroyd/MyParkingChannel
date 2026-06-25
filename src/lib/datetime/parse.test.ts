@@ -1,6 +1,81 @@
 // src/lib/datetime/parse.test.ts
 
-import { isExtz10File, overrideStartToMidnight } from "./parse";
+import {
+  formatBookingDateTimeForTenant,
+  isExtz10File,
+  overrideStartToMidnight,
+  parseTenantLocalDateTimeToUtc,
+  resolveBookingTimesToUtc,
+  sanitizeSupplierDateTimeInput,
+} from "./parse";
+
+describe("tenant-local import and display", () => {
+  it("parses summer BST local 14:00 to 13:00 UTC", () => {
+    const utc = parseTenantLocalDateTimeToUtc({
+      date: "2026-06-25",
+      time: "14:00",
+      timezone: "Europe/London",
+    });
+    expect(utc).toBe("2026-06-25T13:00:00.000Z");
+    expect(
+      formatBookingDateTimeForTenant({
+        timestamp: utc,
+        timezone: "Europe/London",
+      })
+    ).toBe("25 Jun, 14:00");
+  });
+
+  it("parses winter GMT local 14:00 to 14:00 UTC", () => {
+    const utc = parseTenantLocalDateTimeToUtc({
+      date: "2026-12-25",
+      time: "14:00",
+      timezone: "Europe/London",
+    });
+    expect(utc).toBe("2026-12-25T14:00:00.000Z");
+    expect(
+      formatBookingDateTimeForTenant({
+        timestamp: utc,
+        timezone: "Europe/London",
+      })
+    ).toBe("25 Dec, 14:00");
+  });
+
+  it("repairs wrongly Z-suffixed supplier local datetimes via resolveBookingTimesToUtc", () => {
+    const times = resolveBookingTimesToUtc(
+      "2026-06-25T14:00:00.000Z",
+      "2026-06-29T18:00:00.000Z",
+      "Europe/London"
+    );
+    expect(times?.start_at).toBe("2026-06-25T13:00:00.000Z");
+    expect(times?.end_at).toBe("2026-06-29T17:00:00.000Z");
+  });
+
+  it("KWGHHW displays arrival 14:00 and departure 18:00 after correction", () => {
+    const times = resolveBookingTimesToUtc(
+      "2026-06-25T14:00:00.000Z",
+      "2026-06-29T18:00:00.000Z",
+      "Europe/London"
+    );
+    expect(
+      formatBookingDateTimeForTenant({
+        timestamp: times?.start_at,
+        timezone: "Europe/London",
+      })
+    ).toBe("25 Jun, 14:00");
+    expect(
+      formatBookingDateTimeForTenant({
+        timestamp: times?.end_at,
+        timezone: "Europe/London",
+      })
+    ).toBe("29 Jun, 18:00");
+  });
+
+  it("strips erroneous Z suffix from supplier input", () => {
+    expect(sanitizeSupplierDateTimeInput("2026-06-25T14:00:00.000Z")).toBe(
+      "2026-06-25T14:00:00"
+    );
+  });
+});
 
 describe("EXTZ10 file detection and midnight override", () => {
   describe("isExtz10File", () => {

@@ -7,6 +7,7 @@ import {
   mapSupplierStatusToBookingStatus,
   normalizeSupplierStatus,
 } from "@/lib/ingest/importStatusMapping";
+import { resolveBookingTimesToUtc, sanitizeSupplierDateTimeInput } from "@/lib/datetime/parse";
 
 type InRow = {
   source:string; reference:string;
@@ -233,20 +234,30 @@ export async function POST(req: Request) {
       
       if (startAtRaw && (typeof startAtRaw !== 'string' || startAtRaw.trim() !== '') &&
           endAtRaw && (typeof endAtRaw !== 'string' || endAtRaw.trim() !== '')) {
-        try {
-          const { data: parsed, error: parseErr } = await supabaseAdmin()
-            .rpc('normalise_booking_times', {
-              p_start: startAtRaw,
-              p_end: endAtRaw,
-              p_tz: tz
-            });
-          
-          if (!parseErr && parsed && parsed.length > 0) {
-            startAtParsed = parsed[0].start_utc || null;
-            endAtParsed = parsed[0].end_utc || null;
+        const clientResolved = resolveBookingTimesToUtc(
+          sanitizeSupplierDateTimeInput(String(startAtRaw)),
+          sanitizeSupplierDateTimeInput(String(endAtRaw)),
+          tz
+        );
+        if (clientResolved) {
+          startAtParsed = clientResolved.start_at;
+          endAtParsed = clientResolved.end_at;
+        } else {
+          try {
+            const { data: parsed, error: parseErr } = await supabaseAdmin()
+              .rpc('normalise_booking_times', {
+                p_start: sanitizeSupplierDateTimeInput(String(startAtRaw)),
+                p_end: sanitizeSupplierDateTimeInput(String(endAtRaw)),
+                p_tz: tz
+              });
+            
+            if (!parseErr && parsed && parsed.length > 0) {
+              startAtParsed = parsed[0].start_utc || null;
+              endAtParsed = parsed[0].end_utc || null;
+            }
+          } catch (err) {
+            // Will be caught in date validation below
           }
-        } catch (err) {
-          // Will be caught in date validation below
         }
       }
       

@@ -1,5 +1,5 @@
--- Diagnose the one-hour display shift reported for booking KWGHHW.
--- The UI should prefer start_at_local/end_at_local for display and grouping.
+-- Diagnose booking KWGHHW timezone storage vs Europe/London display.
+-- UI displays start_at/end_at once in tenant timezone (not start_at_local).
 select
   id,
   tenant_id,

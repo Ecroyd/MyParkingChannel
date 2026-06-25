@@ -1,4 +1,5 @@
 import { normalizeFlyparksEmailText } from "@/lib/ingest/flyparksTextToStaging";
+import { buildTenantLocalIso } from "@/lib/datetime/parse";
 
 export type ParkViaStaging = {
   reference: string | null;
@@ -81,8 +82,8 @@ function toLocalIso(value: string | null): string | null {
   if (!value) return null;
   const m = value.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
   if (!m) return null;
-  const [, dd, mm, yyyy, hh, min, sec] = m;
-  return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}T${hh.padStart(2, "0")}:${min}:${sec ?? "00"}`;
+  const [, dd, mm, yyyy, hh, min] = m;
+  return buildTenantLocalIso(`${dd}/${mm}/${yyyy}`, `${hh}:${min}`);
 }
 
 export function parkViaEmailBodyToStaging(rawText: string): ParkViaStaging {

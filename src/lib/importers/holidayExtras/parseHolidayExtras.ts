@@ -3,6 +3,7 @@ import {
   mapSupplierStatusToBookingStatus,
   normalizeSupplierStatus,
 } from "@/lib/ingest/importStatusMapping";
+import { parseNaiveLocalIsoToUtc } from "@/lib/datetime/parse";
 
 const trim = (v: unknown) => String(v ?? "").trim().replace(/^"|"$/g, "");
 
@@ -95,7 +96,7 @@ function toIsoFromParts(
       ? `${t.slice(0, 2)}:${t.slice(2, 4)}`
       : t || "00:00";
   if (!/^\d{2}:\d{2}$/.test(time)) return null;
-  return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}T${time}:00.000Z`;
+  return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}T${time}:00`;
 }
 
 function toIsoFromDMY6_HM(dmy6: string, hm: string) {
@@ -441,8 +442,10 @@ export function parseHolidayExtrasText(text: string): HolidayExtrasParseResult {
     }
 
     if (!endAt) {
-      const startMs = new Date(startAt).getTime();
-      endAt = new Date(startMs + 60 * 60 * 1000).toISOString();
+      const startUtc = parseNaiveLocalIsoToUtc(startAt);
+      endAt = startUtc
+        ? new Date(new Date(startUtc).getTime() + 60 * 60 * 1000).toISOString()
+        : null;
     }
 
     const surname = fieldAt(f, 3, offset) || null;

@@ -27,6 +27,10 @@ import {
 } from '@/lib/gateStatus';
 
 import { BookingHighlightCode } from '@/types/bookings';
+import {
+  formatBookingDateTimeForTenant,
+  tenantDateKeyFromUtc,
+} from '@/lib/datetime/parse';
 
 /** Parse response as JSON; throw a clear error if server returned HTML (e.g. 404/500 page). */
 async function parseJsonFromResponse(res: Response): Promise<unknown> {
@@ -43,20 +47,6 @@ async function parseJsonFromResponse(res: Response): Promise<unknown> {
 
 type BoardSection = 'arrivals' | 'departures' | 'parked';
 type OpsAction = 'reserved' | 'arrived' | 'arrived_key_taken' | 'take_key' | 'departed' | 'no_show' | 'cancelled';
-
-function parseLocalDateTimeParts(value?: string | null) {
-  if (!value) return null;
-  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
-  if (!match) return null;
-  return {
-    year: Number(match[1]),
-    month: Number(match[2]),
-    day: Number(match[3]),
-    hour: match[4],
-    minute: match[5],
-    dateKey: `${match[1]}-${match[2]}-${match[3]}`,
-  };
-}
 
 function formatDisplayDate(dateKey: string) {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -248,40 +238,14 @@ export default function TodayServerClient({
   const findBookingById = (bookingId: string): Booking | null =>
     [...arrivals, ...departures, ...currentlyParked].find((b) => b.id === bookingId) ?? null;
 
-  const getBookingDateKey = (booking: Booking, dateField: 'start_at' | 'end_at') => {
-    const localValue = dateField === 'start_at' ? booking.start_at_local : booking.end_at_local;
-    const localParts = parseLocalDateTimeParts(localValue);
-    if (localParts) return localParts.dateKey;
+  const getBookingDateKey = (booking: Booking, dateField: 'start_at' | 'end_at') =>
+    tenantDateKeyFromUtc(booking[dateField], tenant.timezone || 'Europe/London');
 
-    const date = new Date(booking[dateField]);
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: tenant.timezone || 'Europe/London',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).formatToParts(date);
-    const part = (type: string) => parts.find((p) => p.type === type)?.value;
-    return `${part('year')}-${part('month')}-${part('day')}`;
-  };
-
-  const formatBookingDateTime = (booking: Booking, dateField: 'start_at' | 'end_at') => {
-    const localValue = dateField === 'start_at' ? booking.start_at_local : booking.end_at_local;
-    const localParts = parseLocalDateTimeParts(localValue);
-    if (localParts) {
-      const date = new Date(localParts.year, localParts.month - 1, localParts.day);
-      return `${date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}, ${localParts.hour}:${localParts.minute}`;
-    }
-
-    const date = new Date(booking[dateField]);
-    const formatter = new Intl.DateTimeFormat('en-GB', {
-      timeZone: tenant.timezone || 'Europe/London',
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
+  const formatBookingDateTime = (booking: Booking, dateField: 'start_at' | 'end_at') =>
+    formatBookingDateTimeForTenant({
+      timestamp: booking[dateField],
+      timezone: tenant.timezone || 'Europe/London',
     });
-    return formatter.format(date).replace(',', ',');
-  };
 
   const optimisticPatchForAction = (booking: Booking, action: OpsAction): Partial<Booking> => {
     const now = new Date().toISOString();
@@ -896,6 +860,7 @@ export default function TodayServerClient({
                 checked={isSelected}
                 onCheckedChange={(checked) => onSelectChange(checked === true)}
                 aria-label={`Select booking ${booking.reference}`}
+                className="bg-white border-gray-300 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
               />
             </span>
             {isKeyTaken && (
@@ -941,7 +906,7 @@ export default function TodayServerClient({
               <BookingHighlightIcon highlightCode={effectiveHighlightCode} />
             ) : null}
             <span>{booking.customer_name}</span>
-            <span className="text-sm font-semibold font-mono text-inherit bg-black/10 px-2 py-0.5 rounded tracking-wide">{booking.plate}</span>
+            <span className="text-sm font-semibold font-mono text-gray-900 bg-gray-200 px-2 py-0.5 rounded tracking-wide">{booking.plate}</span>
             {(booking as any).is_incomplete && (
               <span className="inline-flex items-center h-5 rounded-md px-1.5 py-0.5 text-xs font-medium bg-amber-50 text-amber-800">Incomplete</span>
             )}
@@ -983,35 +948,6 @@ export default function TodayServerClient({
             <div className="flex flex-wrap justify-end gap-1 text-sm">
               <span>{calculateDays()}d</span>
               <span>£{booking.money_charged || 0}</span>
-            </div>
-            <div className="flex flex-wrap justify-end gap-1">
-              {section !== "departures" && (
-                <>
-                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={isPending} onClick={() => onQuickAction('arrived')}>
-                    Arrived
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={isPending} onClick={() => onQuickAction('arrived_key_taken')}>
-                    Arrived + Key
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={isPending} onClick={() => onQuickAction('take_key')}>
-                    Take Key
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={isPending} onClick={() => onQuickAction('no_show')}>
-                    No Show
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={isPending} onClick={() => onQuickAction('reserved')}>
-                    Reserved
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={isPending} onClick={() => onQuickAction('cancelled')}>
-                    Cancelled
-                  </Button>
-                </>
-              )}
-              {section !== "arrivals" && (
-                <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={isPending} onClick={() => onQuickAction('departed')}>
-                  Departed
-                </Button>
-              )}
             </div>
             <Select value={displayGateStatus === '' ? undefined : displayGateStatus} onValueChange={handleGateStatusChange} disabled={isPending}>
               <SelectTrigger className="h-7 px-1 py-0 bg-transparent border-0 shadow-none gap-1 cursor-pointer focus:ring-0 focus:ring-offset-0 min-w-0 w-auto [&>svg]:shrink-0 [&>span:first-of-type]:sr-only">
@@ -1202,6 +1138,7 @@ export default function TodayServerClient({
                   onCheckedChange={(checked) => selectAllVisible(checked === true)}
                   disabled={visibleOperationalIds.length === 0}
                   aria-label="Select all visible bookings"
+                  className="bg-white border-gray-300 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
                 />
                 <span>Select visible</span>
               </label>

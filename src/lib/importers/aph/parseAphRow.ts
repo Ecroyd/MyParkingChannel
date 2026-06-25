@@ -1,32 +1,14 @@
+import { buildTenantLocalIso } from "@/lib/datetime/parse";
 import { aphV1 } from "./mapping";
 
 const trim = (s: unknown) => String(s ?? "").trim();
 
 /**
  * Parse UK date/time format: dd/mm/yy and hh:mm
- * Returns UTC ISO string or null
+ * Returns naive tenant-local ISO for staging normalisation.
  */
 function parseDateTimeUK(ddmmyy: string, hhmm: string): string | null {
-  const d = trim(ddmmyy);
-  const t = trim(hhmm);
-
-  // dd/mm/yy or dd/mm/yyyy
-  const m = d.match(/^(\d{2})\/(\d{2})\/(\d{2,4})$/);
-  if (!m) return null;
-
-  const day = Number(m[1]);
-  const month = Number(m[2]);
-  let year = Number(m[3]);
-  if (year < 100) year += 2000;
-
-  const tm = t.match(/^(\d{1,2}):(\d{2})$/);
-  const hour = tm ? Number(tm[1]) : 0;
-  const min = tm ? Number(tm[2]) : 0;
-
-  // Create as Europe/London local time, convert to UTC ISO
-  // For now, treat as UTC (you may want to use luxon for proper timezone handling)
-  const date = new Date(Date.UTC(year, month - 1, day, hour, min, 0));
-  return date.toISOString();
+  return buildTenantLocalIso(trim(ddmmyy), trim(hhmm) || "00:00");
 }
 
 function parseMoney(x: string): number | null {

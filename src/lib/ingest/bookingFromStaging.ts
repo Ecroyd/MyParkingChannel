@@ -3,6 +3,10 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
+  resolveBookingTimesToUtc,
+  sanitizeSupplierDateTimeInput,
+} from '@/lib/datetime/parse';
+import {
   mapSupplierStatusToBookingStatus,
   normalizeSupplierStatus,
 } from "@/lib/ingest/importStatusMapping";
@@ -111,9 +115,17 @@ async function normaliseTimes(
   endAtRaw: string,
   tz: string
 ): Promise<{ start_at: string; end_at: string } | { error: string }> {
+  const startSanitized = sanitizeSupplierDateTimeInput(startAtRaw);
+  const endSanitized = sanitizeSupplierDateTimeInput(endAtRaw);
+
+  const clientResolved = resolveBookingTimesToUtc(startSanitized, endSanitized, tz);
+  if (clientResolved) {
+    return clientResolved;
+  }
+
   const { data: parsed, error: parseErr } = await supabase.rpc("normalise_booking_times", {
-    p_start: startAtRaw,
-    p_end: endAtRaw,
+    p_start: startSanitized,
+    p_end: endSanitized,
     p_tz: tz,
   });
 

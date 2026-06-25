@@ -1,6 +1,7 @@
 // src/lib/suppliers/cavuEventsSync.ts
 import 'server-only';
 import { createAdminClient } from '@/lib/supabase/server';
+import { parseSupplierDateTimeToUtc } from '@/lib/datetime/parse';
 import { getCavuConfigForTenant } from './getTenantSupplierConfig';
 import {
   getEventsByAge,
@@ -240,8 +241,8 @@ export async function syncCavuEventsForTenant(
       tenant_id: tenantId,
       reference: booking.Reference,
       external_source: SUPPLIER_CODE,
-      start_at: booking.ArrivalDate,
-      end_at: booking.DepartureDate,
+      start_at: parseSupplierDateTimeToUtc(booking.ArrivalDate) ?? booking.ArrivalDate,
+      end_at: parseSupplierDateTimeToUtc(booking.DepartureDate) ?? booking.DepartureDate,
       customer_name: customerName,
       customer_email: booking.Customer?.Email ?? null,
       customer_phone: booking.Customer?.Mobile ?? null,

@@ -1,4 +1,4 @@
-// src/lib/ingest/flyparksTextToStaging.ts
+import { buildTenantLocalIso } from '@/lib/datetime/parse';
 export type FlyparksStaging = {
   reference: string | null;
   customer_name: string | null;
@@ -210,11 +210,7 @@ function toLocalIso(d: string | null, t: string | null): string | null {
   const date = extractDate(d);
   const time = extractTime(t);
   if (!date || !time) return null;
-
-  const [dd, mm, yyRaw] = date.split("/");
-  const yy = yyRaw.length === 2 ? `20${yyRaw}` : yyRaw;
-  const [hh, min] = time.split(":");
-  return `${yy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}T${hh.padStart(2, "0")}:${min}:00`;
+  return buildTenantLocalIso(date, time);
 }
 
 function splitVehicleModel(value: string | null): { make: string | null; model: string | null } {

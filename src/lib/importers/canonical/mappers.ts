@@ -1,4 +1,5 @@
 import Papa from "papaparse";
+import { parseSupplierDateTimeToUtc, buildTenantLocalIso } from "@/lib/datetime/parse";
 import type { CanonicalBooking } from "./types";
 import type { HolidayExtrasParseStats } from "@/lib/importers/holidayExtras/parseHolidayExtras";
 import {
@@ -12,21 +13,12 @@ import { flyparksTextToStaging, looksLikeFlyparksDirectEmail } from "@/lib/inges
 import { parkViaEmailBodyToStaging, looksLikeParkViaEmail } from "@/lib/ingest/parkviaEmailBodyToStaging";
 
 /**
- * Convert UK date/time format to ISO string
+ * Convert UK date/time format to naive tenant-local ISO (no Z suffix).
  * Supports: "26/01/2026" or "12/02/26" + "07:30" or "19:30"
  */
 export function toIsoFromDMY_HM(dmy: string | null, hm: string | null): string | null {
   if (!dmy) return null;
-  
-  const parts = dmy.split("/").map((x) => x.trim());
-  if (parts.length !== 3) return null;
-
-  let [dd, mm, yy] = parts;
-  if (yy.length === 2) yy = "20" + yy;
-
-  const time = (hm || "00:00").trim();
-  const iso = `${yy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}T${time.padStart(5, "0")}:00.000Z`;
-  return iso;
+  return buildTenantLocalIso(dmy, hm || "00:00");
 }
 
 export function parseMoney(str: string | null): number | null {
@@ -57,8 +49,8 @@ export function mapCavuHourlyCsv(csvText: string): CanonicalBooking[] {
       channel: "CAVU",
       booking_reference: r.booking_reference || null,
       third_party_reference: r.third_party_reference || null,
-      start_at: r.entry_datetime ? new Date(r.entry_datetime).toISOString() : null,
-      end_at: r.exit_datetime ? new Date(r.exit_datetime).toISOString() : null,
+      start_at: r.entry_datetime ? parseSupplierDateTimeToUtc(r.entry_datetime) : null,
+      end_at: r.exit_datetime ? parseSupplierDateTimeToUtc(r.exit_datetime) : null,
       vehicle_registration: r.license_plate || null,
       vehicle_make: r.vehicle_make || null,
       vehicle_model: r.vehicle_model || null,

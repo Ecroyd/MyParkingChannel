@@ -93,32 +93,7 @@ export function parseMoney(x?: string | number | null): number | null {
   return Number.isFinite(val) ? Math.round(val * 100) / 100 : null
 }
 
-// dd/mm/yyyy or yyyy-mm-dd; times like "14:30" or blank
-function parseDateTime(dateStr?: string | null, timeStr?: string | null): Date | null {
-  if (!dateStr || !dateStr.trim()) return null
-  const d = dateStr.trim()
-  let day: number, month: number, year: number
-  if (/^\d{2}\/\d{2}\/\d{4}$/.test(d)) {
-    const [dd, mm, yyyy] = d.split('/')
-    day = Number(dd); month = Number(mm); year = Number(yyyy)
-  } else if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
-    const [yyyy, mm, dd] = d.split('-')
-    day = Number(dd); month = Number(mm); year = Number(yyyy)
-  } else {
-    const dt = new Date(d)
-    if (!isNaN(dt.getTime())) return dt
-    return null
-  }
-
-  let hours = 12, minutes = 0
-  if (timeStr && timeStr.trim()) {
-    const m = timeStr.trim().match(/^(\d{1,2}):(\d{2})/)
-    if (m) { hours = Number(m[1]); minutes = Number(m[2]) }
-  }
-
-  // Treat as Europe/London local -> convert to ISO by app runtime
-  return new Date(Date.UTC(year, month - 1, day, hours, minutes))
-}
+import { parseTenantLocalDateTimeToUtc } from '@/lib/datetime/parse'
 
 export function mapCsvRowToBooking(row: Record<string, any>) {
   // Map headers -> canonical keys
@@ -143,9 +118,15 @@ export function mapCsvRowToBooking(row: Record<string, any>) {
     } as RowIn
   }
 
-  const startAt = parseDateTime(safe.arrival_date ?? null, safe.arrival_time ?? null)
-  const endAt   = parseDateTime(safe.departure_date ?? null, safe.departure_time ?? null)
-  const createdAt = parseDateTime(safe.created_date ?? null, null)
+  const startAtIso = parseTenantLocalDateTimeToUtc(safe.arrival_date ?? '', safe.arrival_time ?? '12:00')
+  const endAtIso = parseTenantLocalDateTimeToUtc(safe.departure_date ?? '', safe.departure_time ?? '12:00')
+  const createdAtIso = safe.created_date
+    ? parseTenantLocalDateTimeToUtc(safe.created_date, '00:00')
+    : null
+
+  const startAt = startAtIso ? new Date(startAtIso) : null
+  const endAt = endAtIso ? new Date(endAtIso) : null
+  const createdAt = createdAtIso ? new Date(createdAtIso) : null
 
   const moneyReceived = parseMoney(safe.money_received ?? null)
   const moneyCharged  = parseMoney(safe.money_charged ?? null)
