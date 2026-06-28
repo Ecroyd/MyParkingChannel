@@ -126,6 +126,7 @@ describe("staging → bookings promotion", () => {
     expect(payload.external_status).toBe("cancelled");
     expect(payload.external_source).toBe("holiday_extras");
     expect(payload.source).toBe("holiday_extras");
+    expect(payload).not.toHaveProperty("supplier_status");
     expect(payload.customer_email).toContain("@");
     expect(payload.plate).toBeNull();
   });

@@ -1,4 +1,6 @@
 import { buildTenantLocalIso } from '@/lib/datetime/parse';
+import { resolveCustomerName } from '@/lib/bookings/normalizeCustomerName';
+import { normalizeUkPlate } from '@/lib/ingest/plateGuess';
 export type FlyparksStaging = {
   reference: string | null;
   customer_name: string | null;
@@ -192,11 +194,35 @@ function extractTime(value: string | null): string | null {
   return value.match(/\b(\d{1,2}:\d{2})\b/)?.[1] ?? null;
 }
 
-function normalizePlate(value: string | null): string | null {
-  if (!value) return null;
-  const candidate = value.match(/\b[A-Z]{2}\d{2}\s?[A-Z]{3}\b/i)?.[0] ?? value;
-  const norm = candidate.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  return /^[A-Z0-9]{5,8}$/.test(norm) ? norm : null;
+function extractDearName(text: string): string | null {
+  const m = text.match(/\bDear\s+([A-Za-z][A-Za-z' -]{0,40}?)\s*,/i);
+  return m?.[1]?.trim() || null;
+}
+
+function extractForwardedCustomerEmail(text: string): string | null {
+  const markers = [
+    "Booking Confirmation",
+    "Payment Successful",
+    "YOUR BOOKING REFERENCE",
+    "Your transaction has been completed",
+  ];
+  let start = 0;
+  for (const marker of markers) {
+    const idx = text.search(new RegExp(marker, "i"));
+    if (idx >= 0) start = Math.max(start, idx);
+  }
+
+  const section = text.slice(start);
+  const toLines = [...section.matchAll(/^\s*To:\s*(.+)$/gim)];
+  for (const m of toLines) {
+    const email =
+      m[1].match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? null;
+    if (email && !/@flyparks/i.test(email) && !/noreply/i.test(email) && !/@myparkingchannel\.app$/i.test(email)) {
+      return email;
+    }
+  }
+
+  return null;
 }
 
 function parseMoney(value: string | null): number | null {
@@ -249,10 +275,10 @@ function parseVehicleDetails(value: string | null): {
 } {
   if (!value) return { make: null, model: null, colour: null, registration: null };
   const tokens = value.trim().split(/\s+/).filter(Boolean);
-  const plateIndex = tokens.findLastIndex((token) => normalizePlate(token) !== null);
+  const plateIndex = tokens.findLastIndex((token) => normalizeUkPlate(token) !== null);
   if (plateIndex < 0) return { make: null, model: value.trim() || null, colour: null, registration: null };
 
-  const registration = normalizePlate(tokens[plateIndex]);
+  const registration = normalizeUkPlate(tokens[plateIndex]);
   const beforePlate = tokens.slice(0, plateIndex);
   const possibleColour = beforePlate.at(-1);
   const colour = possibleColour && VEHICLE_COLOURS.has(possibleColour.toLowerCase()) ? possibleColour : null;
@@ -288,11 +314,28 @@ export function flyparksTextToStaging(rawText: string): FlyparksStaging {
 
   const reference =
     pickLabel(text, ["Reference", "Booking Reference", "YOUR BOOKING REFERENCE"])?.match(/[A-Z0-9-]{3,20}/i)?.[0] ?? null;
-  const customerName = pickLabel(text, ["Your details", "Customer name", "Name"]);
+  const dearName = extractDearName(text);
+  const labelName = pickLabel(text, ["Your details", "Customer name", "Name"]);
   const email =
+    extractForwardedCustomerEmail(text) ??
     pickLabel(text, ["Email"]) ??
-    text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ??
-    null;
+    (() => {
+      const found = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? [];
+      return (
+        found.find(
+          (e) =>
+            !/@flyparks/i.test(e) &&
+            !/noreply/i.test(e) &&
+            !/@myparkingchannel\.app$/i.test(e)
+        ) ?? null
+      );
+    })();
+  const customerResolved = resolveCustomerName({
+    customerName: labelName,
+    customerLastName: dearName,
+    customerEmail: email,
+  });
+  const customerName = customerResolved.name;
   const phone = extractPhone(text, pickLabel(text, ["Phone", "Telephone", "Mobile", "Contact number"]));
 
   const depDate = pickLabel(text, ["Departure date", "Departure Date", "Drop off date", "Drop Off Date"]);
@@ -309,7 +352,8 @@ export function flyparksTextToStaging(rawText: string): FlyparksStaging {
   const vehicleModel = splitModel.model ?? vehicleModelRaw ?? vehicleDetails.model;
   const vehicleColour = pickLabel(text, ["Vehicle colour", "Vehicle Colour"]) ?? vehicleDetails.colour;
   const vehicleRegistration =
-    normalizePlate(pickLabel(text, ["Vehicle registration", "Vehicle Registration"])) ?? vehicleDetails.registration;
+    normalizeUkPlate(pickLabel(text, ["Vehicle registration", "Vehicle Registration"])) ??
+    vehicleDetails.registration;
   const totalCostRaw = pickLabel(text, ["Total Cost", "Parking Cost", "Car Parking", "Product Base Cost"]);
   const totalPrice = parseMoney(totalCostRaw);
 
@@ -335,7 +379,10 @@ export function flyparksTextToStaging(rawText: string): FlyparksStaging {
       extracted: {
         reference,
         customerName,
+        dearName,
         email,
+        customerNameResolved: customerName,
+        customerNameMissing: customerResolved.missingCustomerName,
         phone,
         depDate,
         arrTime,
@@ -347,7 +394,9 @@ export function flyparksTextToStaging(rawText: string): FlyparksStaging {
         vehicleColour,
         vehicleRegistration,
         dateCandidates: Array.from(text.matchAll(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g)).map((match) => match[0]),
-        plateCandidates: Array.from(text.matchAll(/\b[A-Z]{2}\d{2}\s?[A-Z]{3}\b/gi)).map((match) => normalizePlate(match[0])).filter(Boolean),
+        plateCandidates: Array.from(text.matchAll(/\b[A-Z]{2}\d{2}\s?[A-Z]{3}\b/gi))
+          .map((match) => normalizeUkPlate(match[0]))
+          .filter(Boolean),
         parkingCost: pickLabel(text, ["Parking Cost"]),
         carParking: pickLabel(text, ["Car Parking"]),
         totalCost: pickLabel(text, ["Total Cost"]),

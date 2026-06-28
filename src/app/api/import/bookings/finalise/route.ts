@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { mapStagingToBookings } from "@/lib/imports/mapToBookings";
+import { toBookingInsertPayload } from "@/lib/ingest/safeBookingUpsertPayload";
 
 export async function POST(req: Request) {
   const { tenantId, runId } = await req.json();
@@ -29,7 +30,15 @@ export async function POST(req: Request) {
     }
 
     // Map staging records to bookings format
-    const bookingsData = stagingRecords.map(mapStagingToBookings);
+    const bookingsData = stagingRecords
+      .map(mapStagingToBookings)
+      .map((row) => {
+        const safe = toBookingInsertPayload(row as Record<string, unknown>);
+        if (!safe.ok) {
+          throw new Error(safe.error);
+        }
+        return safe.data;
+      });
 
     // Insert into bookings table
     const { error: insertError, count } = await admin

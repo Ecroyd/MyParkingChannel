@@ -13,6 +13,7 @@ import { simpleParser } from "mailparser";
 import { extractFlyparksReceiptFromForward, guessFlyparksFields } from "@/lib/email/flyparksForward";
 import { flyparksTextToStaging } from "@/lib/ingest/flyparksTextToStaging";
 import { promoteStagingRowToBooking } from "@/lib/ingest/promoteStagingToBooking";
+import { safeStagingUpsertPayload } from "@/lib/ingest/safeStagingUpsertPayload";
 
 function requireInternalAuth(req: Request): { ok: true; token: string } | { ok: false; status: number; error: string } {
   const token = process.env.INTERNAL_CRON_KEY?.trim();
@@ -121,42 +122,45 @@ async function processOneEmail(emailId: string) {
 
   const dedupe_key = `${tenantId}|flyparks_text|${reference}`;
 
+  const stagingPayload = safeStagingUpsertPayload({
+    tenant_id: tenantId,
+    source: "direct",
+    source_email_id: email.id,
+    source_filename: "flyparks_text",
+    reference,
+    external_reference: reference,
+    external_status: "RESERVED",
+    start_at: staging.start_at,
+    end_at: staging.end_at,
+    vehicle_reg: staging.vehicle_reg,
+    vehicle_make: staging.vehicle_make,
+    vehicle_model: staging.vehicle_model,
+    vehicle_colour: staging.vehicle_colour,
+    customer_title: null,
+    customer_firstname: null,
+    customer_lastname: null,
+    customer_name: staging.customer_name,
+    customer_email: staging.customer_email,
+    phone: staging.customer_phone,
+    flight_number: staging.flight_number,
+    return_flight_no: staging.flight_number,
+    product_code: staging.product_code,
+    currency: staging.currency ?? "GBP",
+    total_price: staging.total_price,
+    price: staging.total_price ?? staging.money_charged ?? 0,
+    status: "reserved",
+    money_received: staging.money_received ?? staging.total_price ?? 0,
+    notes: null,
+    dedupe_key,
+    raw_json: staging.raw_json,
+  });
+  if (!stagingPayload.ok) {
+    return NextResponse.json({ ok: false, error: stagingPayload.error }, { status: 500 });
+  }
+
   const { data: stagingUpserted, error: stagingErr } = await supabase
     .from("booking_import_staging")
-    .upsert(
-      {
-        tenant_id: tenantId,
-        source: "direct",
-        source_email_id: email.id,
-        source_filename: "flyparks_text",
-        reference,
-        external_reference: reference,
-        external_status: null,
-        start_at: staging.start_at,
-        end_at: staging.end_at,
-        vehicle_reg: staging.vehicle_reg,
-        vehicle_make: staging.vehicle_make,
-        vehicle_model: staging.vehicle_model,
-        vehicle_colour: staging.vehicle_colour,
-        customer_title: null,
-        customer_firstname: null,
-        customer_lastname: null,
-        customer_name: staging.customer_name,
-        phone: staging.customer_phone,
-        flight_number: staging.flight_number,
-        return_flight_no: staging.flight_number,
-        product_code: staging.product_code,
-        currency: staging.currency ?? "GBP",
-        total_price: staging.total_price,
-        price: staging.total_price ?? staging.money_charged ?? 0,
-        status: "reserved",
-        money_received: staging.money_received ?? staging.total_price ?? 0,
-        notes: null,
-        dedupe_key,
-        raw_json: staging.raw_json,
-      },
-      { onConflict: "dedupe_key" }
-    )
+    .upsert(stagingPayload.data, { onConflict: "dedupe_key" })
     .select("id")
     .maybeSingle();
 

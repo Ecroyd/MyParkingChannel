@@ -1,5 +1,5 @@
 /**
- * Supplier/file status tokens → booking.status and supplier_status audit field.
+ * Supplier/file status tokens → booking.status and external_status audit field.
  */
 
 export type BookingStatusEnum = "reserved" | "checked_in" | "checked_out" | "cancelled";

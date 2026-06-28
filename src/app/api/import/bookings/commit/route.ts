@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { makeImportDedupeKey } from "@/lib/bookings/dedupe";
 import { mapStagingToBookings } from "@/lib/imports/mapToBookings";
-import { safeBookingUpsertPayload } from "@/lib/ingest/safeBookingUpsertPayload";
+import { toBookingInsertPayload } from "@/lib/ingest/safeBookingUpsertPayload";
 import {
   mapSupplierStatusToBookingStatus,
   normalizeSupplierStatus,
@@ -387,7 +387,7 @@ export async function POST(req: Request) {
         continue;
       }
 
-      const safePayload = safeBookingUpsertPayload({
+      const safePayload = toBookingInsertPayload({
         ...mappedRow,
         tenant_id: tenantId,
         updated_at: new Date().toISOString(),

@@ -4,6 +4,10 @@ import {
   extractFlyparksReceiptFromForward,
   guessFlyparksFields,
 } from "@/lib/email/flyparksForward";
+import {
+  flyparksTextToStaging,
+  looksLikeFlyparksDirectEmail,
+} from "@/lib/ingest/flyparksTextToStaging";
 
 /**
  * Batch-parse received emails that don't yet have a row in ingest_email_parses.
@@ -45,15 +49,19 @@ export async function runParseReceived(limit = 25): Promise<{
       const text = parsed.text ?? "";
 
       const forwarded_text = extractFlyparksReceiptFromForward({ subject, text });
+      const looksLikeFlyparks = looksLikeFlyparksDirectEmail(subject, forwarded_text);
+      const stagingPreview = looksLikeFlyparks ? flyparksTextToStaging(forwarded_text) : null;
       const guessed = guessFlyparksFields(forwarded_text);
+      const plateGuess = stagingPreview?.vehicle_reg ?? guessed.plate ?? null;
+      const referenceGuess = stagingPreview?.reference ?? guessed.reference ?? null;
 
       const { error: insErr } = await supabase.from("ingest_email_parses").insert({
         ingest_email_id: e.id,
         parsed_subject: subject,
         parsed_text: text,
         forwarded_text,
-        booking_plate_guess: guessed.plate ?? null,
-        booking_reference_guess: guessed.reference ?? null,
+        booking_plate_guess: plateGuess,
+        booking_reference_guess: referenceGuess,
         parse_status: "parsed",
         parsed_at: new Date().toISOString(),
       });

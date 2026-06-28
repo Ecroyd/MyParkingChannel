@@ -2,6 +2,8 @@
  * Whitelist of columns safe to send on public.bookings upsert/insert.
  * Prevents PostgREST schema-cache failures when a column is missing in DB.
  */
+import { resolveCustomerName } from "@/lib/bookings/normalizeCustomerName";
+
 export const ALLOWED_BOOKING_UPSERT_FIELDS = [
   "tenant_id",
   "reference",
@@ -22,7 +24,7 @@ export const ALLOWED_BOOKING_UPSERT_FIELDS = [
   "source",
   "external_source",
   "external_status",
-  "supplier_status",
+  "anpr_status",
   "flight_number",
   "return_flight_number",
   "notes",
@@ -40,14 +42,49 @@ export type SafeBookingPayloadResult =
   | { ok: true; data: Record<string, unknown> }
   | { ok: false; error: string };
 
+function isPlaceholderImportEmail(email: string): boolean {
+  return /@imports\.local$/i.test(email) || /@myparkingchannel\.app$/i.test(email);
+}
+
 /**
- * Strip unknown fields and return only whitelisted booking columns.
- * Rejects payloads that include keys not in the allowed list.
+ * Normalize a raw booking payload before insert/update:
+ * - drop supplier_status (map to external_status when missing)
+ * - strip unknown columns
+ * - guarantee customer_name is never null
  */
-export function safeBookingUpsertPayload(
+export function toBookingInsertPayload(
   payload: Record<string, unknown>
 ): SafeBookingPayloadResult {
-  const keys = Object.keys(payload);
+  const normalized: Record<string, unknown> = { ...payload };
+
+  if (
+    normalized.supplier_status !== undefined &&
+    normalized.supplier_status !== null &&
+    (normalized.external_status === undefined || normalized.external_status === null)
+  ) {
+    normalized.external_status = normalized.supplier_status;
+  }
+  delete normalized.supplier_status;
+
+  const customerEmail =
+    typeof normalized.customer_email === "string" ? normalized.customer_email : null;
+  const resolved = resolveCustomerName({
+    customerName: normalized.customer_name as string | null,
+    customerLastName: normalized.customer_lastname as string | null | undefined,
+    customerEmail:
+      customerEmail && !isPlaceholderImportEmail(customerEmail) ? customerEmail : null,
+  });
+  normalized.customer_name = resolved.name;
+  if (resolved.missingCustomerName) {
+    normalized.is_incomplete = true;
+    const missing = Array.isArray(normalized.missing_fields)
+      ? [...(normalized.missing_fields as string[])]
+      : [];
+    if (!missing.includes("customer_name")) missing.push("customer_name");
+    normalized.missing_fields = missing;
+  }
+
+  const keys = Object.keys(normalized);
   const unknown = keys.filter((k) => !ALLOWED_SET.has(k));
   if (unknown.length > 0) {
     return {
@@ -56,11 +93,26 @@ export function safeBookingUpsertPayload(
     };
   }
 
+  const required = ["tenant_id", "reference", "customer_name", "start_at", "end_at"] as const;
+  for (const key of required) {
+    const val = normalized[key];
+    if (val === undefined || val === null || String(val).trim() === "") {
+      return { ok: false, error: `Missing required booking field: ${key}` };
+    }
+  }
+
   const data: Record<string, unknown> = {};
   for (const key of ALLOWED_BOOKING_UPSERT_FIELDS) {
-    if (payload[key] !== undefined) {
-      data[key] = payload[key];
+    if (normalized[key] !== undefined) {
+      data[key] = normalized[key];
     }
   }
   return { ok: true, data };
+}
+
+/** @deprecated use toBookingInsertPayload */
+export function safeBookingUpsertPayload(
+  payload: Record<string, unknown>
+): SafeBookingPayloadResult {
+  return toBookingInsertPayload(payload);
 }

@@ -254,11 +254,13 @@ export default function DashboardClient({
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Demand Curve</h3>
+          <h3 className="text-lg font-medium text-gray-900 mb-4">Booked demand</h3>
           <DemandCurve 
             tenantId={tenant.id}
+            tenantTimezone={tenant.timezone || 'Europe/London'}
             capacityByDate={demandCurveCapacityByDate}
             showCapacityLine={true}
+            showDebug={true}
           />
         </div>
 

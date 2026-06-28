@@ -94,11 +94,5 @@ export async function clearIngestEmailForReprocess(
     .update({ status: "received", error: null })
     .eq("id", emailId);
 
-  await supabase.from("ingest_email_parses").upsert(
-    {
-      ingest_email_id: emailId,
-      parse_error: null,
-    },
-    { onConflict: "ingest_email_id" }
-  );
+  await supabase.from("ingest_email_parses").delete().eq("ingest_email_id", emailId);
 }

@@ -3,6 +3,13 @@
  * Applies price increases when capacity thresholds are reached
  */
 import { createAdminClient } from '@/lib/supabase/admin';
+import {
+  aggregateDemandByDay,
+  enumerateDateKeys,
+  loadDemandBookingsForWindow,
+  maxBookedDemandOccupancyPercent,
+} from '@/lib/analytics/demandOccupancy';
+import { DEFAULT_TENANT_TIMEZONE, tenantDateKeyFromUtc } from '@/lib/datetime/parse';
 
 export type DynamicRule = {
   id: string;
@@ -113,98 +120,67 @@ export function applyDynamicPricingToBasePrice(
 }
 
 /**
- * Compute occupancy percentage for a date range
- * Returns the maximum occupancy across all days in the range
+ * Compute occupancy percentage for a date range using booked demand (spaces sold).
+ * Returns the maximum bookedDemand / capacity across all tenant-local days in the range.
  */
 export async function computeOccupancyPercent(opts: {
   tenantId: string;
   startAt: string;
   endAt: string;
   excludeBookingReference?: string | null;
+  timezone?: string;
 }): Promise<number> {
   const { tenantId, startAt, endAt, excludeBookingReference } = opts;
   const supabase = createAdminClient();
 
-  // Generate all dates in the range
-  const start = new Date(startAt);
-  const end = new Date(endAt);
-  const dates: string[] = [];
-  const current = new Date(start);
-  
-  while (current < end) {
-    dates.push(current.toISOString().split('T')[0]);
-    current.setDate(current.getDate() + 1);
+  let timezone = opts.timezone ?? DEFAULT_TENANT_TIMEZONE;
+  if (!opts.timezone) {
+    const { data: tenant } = await supabase
+      .from('tenants')
+      .select('timezone')
+      .eq('id', tenantId)
+      .maybeSingle();
+    timezone = tenant?.timezone || DEFAULT_TENANT_TIMEZONE;
   }
 
-  if (dates.length === 0) {
-    return 0;
-  }
+  const fromDay = tenantDateKeyFromUtc(startAt, timezone);
+  const toDay = tenantDateKeyFromUtc(endAt, timezone);
+  if (!fromDay || !toDay) return 0;
 
-  // Load capacity for these dates
+  const dayKeys = enumerateDateKeys(fromDay, toDay);
+  if (dayKeys.length === 0) return 0;
+
   const { data: capRows, error: capError } = await supabase
     .from('tenant_capacity')
     .select('date, capacity')
     .eq('tenant_id', tenantId)
-    .in('date', dates);
+    .in('date', dayKeys);
 
   if (capError) {
     console.error('Error fetching capacity for occupancy calculation:', capError);
     return 0;
   }
 
-  const capByDate: Record<string, number> = {};
-  (capRows ?? []).forEach((row: any) => {
-    capByDate[row.date] = row.capacity || 0;
+  const capacityByDate: Record<string, number | null> = {};
+  (capRows ?? []).forEach((row: { date: string; capacity: number }) => {
+    capacityByDate[row.date] = row.capacity ?? 0;
   });
 
-  // Load bookings overlapping this period
-  let bookingsQuery = supabase
-    .from('bookings')
-    .select('start_at, end_at, status')
-    .eq('tenant_id', tenantId)
-    .in('status', ['reserved', 'confirmed', 'checked_in'])
-    .lt('start_at', endAt)
-    .gt('end_at', startAt);
+  const bookings = await loadDemandBookingsForWindow({
+    tenantId,
+    from: fromDay,
+    to: toDay,
+    timezone,
+    excludeBookingReference,
+  });
 
-  if (excludeBookingReference) {
-    bookingsQuery = bookingsQuery.neq('reference', excludeBookingReference);
-  }
+  const days = aggregateDemandByDay({
+    bookings,
+    dayKeys,
+    timezone,
+    capacityByDate,
+  });
 
-  const { data: bookings, error: bookingsError } = await bookingsQuery;
-
-  if (bookingsError) {
-    console.error('Error fetching bookings for occupancy calculation:', bookingsError);
-    return 0;
-  }
-
-  // Calculate occupancy for each day
-  let maxOccupancyPercent = 0;
-
-  for (const dateStr of dates) {
-    const capacity = capByDate[dateStr] || 0;
-    
-    if (capacity === 0) {
-      // If capacity is 0, treat as 0% occupancy (no dynamic pricing applied)
-      continue;
-    }
-
-    // Count bookings that overlap this date
-    const dateStart = new Date(dateStr);
-    dateStart.setHours(0, 0, 0, 0);
-    const dateEnd = new Date(dateStr);
-    dateEnd.setHours(23, 59, 59, 999);
-
-    const bookingsOnDate = (bookings ?? []).filter((booking: any) => {
-      const bookingStart = new Date(booking.start_at);
-      const bookingEnd = new Date(booking.end_at);
-      return bookingStart < dateEnd && bookingEnd > dateStart;
-    });
-
-    const booked = bookingsOnDate.length;
-    const occupancyPercent = (booked / capacity) * 100;
-    maxOccupancyPercent = Math.max(maxOccupancyPercent, occupancyPercent);
-  }
-
-  return Math.min(100, maxOccupancyPercent); // Clamp to 100%
+  return maxBookedDemandOccupancyPercent(days);
 }
 

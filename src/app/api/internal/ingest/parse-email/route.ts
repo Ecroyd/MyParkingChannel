@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceSupabase } from "@/lib/supabase/service";
+import { guessPlateFromEmailText } from "@/lib/ingest/plateGuess";
 
 /**
  * Extract the *useful* receipt content from a forwarded email.
@@ -33,9 +34,7 @@ function stripMimeNoise(s: string) {
 }
 
 function guessPlate(text: string) {
-  // UK plate common pattern e.g. WD73ZHV
-  const m = text.match(/\b([A-Z]{2}\d{2}[A-Z]{3})\b/i);
-  return m?.[1]?.toUpperCase() ?? null;
+  return guessPlateFromEmailText(text);
 }
 
 function guessReference(text: string) {

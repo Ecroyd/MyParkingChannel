@@ -9,6 +9,12 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getMatrixPriceForStay, type PricingSource, findSeasonForDate } from '@/lib/pricing/matrix';
+import {
+  aggregateDemandByDay,
+  enumerateDateKeys,
+  loadDemandBookingsForWindow,
+} from '@/lib/analytics/demandOccupancy';
+import { DEFAULT_TENANT_TIMEZONE, tenantDateKeyFromUtc } from '@/lib/datetime/parse';
 
 const DAY_MS = 1000 * 60 * 60 * 24;
 
@@ -541,8 +547,18 @@ export async function calculateProductAvailability(input: AvailabilityInput): Pr
     throw new Error('Product ID is required but was not found');
   }
 
-  // 2) Stay dates + LOS
-  const stayDates = generateStayDates(startAt, endAt);
+  // 2) Stay dates + LOS (tenant-local calendar days)
+  const { data: tenantRow } = await supabase
+    .from('tenants')
+    .select('timezone')
+    .eq('id', tenantId)
+    .maybeSingle();
+  const tenantTimezone = tenantRow?.timezone || DEFAULT_TENANT_TIMEZONE;
+
+  const stayFromDay = tenantDateKeyFromUtc(startAt, tenantTimezone);
+  const stayToDay = tenantDateKeyFromUtc(endAt, tenantTimezone);
+  const stayDates =
+    stayFromDay && stayToDay ? enumerateDateKeys(stayFromDay, stayToDay) : generateStayDates(startAt, endAt);
   const days = stayDates.length;
 
   if (days <= 0) {
@@ -626,66 +642,28 @@ export async function calculateProductAvailability(input: AvailabilityInput): Pr
     }
   }
 
-  // Bookings that overlap the stay
-  let bookingsQuery = supabase
-    .from('bookings')
-    .select('start_at, end_at, status')
-    .eq('tenant_id', tenantId)
-    .neq('status', 'cancelled')
-    .lt('start_at', endAt)
-    .gt('end_at', startAt);
-
-  if (excludeBookingReference) {
-    bookingsQuery = bookingsQuery.neq('reference', excludeBookingReference);
-  }
-
-  const { data: bookings, error: bookingsError } = await bookingsQuery;
-
-  if (bookingsError) {
-    console.error('[AVAILABILITY] bookingsError in calculateProductAvailability', {
-      error: bookingsError,
-      tenantId,
-      productId: inputProductId,
-      startAt,
-      endAt,
-    });
-
-    if (bookingsError instanceof Error) {
-      throw bookingsError;
-    }
-
-    const errorObj = bookingsError as { message?: string } | null | undefined;
-    const errorMessage =
-      errorObj && typeof errorObj === 'object' && 'message' in errorObj && errorObj.message
-        ? String(errorObj.message)
-        : JSON.stringify(bookingsError);
-
-    throw new Error(`Failed to check bookings: ${errorMessage}`);
-  }
-
-  // Time-based availability checking: filter to bookings that overlap the requested time range
-  // A booking occupies space from start_at to (end_at + 1 hour buffer)
-  const overlappingBookings = (bookings ?? []).filter((booking: any) => {
-    return bookingOverlapsTimeRange(booking, startAt, endAt);
+  const demandBookings = await loadDemandBookingsForWindow({
+    tenantId,
+    from: stayDates[0]!,
+    to: stayDates[stayDates.length - 1]!,
+    timezone: tenantTimezone,
+    excludeBookingReference,
   });
 
-  // Count overlapping bookings per date for capacity checking
-  const occupancyByDate: Record<string, number> = {};
-  for (const dateStr of stayDates) {
-    occupancyByDate[dateStr] = 0;
-  }
-
-  overlappingBookings.forEach((booking: any) => {
-    for (const dateStr of stayDates) {
-      if (bookingTouchesDate(booking, dateStr)) {
-        occupancyByDate[dateStr] += 1;
-      }
-    }
+  const demandByDay = aggregateDemandByDay({
+    bookings: demandBookings,
+    dayKeys: stayDates,
+    timezone: tenantTimezone,
   });
+
+  const bookedDemandByDate: Record<string, number> = {};
+  for (const row of demandByDay) {
+    bookedDemandByDate[row.date] = row.bookedDemand;
+  }
 
   let overallRemaining: number | null = null;
   let availabilityStatus: 'available' | 'sold_out' | 'closed' = 'available';
-  let maxOccupancyRatio = 0; // for dynamic pricing
+  let maxOccupancyRatio = 0;
 
   for (const dateStr of stayDates) {
     const capacity = capacityByDate[dateStr];
@@ -693,11 +671,11 @@ export async function calculateProductAvailability(input: AvailabilityInput): Pr
     if (capacity === null) {
       availabilityStatus = 'closed';
       overallRemaining = null;
-      maxOccupancyRatio = 1; // treat as fully occupied for dynamic, though it's closed anyway
+      maxOccupancyRatio = 1;
       break;
     }
 
-    const occupancy = occupancyByDate[dateStr] ?? 0;
+    const occupancy = bookedDemandByDate[dateStr] ?? 0;
     const remaining = capacity - occupancy;
 
     const ratio = capacity > 0 ? occupancy / capacity : 1;

@@ -11,9 +11,10 @@ import {
   normalizeSupplierStatus,
 } from "@/lib/ingest/importStatusMapping";
 import { normalizeBookingSourceForDb } from "@/lib/bookings/normalizeBookingSource";
+import { resolveCustomerName } from "@/lib/bookings/normalizeCustomerName";
 import { formatPostgresError } from "@/lib/ingest/logBookingPromotionError";
 import { resolveImportPlatform } from "@/lib/ingest/importPlatform";
-import { safeBookingUpsertPayload } from "@/lib/ingest/safeBookingUpsertPayload";
+import { toBookingInsertPayload } from "@/lib/ingest/safeBookingUpsertPayload";
 
 export type ImportRowAction = "inserted" | "updated" | "skipped" | "error";
 
@@ -58,17 +59,36 @@ export type StagingRow = Record<string, unknown> & {
   } | null;
 };
 
+function isPlaceholderImportEmail(email: string): boolean {
+  return /@imports\.local$/i.test(email) || /@myparkingchannel\.app$/i.test(email);
+}
+
+function extractEmailFromStagingRawJson(
+  rawJson: StagingRow["raw_json"]
+): string | null {
+  if (!rawJson || typeof rawJson !== "object") return null;
+  const raw = rawJson as Record<string, unknown>;
+  const extracted = raw.extracted;
+  if (extracted && typeof extracted === "object") {
+    const email = (extracted as { email?: string }).email;
+    if (email && String(email).includes("@")) return String(email).trim();
+  }
+  const fields = raw.fields;
+  if (fields && typeof fields === "object") {
+    const email = (fields as { Email?: string }).Email;
+    if (email && String(email).includes("@")) return String(email).trim();
+  }
+  return null;
+}
+
 function resolveCustomerEmail(row: StagingRow, reference: string): string {
   const fromRow = row.customer_email;
-  if (fromRow && String(fromRow).trim().includes("@")) {
+  if (fromRow && String(fromRow).trim().includes("@") && !isPlaceholderImportEmail(String(fromRow))) {
     return String(fromRow).trim();
   }
-  const fromRaw =
-    row.raw_json?.extracted &&
-    typeof row.raw_json.extracted === "object" &&
-    (row.raw_json.extracted as { email?: string }).email;
-  if (fromRaw && String(fromRaw).trim().includes("@")) {
-    return String(fromRaw).trim();
+  const fromRaw = extractEmailFromStagingRawJson(row.raw_json);
+  if (fromRaw && !isPlaceholderImportEmail(fromRaw)) {
+    return fromRaw;
   }
   return `import+${reference.toLowerCase()}@imports.local`;
 }
@@ -188,11 +208,18 @@ export function buildBookingPayloadFromStaging(
   const returnFlight =
     row.return_flight_no ?? (row as { return_flight_number?: string }).return_flight_number ?? null;
 
+  const customerEmail = resolveCustomerEmail(row, reference);
+  const customerResolved = resolveCustomerName({
+    customerName: row.customer_name,
+    customerLastName: (row as { customer_lastname?: string | null }).customer_lastname,
+    customerEmail: isPlaceholderImportEmail(customerEmail) ? null : customerEmail,
+  });
+
   const payload: Record<string, unknown> = {
     tenant_id: row.tenant_id,
     reference,
-    customer_name: row.customer_name ?? null,
-    customer_email: resolveCustomerEmail(row, reference),
+    customer_name: customerResolved.name,
+    customer_email: customerEmail,
     customer_phone: row.phone ?? null,
     plate,
     car_make: row.vehicle_make ?? null,
@@ -201,7 +228,6 @@ export function buildBookingPayloadFromStaging(
     start_at: times.start_at,
     end_at: times.end_at,
     status: mappedStatus,
-    supplier_status: parsedStatus,
     external_status: parsedStatus,
     money_charged: Number.isFinite(moneyCharged) ? moneyCharged : 0,
     money_received: Number.isFinite(moneyReceived) ? moneyReceived : 0,
@@ -211,10 +237,17 @@ export function buildBookingPayloadFromStaging(
     flight_number: row.flight_number ?? null,
     return_flight_number: returnFlight,
     updated_at: new Date().toISOString(),
-    is_incomplete: false,
-    missing_fields: [],
+    is_incomplete: customerResolved.missingCustomerName,
+    missing_fields: customerResolved.missingCustomerName ? ["customer_name"] : [],
     ...(isFlyparksText
-      ? { external_source: "flyparks_email_text", source: "direct" }
+      ? {
+          external_source: "flyparks_email_text",
+          source: "direct",
+          external_status: parsedStatus ?? "RESERVED",
+          gate_status: "reserved",
+          ops_status: "reserved",
+          anpr_status: "not_arrived",
+        }
       : {}),
     ...(row.raw_json?.extracted &&
     typeof row.raw_json.extracted === "object" &&
@@ -222,6 +255,11 @@ export function buildBookingPayloadFromStaging(
       ? { customer_email: (row.raw_json.extracted as { email?: string }).email }
       : {}),
   };
+
+  if (customerResolved.missingCustomerName) {
+    const warning = "Parse warning: customer_name not found in source; using fallback";
+    payload.notes = [row.notes, warning].filter(Boolean).join("; ");
+  }
 
   if (mappedStatus === "cancelled") {
     payload.gate_status = "cancelled";
@@ -254,29 +292,15 @@ function bookingPayloadVariants(
 
   push(payload);
 
-  if (payload.supplier_status !== undefined) {
-    const withoutSupplier: Record<string, unknown> = { ...payload };
-    delete withoutSupplier.supplier_status;
-    push(withoutSupplier);
-  }
-
   if (payload.ops_status === "cancelled") {
     const withoutOpsStatus: Record<string, unknown> = { ...payload };
     delete withoutOpsStatus.ops_status;
     push(withoutOpsStatus);
-    if (withoutOpsStatus.supplier_status !== undefined) {
-      const withoutOpsAndSupplier: Record<string, unknown> = { ...withoutOpsStatus };
-      delete withoutOpsAndSupplier.supplier_status;
-      push(withoutOpsAndSupplier);
-    }
   }
 
   const src = String(payload.source ?? "");
   if (src === "holiday_extras") {
     push({ ...payload, source: "holidayextras" });
-    const alt: Record<string, unknown> = { ...payload, source: "holidayextras" };
-    delete alt.supplier_status;
-    push(alt);
   } else if (src === "holidayextras") {
     push({ ...payload, source: "holiday_extras" });
   }
@@ -494,7 +518,7 @@ export async function upsertBookingFromStagingRow(
   }
 
   const bookingRowRaw = buildBookingPayloadFromStaging(row, times);
-  const safePayload = safeBookingUpsertPayload(bookingRowRaw);
+  const safePayload = toBookingInsertPayload(bookingRowRaw);
   if (!safePayload.ok) {
     return {
       log: { ...baseLog, reference, action: "error", reason: safePayload.error },

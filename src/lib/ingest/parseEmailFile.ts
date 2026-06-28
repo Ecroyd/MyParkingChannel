@@ -10,6 +10,7 @@ import {
 import { promoteStagingToBookings } from "@/lib/ingest/promoteStagingToBookings";
 import { makeStagingDedupeKey } from "@/lib/ingest/bookingFromStaging";
 import { dedupeStagingRowsByKey } from "@/lib/ingest/dedupeStagingRows";
+import { safeStagingUpsertPayload } from "@/lib/ingest/safeStagingUpsertPayload";
 import {
   finalizeIngestEmailFileParseSuccess,
   markIngestEmailFileParseFailed,
@@ -373,7 +374,6 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
       customer_lastname: raw.customer_lastname,
       customer_name: raw.customer_name,
       phone: raw.phone,
-      customer_email: raw.customer_email,
       flight_number: raw.flight_number,
       return_flight_no: raw.return_flight_no,
       product_code: raw.product_code,
@@ -400,6 +400,7 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
         raw_fields: raw.raw_fields ?? [],
         external_reference: raw.external_reference,
         external_status: raw.external_status,
+        extracted: raw.customer_email ? { email: raw.customer_email } : undefined,
       },
     };
   });
@@ -447,9 +448,16 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
   }
 
   console.log(`[parseEmailFile] Upserting ${stagingInserts.length} rows into staging (dedupe_key=tenant+reference)`);
+  const safeStagingRows = stagingInserts.map((row) => {
+    const safe = safeStagingUpsertPayload(row as Record<string, unknown>);
+    if (!safe.ok) {
+      throw new Error(`Invalid staging row for ${row.reference}: ${safe.error}`);
+    }
+    return safe.data;
+  });
   const { data: upsertedStaging, error: stagingError } = await adminSupabase
     .from("booking_import_staging")
-    .upsert(stagingInserts, { onConflict: "dedupe_key", ignoreDuplicates: false })
+    .upsert(safeStagingRows, { onConflict: "dedupe_key", ignoreDuplicates: false })
     .select("id, external_reference");
 
   if (stagingError) {

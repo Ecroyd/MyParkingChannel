@@ -4,6 +4,7 @@ type ExtractInput = {
 };
 
 import { normalizeFlyparksEmailText } from "@/lib/ingest/flyparksTextToStaging";
+import { guessPlateFromEmailText } from "@/lib/ingest/plateGuess";
 
 const normalize = (s: string) =>
   normalizeFlyparksEmailText(s);
@@ -32,9 +33,6 @@ export function extractFlyparksReceiptFromForward(input: ExtractInput): string {
   }
 
   // Fallback: find the second "From:" block (the *inner* email)
-  // Your sample has:
-  // 1) From: info@flyparksexeter.co.uk (forward wrapper)
-  // 2) From: Flyparks Exeter Ltd Website <info@flyparksexeter.co.uk> (real receipt)
   const fromMatches = [...text.matchAll(/^\s*From:\s.*$/gim)];
   if (fromMatches.length >= 2) {
     const start = fromMatches[1].index ?? 0;
@@ -51,20 +49,18 @@ export function extractFlyparksReceiptFromForward(input: ExtractInput): string {
 }
 
 /**
- * Pull plate + numeric reference from the extracted receipt.
- * Plate in your case looks like UK format e.g. WD73ZHV.
+ * Pull plate + reference from the extracted receipt.
  */
 export function guessFlyparksFields(receipt: string): {
   plate?: string;
   reference?: string;
 } {
-  const plate =
-    receipt.match(/\b([A-Z]{2}\d{2}[A-Z]{3})\b/)?.[1] ||
-    receipt.match(/\b([A-Z0-9]{6,8})\b/)?.[1];
+  const plate = guessPlateFromEmailText(receipt) ?? undefined;
 
   const reference =
     receipt.match(/^\s*(?:Booking\s+)?Reference:\s*\n?\s*([A-Z0-9-]{3,20})\s*$/im)?.[1] ||
-    receipt.match(/\b(?:Booking\s+)?Reference:\s*([A-Z0-9-]{3,20})\b/i)?.[1];
+    receipt.match(/\b(?:Booking\s+)?Reference:\s*([A-Z0-9-]{3,20})\b/i)?.[1] ||
+    receipt.match(/\bYOUR BOOKING REFERENCE\s*\*?([A-Z0-9-]{3,20})\*?/i)?.[1];
 
   return { plate, reference };
 }

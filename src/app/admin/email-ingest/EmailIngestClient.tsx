@@ -253,14 +253,14 @@ export default function EmailIngestClient() {
       </Card>
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto bg-white text-slate-900 border border-gray-200 shadow-xl">
           <DialogHeader>
             <DialogTitle>Email ingest detail</DialogTitle>
           </DialogHeader>
           {detailLoading ? (
-            <p className="text-sm text-gray-500">Loading…</p>
+            <p className="text-sm text-slate-500">Loading…</p>
           ) : detail ? (
-            <div className="space-y-3 text-sm">
+            <div className="space-y-3 text-sm text-slate-800">
               <p>
                 <strong>Subject:</strong> {detail.subject ?? "—"}
               </p>
@@ -270,7 +270,9 @@ export default function EmailIngestClient() {
               <p>
                 <strong>Status:</strong> {detail.status}
                 {detail.error && (
-                  <span className="block text-red-700 mt-1">{detail.error}</span>
+                  <span className="block mt-2 p-2 rounded border border-red-200 bg-red-50 text-red-800">
+                    {detail.error}
+                  </span>
                 )}
               </p>
               <p>
@@ -278,12 +280,12 @@ export default function EmailIngestClient() {
                 {detail.raw_present ? "stored (reprocess uses DB copy)" : "missing"}
               </p>
               {(detail.ingest_email_parses ?? []).map((p, i) => (
-                <div key={i} className="border rounded p-2 bg-gray-50">
+                <div key={i} className="border border-gray-200 rounded-md p-3 bg-gray-50">
                   <p>
                     <strong>Parse status:</strong> {p.parse_status}
                   </p>
                   {p.parse_error && (
-                    <p className="text-red-700">
+                    <p className="mt-2 p-2 rounded border border-red-200 bg-red-50 text-red-800">
                       <strong>Parse error:</strong> {p.parse_error}
                     </p>
                   )}
@@ -294,7 +296,7 @@ export default function EmailIngestClient() {
                     <strong>Plate guess:</strong> {p.booking_plate_guess ?? "—"}
                   </p>
                   {p.forwarded_text && (
-                    <pre className="mt-2 text-xs whitespace-pre-wrap max-h-40 overflow-auto">
+                    <pre className="mt-2 text-xs whitespace-pre-wrap max-h-40 overflow-auto rounded border border-gray-200 bg-white p-2 text-slate-800">
                       {p.forwarded_text.slice(0, 2000)}
                       {p.forwarded_text.length > 2000 ? "…" : ""}
                     </pre>
@@ -303,7 +305,7 @@ export default function EmailIngestClient() {
               ))}
             </div>
           ) : (
-            <p className="text-sm text-gray-500">No detail</p>
+            <p className="text-sm text-slate-500">No detail</p>
           )}
         </DialogContent>
       </Dialog>

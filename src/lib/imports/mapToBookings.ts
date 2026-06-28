@@ -2,11 +2,17 @@ import {
   mapSupplierStatusToBookingStatus,
   normalizeSupplierStatus,
 } from "@/lib/ingest/importStatusMapping";
+import { resolveCustomerName } from "@/lib/bookings/normalizeCustomerName";
 import { resolveImportPlatform } from "@/lib/ingest/importPlatform";
 
 // Map staging table data to actual bookings table format
 export function mapStagingToBookings(stagingRecord: Record<string, unknown>) {
-  const rawJson = stagingRecord.raw_json as { channel?: string; external_status?: string } | null;
+  const rawJson = stagingRecord.raw_json as {
+    channel?: string;
+    external_status?: string;
+    extracted?: { email?: string };
+    fields?: { Email?: string };
+  } | null;
   const channel = rawJson?.channel ?? null;
   const platform = resolveImportPlatform({
     channel,
@@ -36,11 +42,22 @@ export function mapStagingToBookings(stagingRecord: Record<string, unknown>) {
       ? String(plateRaw).trim().toUpperCase()
       : null;
 
+  const customerEmail =
+    (stagingRecord.customer_email as string) ||
+    rawJson?.extracted?.email ||
+    rawJson?.fields?.Email ||
+    "";
+  const customerResolved = resolveCustomerName({
+    customerName: stagingRecord.customer_name as string | null,
+    customerLastName: stagingRecord.customer_lastname as string | null,
+    customerEmail,
+  });
+
   return {
     tenant_id: stagingRecord.tenant_id,
     reference: stagingRecord.reference,
-    customer_name: stagingRecord.customer_name,
-    customer_email: stagingRecord.customer_email ?? "",
+    customer_name: customerResolved.name,
+    customer_email: customerEmail,
     customer_phone: stagingRecord.phone || null,
     plate,
     car_make: stagingRecord.vehicle_make,
@@ -49,7 +66,6 @@ export function mapStagingToBookings(stagingRecord: Record<string, unknown>) {
     start_at: stagingRecord.start_at,
     end_at: stagingRecord.end_at,
     status: mapSupplierStatusToBookingStatus(parsedStatus),
-    supplier_status: parsedStatus,
     external_status: parsedStatus,
     money_charged: Number.isFinite(moneyCharged) ? moneyCharged : 0,
     money_received: Number.isFinite(moneyReceived) ? moneyReceived : 0,
@@ -58,7 +74,7 @@ export function mapStagingToBookings(stagingRecord: Record<string, unknown>) {
     external_source: platform.platformId,
     flight_number: stagingRecord.flight_number,
     dedupe_key: stagingRecord.dedupe_key,
-    is_incomplete: false,
-    missing_fields: [],
+    is_incomplete: customerResolved.missingCustomerName,
+    missing_fields: customerResolved.missingCustomerName ? ["customer_name"] : [],
   };
 }
