@@ -1,36 +1,24 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useTransition, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect, useMemo, useTransition, useRef, useCallback } from 'react';
 import { LogIn, LogOut, Car, DollarSign, ArrowUpDown, ChevronDown, ChevronUp, KeyRound } from 'lucide-react';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
 import DateRangeSelector from '@/components/admin/DateRangeSelector';
+import TodayBookingRow, { type TodayBoardBooking, type TodayOpsAction } from './TodayBookingRow';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { cn } from '@/lib/utils';
-import { useToast, toast as toastFn } from '@/hooks/use-toast';
-import { BookingHighlightIcon } from '@/components/bookings/BookingHighlightIcon';
-import { DynamicPricingBadge } from '@/components/bookings/DynamicPricingBadge';
+import { useToast } from '@/hooks/use-toast';
+import {
+  groupArrivalsAndDeparturesByDay,
+  groupOverlappingBookingsByDay,
+} from '@/lib/today/groupBookingsByDay';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
   GATE_STATUS,
-  GATE_STATUS_OPTIONS,
-  gateStatusLabel,
-  gateStatusPillClass,
 } from '@/lib/gateStatus';
 
 import { BookingHighlightCode } from '@/types/bookings';
-import {
-  formatBookingDateTimeForTenant,
-  tenantDateKeyFromUtc,
-} from '@/lib/datetime/parse';
 
 /** Parse response as JSON; throw a clear error if server returned HTML (e.g. 404/500 page). */
 async function parseJsonFromResponse(res: Response): Promise<unknown> {
@@ -45,80 +33,9 @@ async function parseJsonFromResponse(res: Response): Promise<unknown> {
   }
 }
 
-type BoardSection = 'arrivals' | 'departures' | 'parked';
-type OpsAction = 'reserved' | 'arrived' | 'arrived_key_taken' | 'take_key' | 'departed' | 'no_show' | 'cancelled';
+type OpsAction = TodayOpsAction;
 
-function formatDisplayDate(dateKey: string) {
-  const [year, month, day] = dateKey.split('-').map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString('en-GB', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
-}
-
-/** Spreadsheet-style row colours: row background + text colour for entire row. */
-function getRowStyleClasses(
-  b: { gate_status?: string | null },
-  section: BoardSection | undefined,
-  gateStatusOverride?: string | null
-): string {
-  const s = gateStatusOverride ?? b.gate_status;
-  const isTakeKey = s === 'take_key';
-  const isArrivedKeyTaken = s === 'arrived_key_taken';
-  let rowBg = 'bg-white';
-  let text = 'text-black';
-
-  if (section === 'arrivals') {
-    if (s === 'no_show') {
-      rowBg = 'bg-red-600';
-      text = 'text-black [&_*]:!text-black';
-    } else if (s === 'cancelled') {
-      rowBg = 'bg-red-600';
-      text = 'text-black [&_*]:!text-black';
-    } else if (isArrivedKeyTaken) {
-      rowBg = 'bg-yellow-400';
-      text = 'text-red-600 [&_*]:!text-red-600';
-    } else if (isTakeKey) {
-      rowBg = 'bg-yellow-400';
-      text = 'text-black [&_*]:!text-black';
-    } else if (s === 'arrived') {
-      rowBg = 'bg-white';
-      text = 'text-red-600';
-    }
-  } else if (section === 'departures') {
-    if (s === 'no_show') {
-      rowBg = 'bg-red-600';
-      text = 'text-black [&_*]:!text-black';
-    } else if (isArrivedKeyTaken) {
-      rowBg = 'bg-yellow-400';
-      text = 'text-red-600 [&_*]:!text-red-600';
-    } else if (isTakeKey) {
-      rowBg = 'bg-yellow-400';
-      text = 'text-black [&_*]:!text-black';
-    } else {
-      rowBg = 'bg-green-600';
-      text = 'text-black';
-    }
-  } else if (section === 'parked' || section === undefined) {
-    if (s === 'no_show') {
-      rowBg = 'bg-red-600';
-      text = 'text-black [&_*]:!text-black';
-    } else if (isArrivedKeyTaken) {
-      rowBg = 'bg-yellow-400';
-      text = 'text-red-600 [&_*]:!text-red-600';
-    } else if (isTakeKey) {
-      rowBg = 'bg-yellow-400';
-      text = 'text-black [&_*]:!text-black';
-    }
-  }
-  // else: default white/black
-
-  return `${rowBg} ${text}`;
-}
-
-interface Booking {
+interface Booking extends TodayBoardBooking {
   id: string;
   tenant_id: string;
   reference: string;
@@ -173,6 +90,8 @@ interface TodayServerClientProps {
   arrivals: Booking[];
   departures: Booking[];
   currentlyParked: Booking[];
+  initialDateRange: { from: string; to: string };
+  queryError?: string;
 }
 
 export default function TodayServerClient({ 
@@ -180,9 +99,10 @@ export default function TodayServerClient({
   kpis: initialKpis, 
   arrivals: initialArrivals, 
   departures: initialDepartures, 
-  currentlyParked: initialCurrentlyParked 
+  currentlyParked: initialCurrentlyParked,
+  initialDateRange,
+  queryError: initialQueryError,
 }: TodayServerClientProps) {
-  const router = useRouter();
   const { toast } = useToast();
   const [, startTransition] = useTransition();
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
@@ -195,7 +115,6 @@ export default function TodayServerClient({
   const [departuresSort, setDeparturesSort] = useState<'closest' | 'most_recent'>('closest');
   const [parkedSort, setParkedSort] = useState<'closest' | 'most_recent'>('closest');
   const [highlightMode, setHighlightMode] = useState(false);
-  const [updatingHighlightId, setUpdatingHighlightId] = useState<string | null>(null);
   const [arrivalsDeparturesCollapsed, setArrivalsDeparturesCollapsed] = useState(false);
   const [showHidden, setShowHidden] = useState(false); // show departed/no_show rows so you can unhide
   const [filterKeysTaken, setFilterKeysTaken] = useState(false);
@@ -206,14 +125,14 @@ export default function TodayServerClient({
   const pendingByIdRef = useRef<Record<string, boolean>>({});
   const [selectedBookingIds, setSelectedBookingIds] = useState<Set<string>>(new Set());
   const [recentlyUpdatedById, setRecentlyUpdatedById] = useState<Record<string, number>>({});
-  // Initialize date range to today
-  const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
-  const [currentDateRange, setCurrentDateRange] = useState<{ from: string; to: string }>({ from: todayStr, to: todayStr });
+  const [currentDateRange, setCurrentDateRange] = useState(initialDateRange);
+  const [queryError, setQueryError] = useState(initialQueryError);
+  const loadedRangeRef = useRef(`${initialDateRange.from}:${initialDateRange.to}`);
+  const tenantTz = tenant.timezone || 'Europe/London';
 
-  const handleBookingClick = (booking: Booking) => {
-    setSelectedBookingId(booking.id);
-  };
+  const handleBookingClick = useCallback((bookingId: string) => {
+    setSelectedBookingId(bookingId);
+  }, []);
 
   const handleBookingUpdated = () => {};
 
@@ -237,15 +156,6 @@ export default function TodayServerClient({
 
   const findBookingById = (bookingId: string): Booking | null =>
     [...arrivals, ...departures, ...currentlyParked].find((b) => b.id === bookingId) ?? null;
-
-  const getBookingDateKey = (booking: Booking, dateField: 'start_at' | 'end_at') =>
-    tenantDateKeyFromUtc(booking[dateField], tenant.timezone || 'Europe/London');
-
-  const formatBookingDateTime = (booking: Booking, dateField: 'start_at' | 'end_at') =>
-    formatBookingDateTimeForTenant({
-      timestamp: booking[dateField],
-      timezone: tenant.timezone || 'Europe/London',
-    });
 
   const optimisticPatchForAction = (booking: Booking, action: OpsAction): Partial<Booking> => {
     const now = new Date().toISOString();
@@ -335,7 +245,7 @@ export default function TodayServerClient({
     });
   };
 
-  const handleUnhide = (booking: Booking) => {
+  const handleUnhide = useCallback((booking: TodayBoardBooking) => {
     startTransition(async () => {
       try {
         const res = await fetch(`/api/admin/bookings/${booking.id}/unhide`, { method: 'PATCH' });
@@ -347,74 +257,83 @@ export default function TodayServerClient({
         if (data.booking) {
           Object.assign(updated, { ops_hidden: data.booking.ops_hidden ?? false, ops_hidden_reason: data.booking.ops_hidden_reason ?? null });
         }
-        setArrivals(prev => prev.map(b => b.id === booking.id ? updated : b));
-        setDepartures(prev => prev.map(b => b.id === booking.id ? updated : b));
-        setCurrentlyParked(prev => prev.map(b => b.id === booking.id ? updated : b));
+        setArrivals(prev => prev.map(b => b.id === booking.id ? updated as Booking : b));
+        setDepartures(prev => prev.map(b => b.id === booking.id ? updated as Booking : b));
+        setCurrentlyParked(prev => prev.map(b => b.id === booking.id ? updated as Booking : b));
         toast({ title: 'Booking unhidden' });
-        handleBookingUpdated();
-        setTimeout(() => router.refresh(), 300);
       } catch (err: unknown) {
         toast({ title: 'Error', description: err instanceof Error ? err.message : 'Could not unhide', variant: 'destructive' });
       }
     });
-  };
+  }, [toast]);
 
-  const updateHighlight = async (bookingId: string, highlightCode: BookingHighlightCode) => {
-    try {
-      setUpdatingHighlightId(bookingId);
+  const bookingsRef = useRef({ arrivals, departures, currentlyParked });
+  bookingsRef.current = { arrivals, departures, currentlyParked };
 
-      const res = await fetch('/api/bookings/highlight', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          bookingId, 
-          tenantId: tenant.id, 
-          highlightCode 
-        }),
+  const updateHighlight = useCallback((bookingId: string, highlightCode: BookingHighlightCode) => {
+    const lists = bookingsRef.current;
+    const snapshot =
+      lists.arrivals.find((b) => b.id === bookingId) ??
+      lists.departures.find((b) => b.id === bookingId) ??
+      lists.currentlyParked.find((b) => b.id === bookingId);
+    if (!snapshot) return;
+    const previous = snapshot.highlight_code;
+
+    patchBookingInLists(bookingId, { highlight_code: highlightCode });
+
+    void fetch('/api/admin/bookings/highlight', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        bookingId,
+        tenantId: tenant.id,
+        highlightCode,
+      }),
+    })
+      .then(async (res) => {
+        const json = (await parseJsonFromResponse(res)) as { error?: string };
+        if (!res.ok) {
+          throw new Error(json.error || 'Failed to update highlight');
+        }
+      })
+      .catch((err: unknown) => {
+        patchBookingInLists(bookingId, { highlight_code: previous });
+        const message = err instanceof Error ? err.message : 'Could not update highlight';
+        toast({ title: 'Highlight not saved', description: message, variant: 'destructive' });
       });
+  }, [tenant.id, toast]);
 
-      const json = (await parseJsonFromResponse(res)) as { error?: string };
-      if (!res.ok) {
-        throw new Error(json.error || 'Failed to update highlight');
-      }
+  const handleRowSelectChange = useCallback((bookingId: string, checked: boolean) => {
+    setSelectedBookingIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(bookingId);
+      else next.delete(bookingId);
+      return next;
+    });
+  }, []);
 
-      // Update local state
-      const updateBookingInState = (booking: Booking) => 
-        booking.id === bookingId ? { ...booking, highlight_code: highlightCode } : booking;
+  const updateBookingStatusRef = useRef(updateBookingStatus);
+  updateBookingStatusRef.current = updateBookingStatus;
 
-      setArrivals(prev => prev.map(updateBookingInState));
-      setDepartures(prev => prev.map(updateBookingInState));
-      setCurrentlyParked(prev => prev.map(updateBookingInState));
+  const handleRowQuickAction = useCallback((bookingId: string, action: OpsAction) => {
+    void updateBookingStatusRef.current(bookingId, action);
+  }, []);
 
-      toastFn({
-        title: 'Highlight updated',
-        description: 'Booking highlight has been saved',
-      });
-    } catch (err: any) {
-      console.error('Failed to update highlight:', err);
-      toastFn({
-        title: 'Error',
-        description: err.message || 'Could not update highlight',
-        variant: 'destructive',
-      });
-    } finally {
-      setUpdatingHighlightId(null);
-    }
-  };
+  const fetchDataForDateRange = useCallback(async (from: string, to: string) => {
+    const rangeKey = `${from}:${to}`;
+    if (loadedRangeRef.current === rangeKey) return;
 
-  const fetchDataForDateRange = async (from: string, to: string) => {
-    // Clear previous data
-    setKpis({ arrivals: 0, departures: 0, checkedIn: 0, capacityLeft: 0, totalRevenue: 0 });
-    setArrivals([]);
-    setDepartures([]);
-    setCurrentlyParked([]);
     setLoading(true);
-    
+
     try {
-      const response = await fetch(`/api/admin/today?from=${from}&to=${to}`, { 
-        cache: "no-store" 
-      });
-      const data = (await parseJsonFromResponse(response)) as { kpis?: KPIs; arrivals?: Booking[]; departures?: Booking[]; currentlyParked?: Booking[] };
+      const response = await fetch(`/api/admin/today?from=${from}&to=${to}`);
+      const data = (await parseJsonFromResponse(response)) as {
+        kpis?: KPIs;
+        arrivals?: Booking[];
+        departures?: Booking[];
+        currentlyParked?: Booking[];
+        queryError?: string;
+      };
       if (!response.ok) {
         throw new Error('Failed to fetch data');
       }
@@ -424,17 +343,19 @@ export default function TodayServerClient({
       setArrivals(data.arrivals ?? []);
       setDepartures(data.departures ?? []);
       setCurrentlyParked(data.currentlyParked ?? []);
+      setQueryError(data.queryError);
+      loadedRangeRef.current = rangeKey;
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const handleDateRangeChange = (dateRange: { from: string; to: string }) => {
+  const handleDateRangeChange = useCallback((dateRange: { from: string; to: string }) => {
     setCurrentDateRange(dateRange);
-    fetchDataForDateRange(dateRange.from, dateRange.to);
-  };
+    void fetchDataForDateRange(dateRange.from, dateRange.to);
+  }, [fetchDataForDateRange]);
 
   const sortBookings = (bookings: Booking[], sortOrder: 'closest' | 'most_recent', dateField: 'start_at' | 'end_at') => {
     const sorted = [...bookings];
@@ -545,152 +466,19 @@ export default function TodayServerClient({
     return sortBookings(currentlyParked, parkedSort, 'start_at');
   }, [currentlyParked, parkedSort]);
 
-  // Group bookings by date
-  const groupBookingsByDate = (bookings: Booking[], dateField: 'start_at' | 'end_at') => {
-    const grouped: Record<string, Booking[]> = {};
-    
-    bookings.forEach(booking => {
-      const dateKey = getBookingDateKey(booking, dateField);
-      
-      if (!grouped[dateKey]) {
-        grouped[dateKey] = [];
-      }
-      grouped[dateKey].push(booking);
-    });
-    
-    // Sort dates
-    const sortedDates = Object.keys(grouped).sort();
-    
-    return sortedDates.map(date => ({
-      date,
-      bookings: grouped[date],
-      displayDate: formatDisplayDate(date)
-    }));
-  };
-
-  const groupedArrivals = useMemo(() => {
-    return groupBookingsByDate(sortedArrivals, 'start_at');
-  }, [sortedArrivals]);
-
-  const groupedDepartures = useMemo(() => {
-    return groupBookingsByDate(sortedDepartures, 'end_at');
-  }, [sortedDepartures]);
-
-  // Group currently parked by day - shows who is/will be parked on each day in the date range
+  // Group currently parked by tenant-local day in the selected range
   const groupedCurrentlyParked = useMemo(() => {
-    // Debug: log if we have bookings but they're not showing
-    if (sortedCurrentlyParked.length > 0) {
-      console.log('Currently Parked - Total bookings:', sortedCurrentlyParked.length, {
-        sample: sortedCurrentlyParked[0] ? {
-          id: sortedCurrentlyParked[0].id,
-          start: sortedCurrentlyParked[0].start_at,
-          end: sortedCurrentlyParked[0].end_at,
-          status: sortedCurrentlyParked[0].status
-        } : null
-      });
-    }
+    return groupOverlappingBookingsByDay(
+      sortedCurrentlyParked,
+      currentDateRange.from,
+      currentDateRange.to,
+      tenantTz
+    );
+  }, [sortedCurrentlyParked, currentDateRange, tenantTz]);
 
-    if (sortedCurrentlyParked.length === 0) {
-      return [];
-    }
-
-    // Get date range
-    const fromDate = currentDateRange.from;
-    const toDate = currentDateRange.to;
-
-    // Generate all days in the date range
-    const days: string[] = [];
-    const start = new Date(fromDate + 'T00:00:00.000Z');
-    const end = new Date(toDate + 'T00:00:00.000Z');
-    const current = new Date(start);
-    
-    while (current <= end) {
-      days.push(current.toISOString().split('T')[0]);
-      current.setDate(current.getDate() + 1);
-    }
-
-    // For each day, find bookings that are active on that day
-    const grouped: Record<string, Booking[]> = {};
-    
-    const DAY_MS = 1000 * 60 * 60 * 24;
-    
-    days.forEach(dayStr => {
-      const dayStart = new Date(dayStr + 'T00:00:00Z');
-      const dayEnd = new Date(dayStart.getTime() + DAY_MS);
-      
-      const activeBookings = sortedCurrentlyParked.filter(booking => {
-        const bookingStart = new Date(booking.start_at);
-        const bookingEnd = new Date(booking.end_at);
-        
-        // Booking is active on this day if it overlaps: start < dayEnd AND end > dayStart
-        // (matches bookingTouchesDate logic from engine.ts)
-        const isActive = bookingStart < dayEnd && bookingEnd > dayStart;
-        return isActive;
-      });
-      
-      if (activeBookings.length > 0) {
-        grouped[dayStr] = activeBookings;
-      }
-    });
-
-    // Sort dates and format
-    const sortedDates = Object.keys(grouped).sort();
-    
-    const result = sortedDates.map(date => ({
-      date,
-      bookings: grouped[date],
-      displayDate: new Date(date).toLocaleDateString('en-GB', {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
-      })
-    }));
-
-    // If we have bookings but no grouped dates, show them all under today as fallback
-    if (result.length === 0 && sortedCurrentlyParked.length > 0) {
-      const today = new Date();
-      const todayStr = today.toISOString().split('T')[0];
-      return [{
-        date: todayStr,
-        bookings: sortedCurrentlyParked,
-        displayDate: new Date(todayStr).toLocaleDateString('en-GB', {
-          weekday: 'long',
-          day: 'numeric',
-          month: 'long',
-          year: 'numeric'
-        })
-      }];
-    }
-
-    return result;
-  }, [sortedCurrentlyParked, currentDateRange]);
-
-  // Group arrivals and departures by date (using visible lists so hidden rows stay hidden until "Show hidden")
   const groupedByDay = useMemo(() => {
-    const allDates = new Set<string>();
-    visibleArrivals.forEach((booking) => {
-      allDates.add(getBookingDateKey(booking, 'start_at'));
-    });
-    visibleDepartures.forEach((booking) => {
-      allDates.add(getBookingDateKey(booking, 'end_at'));
-    });
-    const sortedDates = Array.from(allDates).sort();
-    return sortedDates.map((date) => {
-      const arrivalsForDate = visibleArrivals.filter(
-        (b) => getBookingDateKey(b, 'start_at') === date
-      );
-      const departuresForDate = visibleDepartures.filter(
-        (b) => getBookingDateKey(b, 'end_at') === date
-      );
-      return {
-        date,
-        displayDate: formatDisplayDate(date),
-        arrivals: arrivalsForDate,
-        departures: departuresForDate
-      };
-    });
-  }, [visibleArrivals, visibleDepartures]);
+    return groupArrivalsAndDeparturesByDay(visibleArrivals, visibleDepartures, tenantTz);
+  }, [visibleArrivals, visibleDepartures, tenantTz]);
 
   const visibleOperationalBookings = useMemo(
     () => [...visibleArrivals, ...visibleDepartures],
@@ -777,198 +565,28 @@ export default function TodayServerClient({
     );
   };
 
-  const BookingRow = ({
-    booking,
-    type,
-    section,
-    showHidden,
-    onUnhide,
-    isSelected,
-    isPending,
-    onSelectChange,
-    onQuickAction,
-  }: {
-    booking: Booking;
-    type: 'arrival' | 'departure' | 'parked';
-    section?: 'arrivals' | 'departures' | 'parked';
-    showHidden?: boolean;
-    onUnhide?: (booking: Booking) => void;
-    isSelected: boolean;
-    isPending: boolean;
-    onSelectChange: (checked: boolean) => void;
-    onQuickAction: (action: OpsAction) => void;
-  }) => {
-    // Calculate number of days staying
-    const calculateDays = () => {
-      const start = new Date(booking.start_at);
-      const end = new Date(booking.end_at);
-      const diffTime = Math.abs(end.getTime() - start.getTime());
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      return diffDays;
-    };
-    
-    const handleRowClick = () => {
-      if (!highlightMode) handleBookingClick(booking);
-    };
-
-    const isKeyTaken = Boolean(
-      booking.gate_status === GATE_STATUS.TAKE_KEY ||
-      booking.gate_status === GATE_STATUS.ARRIVED_KEY_TAKEN ||
-      booking.highlight_code === 'key'
-    );
-    const effectiveHighlightCode: BookingHighlightCode = isKeyTaken ? 'key' : (booking.highlight_code || 'none');
-    const displayGateStatus = booking.gate_status ?? GATE_STATUS.RESERVED;
-
-    const rowClass = cn(
-      'group border-b transition-colors',
-      highlightMode && 'cursor-pointer',
-      getRowStyleClasses(booking, section, displayGateStatus)
-    );
-
-    const handleGateStatusChange = (value: string) => {
-      if (value === GATE_STATUS.NONE) return;
-      onQuickAction(value as OpsAction);
-    };
-
-    const handleQuickKey = (event: React.KeyboardEvent<HTMLTableRowElement>) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.closest("button,input,select,textarea,[role='button']")) return;
-      const key = event.key.toLowerCase();
-      if (key === "a" && section !== "departures") {
-        event.preventDefault();
-        handleGateStatusChange(GATE_STATUS.ARRIVED);
-      } else if (key === "k" && section !== "departures") {
-        event.preventDefault();
-        handleGateStatusChange(GATE_STATUS.ARRIVED_KEY_TAKEN);
-      } else if (key === "d") {
-        event.preventDefault();
-        handleGateStatusChange(GATE_STATUS.DEPARTED);
-      }
-    };
-
-    const gateStatusOptions = useMemo(() => {
-      return GATE_STATUS_OPTIONS;
-    }, []);
-
-    // Single dropdown: gate_status only (— Status — / Arrived / No Show / Take Key / Arrived & Key Taken / Departed).
-    return (
-      <tr className={rowClass} tabIndex={0} onKeyDown={handleQuickKey}>
-        <td colSpan={3} className="px-1.5 py-1 cursor-pointer align-middle text-inherit" onClick={handleRowClick}>
-          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm">
-            <span onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} className="inline-flex items-center">
-              <Checkbox
-                checked={isSelected}
-                onCheckedChange={(checked) => onSelectChange(checked === true)}
-                aria-label={`Select booking ${booking.reference}`}
-                className="bg-white border-gray-300 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
-              />
-            </span>
-            {isKeyTaken && (
-              <span className="inline-flex items-center text-inherit" title="Key taken">
-                <KeyRound className="h-4 w-4 shrink-0" />
-              </span>
-            )}
-            <span className="font-medium">{booking.reference}</span>
-            {highlightMode ? (
-              <div onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} className="inline-flex">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      className="inline-flex focus:outline-none hover:opacity-80 cursor-pointer min-w-[20px] min-h-[20px] rounded"
-                      disabled={updatingHighlightId === booking.id}
-                      onClick={(e) => e.stopPropagation()}
-                      onPointerDown={(e) => e.stopPropagation()}
-                    >
-                      <BookingHighlightIcon highlightCode={effectiveHighlightCode} />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="z-[100] bg-white border border-gray-200 shadow-lg" onClick={(e) => e.stopPropagation()}>
-                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); updateHighlight(booking.id, 'key'); }} className="flex items-center gap-2">
-                      <BookingHighlightIcon highlightCode="key" /><span>Key icon</span>{(effectiveHighlightCode === 'key') && <span className="ml-auto">✓</span>}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); updateHighlight(booking.id, 'dot_green'); }} className="flex items-center gap-2">
-                      <BookingHighlightIcon highlightCode="dot_green" /><span>Green dot</span>{booking.highlight_code === 'dot_green' && <span className="ml-auto">✓</span>}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); updateHighlight(booking.id, 'dot_amber'); }} className="flex items-center gap-2">
-                      <BookingHighlightIcon highlightCode="dot_amber" /><span>Amber dot</span>{booking.highlight_code === 'dot_amber' && <span className="ml-auto">✓</span>}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); updateHighlight(booking.id, 'dot_red'); }} className="flex items-center gap-2">
-                      <BookingHighlightIcon highlightCode="dot_red" /><span>Red dot</span>{booking.highlight_code === 'dot_red' && <span className="ml-auto">✓</span>}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); updateHighlight(booking.id, 'none'); }} className="flex items-center gap-2">
-                      <BookingHighlightIcon highlightCode="none" /><span>No highlight</span>{effectiveHighlightCode === 'none' && <span className="ml-auto">✓</span>}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            ) : !isKeyTaken ? (
-              <BookingHighlightIcon highlightCode={effectiveHighlightCode} />
-            ) : null}
-            <span>{booking.customer_name}</span>
-            <span className="text-sm font-semibold font-mono text-gray-900 bg-gray-200 px-2 py-0.5 rounded tracking-wide">{booking.plate}</span>
-            {(booking as any).is_incomplete && (
-              <span className="inline-flex items-center h-5 rounded-md px-1.5 py-0.5 text-xs font-medium bg-amber-50 text-amber-800">Incomplete</span>
-            )}
-            {booking.status === 'cancelled' && (
-              <span className="inline-flex items-center h-5 rounded-md px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-800">Cancelled</span>
-            )}
-            {(booking as any).dynamic_pricing_applied && (
-              <DynamicPricingBadge applied={(booking as any).dynamic_pricing_applied} multiplier={(booking as any).dynamic_pricing_multiplier} occupancyPercent={(booking as any).dynamic_pricing_occupancy_percent} ruleId={(booking as any).dynamic_pricing_rule_id} />
-            )}
-            {booking.ops_hidden && (
-              <span className="inline-flex items-center h-5 rounded-md px-1.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-600" title={booking.ops_hidden_reason || 'Hidden'}>
-                HIDDEN
-              </span>
-            )}
-            {isPending && (
-              <span className="inline-flex items-center h-5 rounded-md px-1.5 py-0.5 text-xs font-medium bg-blue-50 text-blue-800">
-                Saving...
-              </span>
-            )}
-            {booking.ops_hidden && showHidden && onUnhide && (
-              <Button type="button" variant="outline" size="sm" className="h-6 text-xs" onClick={(e) => { e.stopPropagation(); onUnhide(booking); }}>
-                Unhide
-              </Button>
-            )}
-          </div>
-        </td>
-        <td colSpan={3} className="px-1.5 py-1 cursor-pointer align-middle text-inherit" onClick={handleRowClick}>
-          <span className="text-xs font-normal">
-            {formatBookingDateTime(booking, 'start_at')}
-          </span>
-        </td>
-        <td colSpan={3} className="px-1.5 py-1 cursor-pointer align-middle text-inherit" onClick={handleRowClick}>
-          <span className="text-xs font-normal">
-            {formatBookingDateTime(booking, 'end_at')}
-          </span>
-        </td>
-        <td colSpan={3} className="px-1.5 py-1 align-middle text-inherit" onClick={(e) => e.stopPropagation()}>
-          <div className="flex flex-col md:flex-row md:items-center md:justify-end gap-1 md:gap-2">
-            <div className="flex flex-wrap justify-end gap-1 text-sm">
-              <span>{calculateDays()}d</span>
-              <span>£{booking.money_charged || 0}</span>
-            </div>
-            <Select value={displayGateStatus === '' ? undefined : displayGateStatus} onValueChange={handleGateStatusChange} disabled={isPending}>
-              <SelectTrigger className="h-7 px-1 py-0 bg-transparent border-0 shadow-none gap-1 cursor-pointer focus:ring-0 focus:ring-offset-0 min-w-0 w-auto [&>svg]:shrink-0 [&>span:first-of-type]:sr-only">
-                <SelectValue />
-                <span className={cn('inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium leading-none text-inherit', gateStatusPillClass(displayGateStatus))}>
-                  {gateStatusLabel(displayGateStatus)}
-                </span>
-              </SelectTrigger>
-              <SelectContent align="end" className="z-[100]">
-                {gateStatusOptions.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </td>
-      </tr>
-    );
-  };
+  const rowProps = useMemo(
+    () => ({
+      timezone: tenantTz,
+      highlightMode,
+      showHidden,
+      onBookingClick: handleBookingClick,
+      onUnhide: handleUnhide,
+      onSelectChange: handleRowSelectChange,
+      onQuickAction: handleRowQuickAction,
+      onHighlightSelect: updateHighlight,
+    }),
+    [
+      tenantTz,
+      highlightMode,
+      showHidden,
+      handleBookingClick,
+      handleUnhide,
+      handleRowSelectChange,
+      handleRowQuickAction,
+      updateHighlight,
+    ]
+  );
 
   return (
     <>
@@ -990,8 +608,20 @@ export default function TodayServerClient({
 
         {/* Date Range Selector */}
         <div className="max-w-xs">
-          <DateRangeSelector onDateRangeChange={handleDateRangeChange} />
+          <DateRangeSelector
+            onDateRangeChange={handleDateRangeChange}
+            tenantTimezone={tenantTz}
+            initialFrom={initialDateRange.from}
+            initialTo={initialDateRange.to}
+            skipInitialFetch
+          />
         </div>
+
+        {queryError && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Could not load some booking data: {queryError}
+          </div>
+        )}
 
         {/* Loading State */}
         {loading && (
@@ -1190,7 +820,19 @@ export default function TodayServerClient({
                   {groupedByDay.length === 0 ? (
                     <tr>
                       <td colSpan={12} className="px-4 py-8 text-center text-gray-500">
-                        No arrivals or departures in this period
+                        <div>No arrivals or departures in this period</div>
+                        {(arrivals.length > 0 || departures.length > 0) && (
+                          <div className="mt-2 text-sm text-amber-700">
+                            {arrivals.length} arrival(s) and {departures.length} departure(s) loaded but hidden by
+                            filters — try &quot;Show hidden&quot; or clear Keys Taken filters.
+                          </div>
+                        )}
+                        {arrivals.length === 0 && departures.length === 0 && kpis.checkedIn > 0 && (
+                          <div className="mt-2 text-sm text-gray-600">
+                            {kpis.checkedIn} vehicle(s) currently parked overlap today but none start or end on this
+                            date.
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ) : (
@@ -1264,17 +906,13 @@ export default function TodayServerClient({
                                     </td>
                                   </tr>
                                   {dayGroup.arrivals.map((booking) => (
-                                    <BookingRow
+                                    <TodayBookingRow
                                       key={`arrival-${booking.id}`}
+                                      {...rowProps}
                                       booking={booking}
-                                      type="arrival"
                                       section="arrivals"
-                                      showHidden={showHidden}
-                                      onUnhide={handleUnhide}
                                       isSelected={selectedBookingIds.has(booking.id)}
                                       isPending={Boolean(pendingById[booking.id])}
-                                      onSelectChange={(checked) => toggleSelected(booking.id, checked)}
-                                      onQuickAction={(action) => updateBookingStatus(booking.id, action)}
                                     />
                                   ))}
                                 </>
@@ -1295,17 +933,13 @@ export default function TodayServerClient({
                                     </td>
                                   </tr>
                                   {dayGroup.departures.map((booking) => (
-                                    <BookingRow
+                                    <TodayBookingRow
                                       key={`departure-${booking.id}`}
+                                      {...rowProps}
                                       booking={booking}
-                                      type="departure"
                                       section="departures"
-                                      showHidden={showHidden}
-                                      onUnhide={handleUnhide}
                                       isSelected={selectedBookingIds.has(booking.id)}
                                       isPending={Boolean(pendingById[booking.id])}
-                                      onSelectChange={(checked) => toggleSelected(booking.id, checked)}
-                                      onQuickAction={(action) => updateBookingStatus(booking.id, action)}
                                     />
                                   ))}
                                 </>
@@ -1409,17 +1043,13 @@ export default function TodayServerClient({
                         {!isCollapsed && (
                           <>
                             {group.bookings.map((booking) => (
-                              <BookingRow
+                              <TodayBookingRow
                                 key={booking.id}
+                                {...rowProps}
                                 booking={booking}
-                                type="parked"
                                 section="parked"
-                                showHidden={showHidden}
-                                onUnhide={handleUnhide}
                                 isSelected={selectedBookingIds.has(booking.id)}
                                 isPending={Boolean(pendingById[booking.id])}
-                                onSelectChange={(checked) => toggleSelected(booking.id, checked)}
-                                onQuickAction={(action) => updateBookingStatus(booking.id, action)}
                               />
                             ))}
                           </>
@@ -1441,7 +1071,8 @@ export default function TodayServerClient({
           open={!!selectedBookingId}
           onClose={() => setSelectedBookingId(null)}
           onBookingUpdated={() => {
-            router.refresh();
+            loadedRangeRef.current = '';
+            void fetchDataForDateRange(currentDateRange.from, currentDateRange.to);
           }}
         />
       )}

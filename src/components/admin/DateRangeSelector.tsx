@@ -2,63 +2,82 @@
 
 import { useState, useEffect } from 'react';
 import { ChevronDownIcon } from 'lucide-react';
+import { tenantTodayDateKey } from '@/lib/timezone';
 
 interface DateRangeSelectorProps {
   onDateRangeChange: (dateRange: { from: string; to: string }) => void;
+  /** Tenant IANA timezone for calendar-day presets. */
+  tenantTimezone?: string;
+  /** When set, skips the automatic fetch on mount (SSR already loaded this range). */
+  skipInitialFetch?: boolean;
+  /** Initial preset when SSR provided a range (keeps selector in sync). */
+  initialFrom?: string;
+  initialTo?: string;
 }
 
-export default function DateRangeSelector({ onDateRangeChange }: DateRangeSelectorProps) {
+function addDays(dateKey: string, days: number): string {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return dt.toISOString().slice(0, 10);
+}
+
+export default function DateRangeSelector({
+  onDateRangeChange,
+  tenantTimezone = 'Europe/London',
+  skipInitialFetch = false,
+  initialFrom,
+  initialTo,
+}: DateRangeSelectorProps) {
   const [selectedRange, setSelectedRange] = useState('today');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
   const [showCustom, setShowCustom] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
 
-  // Call onDateRangeChange on mount with initial "today" range
+  const tenantToday = tenantTodayDateKey(tenantTimezone);
+
   useEffect(() => {
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
-    onDateRangeChange({ from: todayStr, to: todayStr });
-  }, []); // Empty dependency array - only run on mount
+    if (initialFrom && initialTo) {
+      if (initialFrom === tenantToday && initialTo === tenantToday) {
+        setSelectedRange('today');
+      }
+    }
+  }, [initialFrom, initialTo, tenantToday]);
+
+  useEffect(() => {
+    if (skipInitialFetch) return;
+    onDateRangeChange({ from: tenantToday, to: tenantToday });
+  }, [skipInitialFetch, onDateRangeChange, tenantToday]);
 
   const handleRangeChange = (range: string) => {
     setSelectedRange(range);
     setShowCustom(false);
-    
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
-    
+
+    const todayStr = tenantToday;
+
     let from: string;
     let to: string;
-    
+
     switch (range) {
       case 'today':
         from = todayStr;
         to = todayStr;
         break;
       case 'tomorrow':
-        const tomorrow = new Date(today);
-        tomorrow.setDate(today.getDate() + 1);
-        from = tomorrow.toISOString().split('T')[0];
-        to = tomorrow.toISOString().split('T')[0];
+        from = addDays(todayStr, 1);
+        to = addDays(todayStr, 1);
         break;
       case 'next7days':
-        const nextWeek = new Date(today);
-        nextWeek.setDate(today.getDate() + 7);
         from = todayStr;
-        to = nextWeek.toISOString().split('T')[0];
+        to = addDays(todayStr, 7);
         break;
       case 'next14days':
-        const nextTwoWeeks = new Date(today);
-        nextTwoWeeks.setDate(today.getDate() + 14);
         from = todayStr;
-        to = nextTwoWeeks.toISOString().split('T')[0];
+        to = addDays(todayStr, 14);
         break;
       case 'next30days':
-        const nextMonth = new Date(today);
-        nextMonth.setDate(today.getDate() + 30);
         from = todayStr;
-        to = nextMonth.toISOString().split('T')[0];
+        to = addDays(todayStr, 30);
         break;
       case 'custom':
         setShowCustom(true);
@@ -67,7 +86,7 @@ export default function DateRangeSelector({ onDateRangeChange }: DateRangeSelect
         from = todayStr;
         to = todayStr;
     }
-    
+
     onDateRangeChange({ from, to });
   };
 

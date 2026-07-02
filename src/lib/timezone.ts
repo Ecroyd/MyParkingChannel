@@ -3,46 +3,51 @@
  * All dates are treated as UK timezone since the platform is UK-only
  */
 
-export function getTenantDateRange(tenantTimezone: string = 'Europe/London', date: Date = new Date()) {
-  // Simple approach: get today's date in UK timezone
-  const now = new Date();
-  
-  // Get UK date string (YYYY-MM-DD format)
-  const ukDateString = now.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
-  
-  // Create start and end of day in UK timezone
-  const startOfDay = new Date(ukDateString + 'T00:00:00');
-  const endOfDay = new Date(ukDateString + 'T23:59:59');
-  
-  // Convert to UTC for database queries
-  const startOfDayUTC = new Date(startOfDay.getTime() - (startOfDay.getTimezoneOffset() * 60000));
-  const endOfDayUTC = new Date(endOfDay.getTime() - (endOfDay.getTimezoneOffset() * 60000));
-  
+/**
+ * UTC bounds for a tenant calendar date (YYYY-MM-DD).
+ *
+ * Booking imports historically store supplier UK local clock times as UTC
+ * (e.g. 14:00 UK → start_at 14:00Z). Today-page range queries must use these
+ * naive calendar-day UTC bounds, not zonedTimeToUtc, or arrivals/departures
+ * disappear for most rows.
+ */
+export function tenantDateRangeUtcBounds(fromDate: string, toDate: string) {
   return {
-    startOfDay,
-    endOfDay,
+    rangeStart: `${fromDate}T00:00:00.000Z`,
+    rangeEnd: `${toDate}T23:59:59.999Z`,
+    /** Use .lt(column, rangeEnd) on start_at / end_at — matches legacy Today page. */
+    endExclusive: true as const,
+  };
+}
+
+export function tenantTodayDateKey(timezone: string = 'Europe/London', date: Date = new Date()): string {
+  return date.toLocaleDateString('en-CA', { timeZone: timezone });
+}
+
+export function getTenantDateRange(tenantTimezone: string = 'Europe/London', date: Date = new Date()) {
+  const dateKey = tenantTodayDateKey(tenantTimezone, date);
+  const { rangeStart, rangeEnd } = tenantDateRangeUtcBounds(dateKey, dateKey);
+  const startOfDayUTC = new Date(rangeStart);
+  const endOfDayUTC = new Date(rangeEnd);
+
+  return {
+    startOfDay: new Date(`${dateKey}T00:00:00`),
+    endOfDay: new Date(`${dateKey}T23:59:59`),
     startOfDayUTC,
     endOfDayUTC,
-    tenantDate: new Date(now.toLocaleString("en-US", { timeZone: "Europe/London" }))
+    tenantDate: dateKey,
   };
 }
 
 export function getDateRangeForQuery(fromDate: string, toDate: string, tenantTimezone: string = 'Europe/London') {
-  // Parse the plain calendar days as naive JS dates
-  const start = new Date(`${fromDate}T00:00:00`);
-  const end = new Date(`${toDate}T23:59:59`);
-
-  // Interpret those as tenant-local times
-  const startLocal = new Date(start.toLocaleString('en-US', { timeZone: tenantTimezone }));
-  const endLocal = new Date(end.toLocaleString('en-US', { timeZone: tenantTimezone }));
-
-  // Convert to UTC for database queries
-  const fromUTC = startLocal;
-  const toUTC = endLocal;
+  // Today ops board: same naive UTC calendar bounds as getTenantDateRange.
+  const { rangeStart, rangeEnd } = tenantDateRangeUtcBounds(fromDate, toDate);
+  const fromUTC = new Date(rangeStart);
+  const toUTC = new Date(rangeEnd);
 
   return {
-    from: start,
-    to: end,
+    from: new Date(`${fromDate}T00:00:00`),
+    to: new Date(`${toDate}T23:59:59`),
     fromUTC,
     toUTC,
   };
