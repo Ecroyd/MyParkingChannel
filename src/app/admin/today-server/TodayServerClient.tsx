@@ -98,7 +98,39 @@ export default function TodayServerClient({
   const [currentDateRange, setCurrentDateRange] = useState(initialDateRange);
   const [queryError, setQueryError] = useState(initialQueryError);
   const loadedRangeRef = useRef(`${initialDateRange.from}:${initialDateRange.to}`);
+  const bulkToolbarRef = useRef<HTMLDivElement>(null);
   const tenantTz = tenant.timezone || 'Europe/London';
+
+  function compensateBulkToolbarScroll(delta: number) {
+    if (delta === 0) return;
+    const main = document.querySelector('main.overflow-y-auto');
+    if (main instanceof HTMLElement) {
+      main.scrollTop += delta;
+    }
+  }
+
+  function updateSelectionWithScrollAnchor(buildNext: (prev: Set<string>) => Set<string>) {
+    const prev = selectedBookingIds;
+    const next = buildNext(new Set(prev));
+    const appearing = prev.size === 0 && next.size > 0;
+    const disappearing = prev.size > 0 && next.size === 0;
+    const toolbarHeightBeforeHide = disappearing ? (bulkToolbarRef.current?.offsetHeight ?? 0) : 0;
+
+    setSelectedBookingIds(next);
+
+    if (appearing) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const height = bulkToolbarRef.current?.offsetHeight ?? 0;
+          compensateBulkToolbarScroll(height);
+        });
+      });
+    } else if (disappearing && toolbarHeightBeforeHide > 0) {
+      requestAnimationFrame(() => {
+        compensateBulkToolbarScroll(-toolbarHeightBeforeHide);
+      });
+    }
+  }
 
   const handleBookingClick = useCallback((bookingId: string) => {
     setSelectedBookingId(bookingId);
@@ -274,13 +306,13 @@ export default function TodayServerClient({
   }, [tenant.id, toast]);
 
   const handleRowSelectChange = useCallback((bookingId: string, checked: boolean) => {
-    setSelectedBookingIds((prev) => {
+    updateSelectionWithScrollAnchor((prev) => {
       const next = new Set(prev);
       if (checked) next.add(bookingId);
       else next.delete(bookingId);
       return next;
     });
-  }, []);
+  }, [selectedBookingIds]);
 
   const updateBookingStatusRef = useRef(updateBookingStatus);
   updateBookingStatusRef.current = updateBookingStatus;
@@ -460,9 +492,10 @@ export default function TodayServerClient({
   );
   const selectedVisibleCount = visibleOperationalIds.filter((id) => selectedBookingIds.has(id)).length;
   const allVisibleSelected = visibleOperationalIds.length > 0 && selectedVisibleCount === visibleOperationalIds.length;
+  const hasBulkSelection = selectedBookingIds.size > 0;
 
   const selectAllVisible = (checked: boolean) => {
-    setSelectedBookingIds((prev) => {
+    updateSelectionWithScrollAnchor((prev) => {
       const next = new Set(prev);
       for (const id of visibleOperationalIds) {
         if (checked) next.add(id);
@@ -472,7 +505,9 @@ export default function TodayServerClient({
     });
   };
 
-  const clearSelection = () => setSelectedBookingIds(new Set());
+  const clearSelection = () => {
+    updateSelectionWithScrollAnchor(() => new Set());
+  };
 
   const runBulkAction = async (action: OpsAction) => {
     const ids = Array.from(selectedBookingIds);
@@ -731,7 +766,7 @@ export default function TodayServerClient({
             </div>
           </div>
           {!arrivalsDeparturesCollapsed && (
-            <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 px-4 py-3 md:px-6">
+            <div className="space-y-2 border-t border-gray-100 px-4 py-3 md:px-6">
               <label className="inline-flex items-center gap-2 text-sm text-gray-700">
                 <Checkbox
                   checked={allVisibleSelected}
@@ -742,33 +777,36 @@ export default function TodayServerClient({
                 />
                 <span>Select visible</span>
               </label>
-              {selectedBookingIds.size > 0 && (
-                <div className="flex flex-wrap items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
-                  <span className="text-sm font-medium text-blue-900">
+              {hasBulkSelection && (
+                <div
+                  ref={bulkToolbarRef}
+                  className="flex items-center gap-2 overflow-x-auto rounded-md border border-blue-200 bg-blue-50 px-3 py-2"
+                >
+                  <span className="shrink-0 text-sm font-medium text-blue-900">
                     {selectedBookingIds.size} selected
                   </span>
-                  <Button type="button" size="sm" variant="outline" onClick={() => runBulkAction('arrived')}>
+                  <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => runBulkAction('arrived')}>
                     Mark Arrived
                   </Button>
-                  <Button type="button" size="sm" variant="outline" onClick={() => runBulkAction('arrived_key_taken')}>
+                  <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => runBulkAction('arrived_key_taken')}>
                     Mark Arrived + Key Taken
                   </Button>
-                  <Button type="button" size="sm" variant="outline" onClick={() => runBulkAction('take_key')}>
+                  <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => runBulkAction('take_key')}>
                     Mark Take Key
                   </Button>
-                  <Button type="button" size="sm" variant="outline" onClick={() => runBulkAction('departed')}>
+                  <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => runBulkAction('departed')}>
                     Mark Departed
                   </Button>
-                  <Button type="button" size="sm" variant="outline" onClick={() => runBulkAction('no_show')}>
+                  <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => runBulkAction('no_show')}>
                     Mark No Show
                   </Button>
-                  <Button type="button" size="sm" variant="outline" onClick={() => runBulkAction('reserved')}>
+                  <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => runBulkAction('reserved')}>
                     Reset to Reserved
                   </Button>
-                  <Button type="button" size="sm" variant="outline" onClick={() => runBulkAction('cancelled')}>
+                  <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => runBulkAction('cancelled')}>
                     Cancel Booking
                   </Button>
-                  <Button type="button" size="sm" variant="ghost" onClick={clearSelection}>
+                  <Button type="button" size="sm" variant="ghost" className="shrink-0" onClick={clearSelection}>
                     Clear
                   </Button>
                 </div>

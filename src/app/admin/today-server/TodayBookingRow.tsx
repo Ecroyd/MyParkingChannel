@@ -195,7 +195,7 @@ function TodayBookingRow({
         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm">
           <span
             onClick={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.preventDefault()}
             className="inline-flex items-center"
           >
             <Checkbox
