@@ -1,4 +1,6 @@
 /** Columns needed for Today ops board list rows (not modal detail). */
+import type { BookingHighlightCode } from '@/types/bookings';
+
 export const TODAY_BOOKING_SELECT =
   'id, tenant_id, reference, customer_name, customer_email, customer_phone, plate, car_make, car_model, car_color, start_at, end_at, start_at_local, end_at_local, status, money_received, money_charged, source, flight_number, notes, stripe_payment_intent_id, checked_in_at, checked_out_at, arrived_at, departed_at, gate_status, highlight_code, ops_status, ops_hidden, ops_hidden_reason';
 
@@ -29,7 +31,7 @@ export type TodayBookingRow = {
   arrived_at?: string | null;
   departed_at?: string | null;
   gate_status?: string | null;
-  highlight_code?: string | null;
+  highlight_code?: BookingHighlightCode | null;
   ops_status?: string | null;
   ops_hidden?: boolean | null;
   ops_hidden_reason?: string | null;

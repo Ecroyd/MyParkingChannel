@@ -5,6 +5,7 @@ import { LogIn, LogOut, Car, DollarSign, ArrowUpDown, ChevronDown, ChevronUp, Ke
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
 import DateRangeSelector from '@/components/admin/DateRangeSelector';
 import TodayBookingRow, { type TodayBoardBooking, type TodayOpsAction } from './TodayBookingRow';
+import type { TodayBookingRow as TodayBooking } from '@/lib/today/bookingSelect';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
@@ -35,38 +36,7 @@ async function parseJsonFromResponse(res: Response): Promise<unknown> {
 
 type OpsAction = TodayOpsAction;
 
-interface Booking extends TodayBoardBooking {
-  id: string;
-  tenant_id: string;
-  reference: string;
-  customer_name: string;
-  customer_email: string;
-  customer_phone: string | null;
-  plate: string;
-  car_make: string | null;
-  car_model: string | null;
-  car_color: string | null;
-  start_at: string;
-  end_at: string;
-  start_at_local?: string | null;
-  end_at_local?: string | null;
-  status: string;
-  money_received: number;
-  money_charged: number;
-  source: string;
-  flight_number: string;
-  notes: string | null;
-  stripe_payment_intent_id?: string | null;
-  payment_status?: string | null;
-  checked_in_at: string | null;
-  checked_out_at: string | null;
-  arrived_at?: string | null;
-  departed_at?: string | null;
-  gate_status?: string | null;
-  highlight_code: BookingHighlightCode;
-  ops_hidden?: boolean;
-  ops_hidden_reason?: string | null;
-}
+type Booking = TodayBooking;
 
 interface Tenant {
   id: string;
@@ -382,7 +352,7 @@ export default function TodayServerClient({
     return sortBookings(departures, departuresSort, 'end_at');
   }, [departures, departuresSort]);
 
-  function isCancelledBooking(b: { gate_status?: string | null; status?: string }) {
+  function isCancelledBooking(b: { gate_status?: string | null; status?: string | null }) {
     return b.status === 'cancelled' || b.gate_status === GATE_STATUS.CANCELLED;
   }
 
@@ -390,7 +360,7 @@ export default function TodayServerClient({
     return b.gate_status === GATE_STATUS.NO_SHOW;
   }
 
-  function isArrivalRemaining(b: { gate_status?: string | null; status?: string }) {
+  function isArrivalRemaining(b: { gate_status?: string | null; status?: string | null }) {
     return !isCancelledBooking(b) && !isNoShowBooking(b) && ![
       GATE_STATUS.ARRIVED,
       GATE_STATUS.ARRIVED_KEY_TAKEN,
@@ -398,11 +368,11 @@ export default function TodayServerClient({
     ].includes(b.gate_status as any);
   }
 
-  function isDepartureRemaining(b: { gate_status?: string | null; status?: string }) {
+  function isDepartureRemaining(b: { gate_status?: string | null; status?: string | null }) {
     return !isCancelledBooking(b) && !isNoShowBooking(b) && b.gate_status !== GATE_STATUS.DEPARTED;
   }
 
-  function isKeysToTakeRemaining(b: { gate_status?: string | null; status?: string }) {
+  function isKeysToTakeRemaining(b: { gate_status?: string | null; status?: string | null }) {
     return !isCancelledBooking(b) && b.gate_status === GATE_STATUS.TAKE_KEY;
   }
 
@@ -413,7 +383,7 @@ export default function TodayServerClient({
   }
 
   // Operational lists hide cancelled bookings permanently; reports still retain the records.
-  function applyStatusFilters<T extends { ops_hidden?: boolean; gate_status?: string | null; status?: string }>(
+  function applyStatusFilters<T extends { ops_hidden?: boolean | null; gate_status?: string | null; status?: string | null }>(
     bookings: T[],
     section: 'arrivals' | 'departures'
   ): T[] {
@@ -1067,7 +1037,10 @@ export default function TodayServerClient({
       {/* Booking Details Modal */}
       {selectedBookingId && (
         <BookingDetailsModal
-          booking={[...arrivals, ...departures, ...currentlyParked].find(b => b.id === selectedBookingId) || null}
+          booking={
+            ([...arrivals, ...departures, ...currentlyParked].find((b) => b.id === selectedBookingId) ??
+              null) as React.ComponentProps<typeof BookingDetailsModal>['booking']
+          }
           open={!!selectedBookingId}
           onClose={() => setSelectedBookingId(null)}
           onBookingUpdated={() => {

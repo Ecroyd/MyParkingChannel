@@ -129,7 +129,7 @@ export async function loadTodayPageData(opts: LoadOpts): Promise<TodayPageData> 
           .lte('start_at', now.toISOString())
           .gte('end_at', now.toISOString())
           .neq('status', 'cancelled')
-      : Promise.resolve({ data: null as { id: string; status: string | null; gate_status: string | null }[] | null }),
+      : Promise.resolve({ data: null as { id: string; status: string | null; gate_status: string | null }[] | null, error: null }),
 
     calculateCapacityForDate(tenantId, todayStr),
 

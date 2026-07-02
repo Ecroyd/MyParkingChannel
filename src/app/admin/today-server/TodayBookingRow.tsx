@@ -30,15 +30,15 @@ export type TodayOpsAction =
 export type TodayBoardBooking = {
   id: string;
   reference: string;
-  customer_name: string;
-  plate: string;
+  customer_name: string | null;
+  plate: string | null;
   start_at: string;
   end_at: string;
-  status: string;
-  money_charged: number;
+  status: string | null;
+  money_charged?: number | null;
   gate_status?: string | null;
-  highlight_code: BookingHighlightCode;
-  ops_hidden?: boolean;
+  highlight_code?: BookingHighlightCode | null;
+  ops_hidden?: boolean | null;
   ops_hidden_reason?: string | null;
   is_incomplete?: boolean;
   dynamic_pricing_applied?: boolean;
@@ -219,7 +219,7 @@ function TodayBookingRow({
             >
               <BookingHighlightPicker
                 bookingId={booking.id}
-                highlightCode={booking.highlight_code}
+                highlightCode={effectiveHighlightCode}
                 effectiveHighlightCode={effectiveHighlightCode}
                 onSelect={onHighlightSelect}
               />
