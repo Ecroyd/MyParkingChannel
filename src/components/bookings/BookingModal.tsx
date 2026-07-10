@@ -12,7 +12,6 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { 
   Calendar, 
   Clock, 
@@ -27,16 +26,20 @@ import {
   X,
   CheckCircle,
   AlertCircle,
-  Save
+  Save,
+  Phone,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import ExtendBookingSheet from './ExtendBookingSheet'
+import { notifyBookingsChanged } from '@/lib/bookings/operational-state'
 
 type Booking = {
   id: string
   reference: string
   customer_name: string
   customer_email: string
+  customer_phone?: string
+  phone?: string
   plate: string
   start_at: string
   end_at: string
@@ -44,6 +47,7 @@ type Booking = {
   money_charged: number
   money_received: number
   flight_number?: string
+  return_flight_number?: string
   notes?: string
   source: string
   created_at: string
@@ -60,56 +64,79 @@ type BookingModalProps = {
   onOpenChange: (open: boolean) => void
   onBookingUpdated?: (booking: Booking) => void
   tenantId?: string
+  tenantTimezone?: string
 }
+
+function isoToDatetimeLocal(iso: string): string {
+  if (!iso) return ''
+  return iso.slice(0, 16)
+}
+
+function datetimeLocalToIso(value: string): string {
+  if (!value) return value
+  if (value.includes('Z') || /[+-]\d{2}:\d{2}$/.test(value)) {
+    return new Date(value).toISOString()
+  }
+  // datetime-local values are stored/displayed as UTC wall-clock times
+  return new Date(`${value}:00.000Z`).toISOString()
+}
+
+type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
 export default function BookingModal({ 
   booking, 
   open, 
   onOpenChange, 
   onBookingUpdated,
-  tenantId
+  tenantId,
+  tenantTimezone = 'UTC',
 }: BookingModalProps) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
+  const [saveState, setSaveState] = useState<SaveState>('idle')
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [showExtendSheet, setShowExtendSheet] = useState(false)
   const [stripePublishableKey, setStripePublishableKey] = useState<string>('')
   const [isEditing, setIsEditing] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [localBooking, setLocalBooking] = useState<Booking | null>(booking)
   const [editForm, setEditForm] = useState({
     plate: '',
     flight_number: '',
+    return_flight_number: '',
     start_at: '',
     end_at: '',
     status: '',
     customer_name: '',
     customer_email: '',
+    customer_phone: '',
     notes: ''
   })
 
-  // Ensure component is mounted on client side
   useEffect(() => {
     setMounted(true)
   }, [])
 
-  if (!booking || !mounted) return null
-
-  // Initialize edit form when booking changes
   useEffect(() => {
+    setLocalBooking(booking)
     if (booking) {
       setEditForm({
         plate: booking.plate || '',
         flight_number: booking.flight_number || '',
-        start_at: booking.start_at.slice(0, 16),
-        end_at: booking.end_at.slice(0, 16),
+        return_flight_number: booking.return_flight_number || '',
+        start_at: isoToDatetimeLocal(booking.start_at),
+        end_at: isoToDatetimeLocal(booking.end_at),
         status: booking.status || '',
         customer_name: booking.customer_name || '',
         customer_email: booking.customer_email || '',
+        customer_phone: booking.customer_phone || booking.phone || '',
         notes: booking.notes || ''
       })
+      setSaveState('idle')
+      setSaveError(null)
     }
   }, [booking])
 
-  // Fetch Stripe publishable key when modal opens
   useEffect(() => {
     if (open && tenantId) {
       let cancelled = false
@@ -121,9 +148,7 @@ export default function BookingModal({
             setStripePublishableKey(data.publishableKey)
           }
         })
-        .catch(() => {
-          // Stripe not configured
-        })
+        .catch(() => {})
       
       return () => {
         cancelled = true
@@ -131,25 +156,25 @@ export default function BookingModal({
     }
   }, [open, tenantId])
 
+  if (!mounted || !localBooking) return null
+
   const formatDate = (dateString: string) => {
-    // Use consistent formatting to avoid hydration mismatches
     const date = new Date(dateString)
     return date.toLocaleDateString('en-GB', {
       weekday: 'short',
       year: 'numeric',
       month: 'short',
       day: 'numeric',
-      timeZone: 'UTC'
+      timeZone: tenantTimezone,
     })
   }
 
   const formatTime = (dateString: string) => {
-    // Use consistent formatting to avoid hydration mismatches
     const date = new Date(dateString)
     return date.toLocaleTimeString('en-GB', {
       hour: '2-digit',
       minute: '2-digit',
-      timeZone: 'UTC'
+      timeZone: tenantTimezone,
     })
   }
 
@@ -170,6 +195,8 @@ export default function BookingModal({
         return <Badge className="badge badge-danger">Checked Out</Badge>
       case 'cancelled':
         return <Badge className="badge badge-danger">Cancelled</Badge>
+      case 'no_show':
+        return <Badge className="badge badge-danger">No Show</Badge>
       default:
         return <Badge variant="outline">{status}</Badge>
     }
@@ -182,21 +209,30 @@ export default function BookingModal({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          bookingId: booking.id,
+          bookingId: localBooking.id,
           status: newStatus
         }),
         credentials: 'include'
       })
 
+      const result = await response.json().catch(() => ({}))
       if (!response.ok) {
-        throw new Error('Failed to update booking status')
+        throw new Error(result.error || 'Failed to update booking status')
       }
 
-      toast.success(`Booking ${newStatus.replace('_', ' ')} successfully`)
-      onBookingUpdated?.(booking)
+      const updated = result.booking as Booking
+      if (!updated?.id) {
+        throw new Error('Update did not return a booking row')
+      }
+
+      setLocalBooking((prev) => (prev ? { ...prev, ...updated, status: newStatus } : prev))
+      toast.success(`Booking ${newStatus.replace(/_/g, ' ')} successfully`)
+      notifyBookingsChanged()
+      onBookingUpdated?.({ ...localBooking, ...updated, status: newStatus })
+      router.refresh()
       onOpenChange(false)
-    } catch (error) {
-      toast.error('Failed to update booking status')
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update booking status')
     } finally {
       setLoading(false)
     }
@@ -216,49 +252,73 @@ export default function BookingModal({
     }
   }
 
+  const handleNoShow = async () => {
+    if (confirm('Mark this booking as a no-show?')) {
+      await handleStatusUpdate('no_show')
+    }
+  }
+
   const handleEdit = () => {
     setIsEditing(true)
+    setSaveState('idle')
+    setSaveError(null)
   }
 
   const handleSaveEdit = async () => {
+    setSaveState('saving')
+    setSaveError(null)
     setLoading(true)
     try {
       const updateData = {
         plate: editForm.plate,
         flight_number: editForm.flight_number,
-        start_at: editForm.start_at,
-        end_at: editForm.end_at,
+        return_flight_number: editForm.return_flight_number,
+        start_at: datetimeLocalToIso(editForm.start_at),
+        end_at: datetimeLocalToIso(editForm.end_at),
         status: editForm.status,
         customer_name: editForm.customer_name,
         customer_email: editForm.customer_email,
+        customer_phone: editForm.customer_phone,
         notes: editForm.notes
       }
       
-      console.log('Updating booking with data:', updateData)
-      console.log('Booking ID:', booking.id)
-      
-      const response = await fetch(`/api/bookings/${booking.id}`, {
+      const response = await fetch(`/api/bookings/${localBooking.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updateData),
+        credentials: 'include',
       })
 
+      const result = await response.json().catch(() => ({}))
       if (!response.ok) {
-        const error = await response.json()
-        console.error('Update failed:', error)
-        throw new Error(error.error || `Failed to update booking (${response.status})`)
+        throw new Error(result.error || `Failed to update booking (${response.status})`)
       }
 
-      const updatedBooking = await response.json()
-      toast.success('Booking updated successfully')
+      if (!result?.id) {
+        throw new Error('Save did not return the updated booking')
+      }
+
+      const updatedBooking = result as Booking
+      setLocalBooking(updatedBooking)
+      setSaveState('saved')
+      toast.success('Booking updated')
+      notifyBookingsChanged()
       onBookingUpdated?.(updatedBooking)
+      router.refresh()
       setIsEditing(false)
     } catch (error: any) {
+      setSaveState('error')
+      setSaveError(error.message || 'Failed to update booking')
       toast.error(error.message || 'Failed to update booking')
     } finally {
       setLoading(false)
     }
   }
+
+  const saveButtonLabel =
+    saveState === 'saving' ? 'Saving…' :
+    saveState === 'saved' ? 'Booking updated ✓' :
+    'Save changes'
 
   const handleDelete = async () => {
     if (confirm('Are you sure you want to delete this booking? This action cannot be undone.')) {
@@ -267,7 +327,7 @@ export default function BookingModal({
         const response = await fetch('/api/bookings/delete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: booking.id }),
+          body: JSON.stringify({ id: localBooking.id }),
           credentials: 'include'
         })
 
@@ -276,8 +336,10 @@ export default function BookingModal({
         }
 
         toast.success('Booking deleted successfully')
-        onBookingUpdated?.(booking)
+        notifyBookingsChanged()
+        onBookingUpdated?.(localBooking)
         onOpenChange(false)
+        router.refresh()
       } catch (error) {
         toast.error('Failed to delete booking')
       } finally {
@@ -295,7 +357,7 @@ export default function BookingModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5" />
-            Booking Details - {booking.reference}
+            Booking Details - {localBooking.reference}
           </DialogTitle>
           <p id="booking-modal-description" className="sr-only">
             View and edit booking details including customer information, vehicle details, dates, and payment information.
@@ -303,23 +365,17 @@ export default function BookingModal({
         </DialogHeader>
 
         <div className="space-y-6">
-          {/* Status and Actions */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              {getStatusBadge(booking.status)}
+              {getStatusBadge(localBooking.status)}
               <span className="text-sm text-slate-500">
-                Created {formatDate(booking.created_at)}
+                Created {formatDate(localBooking.created_at)}
               </span>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap justify-end">
               {!isEditing ? (
                 <>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleEdit}
-                    disabled={loading}
-                  >
+                  <Button variant="outline" size="sm" onClick={handleEdit} disabled={loading}>
                     <Edit className="h-4 w-4 mr-2" />
                     Edit
                   </Button>
@@ -333,23 +389,20 @@ export default function BookingModal({
                     <Plus className="h-4 w-4 mr-2" />
                     Extend
                   </Button>
-                  {booking.status !== 'cancelled' && booking.status !== 'checked_out' && (
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={handleCancel}
-                      disabled={loading}
-                    >
-                      <X className="h-4 w-4 mr-2" />
-                      Cancel
-                    </Button>
+                  {localBooking.status !== 'cancelled' && localBooking.status !== 'checked_out' && localBooking.status !== 'no_show' && (
+                    <>
+                      <Button variant="destructive" size="sm" onClick={handleCancel} disabled={loading}>
+                        <X className="h-4 w-4 mr-2" />
+                        Cancel
+                      </Button>
+                      {localBooking.status === 'reserved' && (
+                        <Button variant="outline" size="sm" onClick={handleNoShow} disabled={loading}>
+                          No-show
+                        </Button>
+                      )}
+                    </>
                   )}
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={handleDelete}
-                    disabled={loading}
-                  >
+                  <Button variant="destructive" size="sm" onClick={handleDelete} disabled={loading}>
                     <X className="h-4 w-4 mr-2" />
                     Delete
                   </Button>
@@ -360,15 +413,19 @@ export default function BookingModal({
                     variant="default"
                     size="sm"
                     onClick={handleSaveEdit}
-                    disabled={loading}
+                    disabled={loading || saveState === 'saving'}
                   >
                     <Save className="h-4 w-4 mr-2" />
-                    Save
+                    {saveButtonLabel}
                   </Button>
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setIsEditing(false)}
+                    onClick={() => {
+                      setIsEditing(false)
+                      setSaveState('idle')
+                      setSaveError(null)
+                    }}
                     disabled={loading}
                   >
                     Cancel
@@ -378,9 +435,14 @@ export default function BookingModal({
             </div>
           </div>
 
+          {saveError && (
+            <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+              {saveError}
+            </div>
+          )}
+
           <Separator />
 
-          {/* Customer Information */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
@@ -399,7 +461,7 @@ export default function BookingModal({
                       className="mt-1"
                     />
                   ) : (
-                    <p className="text-sm">{booking.customer_name}</p>
+                    <p className="text-sm">{localBooking.customer_name}</p>
                   )}
                 </div>
                 <div>
@@ -413,7 +475,22 @@ export default function BookingModal({
                   ) : (
                     <p className="text-sm flex items-center gap-2">
                       <Mail className="h-3 w-3" />
-                      {booking.customer_email}
+                      {localBooking.customer_email}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-600">Telephone</label>
+                  {isEditing ? (
+                    <Input
+                      value={editForm.customer_phone}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, customer_phone: e.target.value }))}
+                      className="mt-1"
+                    />
+                  ) : (
+                    <p className="text-sm flex items-center gap-2">
+                      <Phone className="h-3 w-3" />
+                      {localBooking.customer_phone || localBooking.phone || 'Not provided'}
                     </p>
                   )}
                 </div>
@@ -421,7 +498,6 @@ export default function BookingModal({
             </CardContent>
           </Card>
 
-          {/* Vehicle Information */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
@@ -441,7 +517,7 @@ export default function BookingModal({
                     />
                   ) : (
                     <p className="text-sm font-mono bg-slate-100 px-2 py-1 rounded">
-                      {booking.plate || 'Not provided'}
+                      {localBooking.plate || 'Not provided'}
                     </p>
                   )}
                 </div>
@@ -456,28 +532,28 @@ export default function BookingModal({
                   ) : (
                     <p className="text-sm flex items-center gap-2">
                       <Plane className="h-3 w-3" />
-                      {booking.flight_number || 'Not provided'}
+                      {localBooking.flight_number || 'Not provided'}
                     </p>
                   )}
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-slate-600">Make & Model</label>
-                  <p className="text-sm">
-                    {booking.car_make && booking.car_model
-                      ? `${booking.car_make} ${booking.car_model}`
-                      : 'Not provided'
-                    }
-                  </p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-slate-600">Color</label>
-                  <p className="text-sm">{booking.car_color || 'Not provided'}</p>
+                  <label className="text-sm font-medium text-slate-600">Return Flight</label>
+                  {isEditing ? (
+                    <Input
+                      value={editForm.return_flight_number}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, return_flight_number: e.target.value }))}
+                      className="mt-1"
+                    />
+                  ) : (
+                    <p className="text-sm">
+                      {localBooking.return_flight_number || 'Not provided'}
+                    </p>
+                  )}
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          {/* Dates and Times */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
@@ -499,7 +575,7 @@ export default function BookingModal({
                   ) : (
                     <p className="text-sm flex items-center gap-2">
                       <Clock className="h-3 w-3" />
-                      {formatDate(booking.start_at)} at {formatTime(booking.start_at)}
+                      {formatDate(localBooking.start_at)} at {formatTime(localBooking.start_at)}
                     </p>
                   )}
                 </div>
@@ -515,7 +591,7 @@ export default function BookingModal({
                   ) : (
                     <p className="text-sm flex items-center gap-2">
                       <Clock className="h-3 w-3" />
-                      {formatDate(booking.end_at)} at {formatTime(booking.end_at)}
+                      {formatDate(localBooking.end_at)} at {formatTime(localBooking.end_at)}
                     </p>
                   )}
                 </div>
@@ -531,6 +607,7 @@ export default function BookingModal({
                       <option value="checked_in">Checked In</option>
                       <option value="checked_out">Checked Out</option>
                       <option value="cancelled">Cancelled</option>
+                      <option value="no_show">No Show</option>
                     </select>
                   </div>
                 )}
@@ -538,7 +615,6 @@ export default function BookingModal({
             </CardContent>
           </Card>
 
-          {/* Payment Information */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
@@ -550,56 +626,17 @@ export default function BookingModal({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm font-medium text-slate-600">Amount Charged</label>
-                  <p className="text-sm font-semibold">{formatCurrency(booking.money_charged)}</p>
+                  <p className="text-sm font-semibold">{formatCurrency(localBooking.money_charged)}</p>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-slate-600">Amount Received</label>
-                  <p className="text-sm font-semibold">{formatCurrency(booking.money_received)}</p>
+                  <p className="text-sm font-semibold">{formatCurrency(localBooking.money_received)}</p>
                 </div>
-              </div>
-              {booking.money_charged !== booking.money_received && (
-                <div className="flex items-center gap-2 text-amber-600 text-sm">
-                  <AlertCircle className="h-4 w-4" />
-                  Payment discrepancy detected
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Additional Information */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Additional Information</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium text-slate-600">Source</label>
-                  <p className="text-sm capitalize">{booking.source}</p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-slate-600">Booking ID</label>
-                  <p className="text-sm font-mono text-slate-500">{booking.id}</p>
-                </div>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-slate-600">Notes</label>
-                {isEditing ? (
-                  <textarea
-                    value={editForm.notes}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, notes: e.target.value }))}
-                    className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    rows={3}
-                  />
-                ) : (
-                  <p className="text-sm bg-slate-50 p-3 rounded-md">{booking.notes || 'No notes'}</p>
-                )}
               </div>
             </CardContent>
           </Card>
 
-          {/* Quick Actions */}
-          {booking.status === 'reserved' && !isEditing && (
+          {localBooking.status === 'reserved' && !isEditing && (
             <Card className="bg-blue-50 border-blue-200">
               <CardContent className="p-4">
                 <div className="flex items-center gap-2 mb-3">
@@ -612,13 +649,13 @@ export default function BookingModal({
                   onClick={() => handleStatusUpdate('checked_in')}
                   disabled={loading}
                 >
-                  Check In Customer
+                  Arrived
                 </Button>
               </CardContent>
             </Card>
           )}
 
-          {booking.status === 'checked_in' && !isEditing && (
+          {localBooking.status === 'checked_in' && !isEditing && (
             <Card className="bg-green-50 border-green-200">
               <CardContent className="p-4">
                 <div className="flex items-center gap-2 mb-3">
@@ -631,13 +668,12 @@ export default function BookingModal({
                   onClick={() => handleStatusUpdate('checked_out')}
                   disabled={loading}
                 >
-                  Check Out Customer
+                  Departed
                 </Button>
               </CardContent>
             </Card>
           )}
 
-          {/* Extension Sheet */}
           {showExtendSheet && tenantId && (
             <Card className="mt-6">
               <CardHeader>
@@ -650,15 +686,16 @@ export default function BookingModal({
                 <ExtendBookingSheet
                   tenantId={tenantId}
                   booking={{
-                    id: booking.id,
-                    end_at: booking.end_at,
-                    flight_number: booking.flight_number,
-                    reference: booking.reference
+                    id: localBooking.id,
+                    end_at: localBooking.end_at,
+                    flight_number: localBooking.flight_number,
+                    reference: localBooking.reference
                   }}
                   publishableKey={stripePublishableKey}
                   onExtended={() => {
                     setShowExtendSheet(false)
-                    onBookingUpdated?.(booking)
+                    notifyBookingsChanged()
+                    onBookingUpdated?.(localBooking)
                     router.refresh()
                   }}
                 />

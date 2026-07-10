@@ -11,7 +11,7 @@ export const bookingSchema = z.object({
   car_color: z.string().optional(),
   start_at: z.string().datetime('Invalid start date'),
   end_at: z.string().datetime('Invalid end date'),
-  status: z.enum(['reserved', 'checked_in', 'checked_out', 'cancelled']).default('reserved'),
+  status: z.enum(['reserved', 'checked_in', 'checked_out', 'cancelled', 'no_show']).default('reserved'),
   money_charged: z.number().min(0).default(0),
   money_received: z.number().min(0).default(0),
   notes: z.string().optional(),

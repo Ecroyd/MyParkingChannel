@@ -15,7 +15,6 @@ type Body = {
   money_received?: number
   notes?: string
   flight_number?: string
-  tenantId?: string // optional override if you support switching tenants
 }
 
 function roundToMinute(iso?: string) {
@@ -55,18 +54,16 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  // 2) resolve tenant id (if you have a "current tenant" cookie/context, use it; otherwise first membership)
-  let tenantId = body.tenantId
-  if (!tenantId) {
-    const { data: mem } = await supabase
-      .from('user_tenants')
-      .select('tenant_id')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: true })
-      .limit(1)
-      .maybeSingle()
-    tenantId = mem?.tenant_id ?? null
-  }
+  // 2) resolve tenant from authenticated membership — never trust browser-supplied tenantId
+  const { data: defaultMembership } = await supabase
+    .from('user_tenants')
+    .select('tenant_id, is_default')
+    .eq('user_id', user.id)
+    .order('is_default', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const tenantId = defaultMembership?.tenant_id ?? null
   if (!tenantId) return NextResponse.json({ error: 'No tenant context' }, { status: 400 })
 
   // 3) normalize times → TIMESTAMPTZ
@@ -152,7 +149,7 @@ export async function POST(req: NextRequest) {
   const { data, error } = await supabase
     .from('bookings')
     .insert(payload)
-    .select('id, reference')
+    .select('*')
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })

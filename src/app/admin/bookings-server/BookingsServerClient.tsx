@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -8,8 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { CalendarDays, Search, Plus, Filter, Trash2, Eye, Edit } from 'lucide-react';
+import { CalendarDays, Search, Filter, Trash2, Eye, Edit } from 'lucide-react';
 import BookingModal from '@/components/bookings/BookingModal';
+import NewBookingDialog from '@/components/bookings/NewBookingDialog';
+import { notifyBookingsChanged } from '@/lib/bookings/operational-state';
 import { toast } from 'sonner';
 
 interface BookingsServerClientProps {
@@ -19,6 +22,7 @@ interface BookingsServerClientProps {
 }
 
 export default function BookingsServerClient({ user, tenant, bookings }: BookingsServerClientProps) {
+  const router = useRouter();
   const [filteredBookings, setFilteredBookings] = useState<any[]>(bookings);
   const [dateRange, setDateRange] = useState('all');
   const [customStartDate, setCustomStartDate] = useState('');
@@ -93,12 +97,18 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
     setFilteredBookings(searchFiltered);
   }, [dateRange, customStartDate, customEndDate, searchTerm, bookings]);
 
+  const handleBookingUpdated = useCallback(() => {
+    notifyBookingsChanged();
+    router.refresh();
+  }, [router]);
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'reserved': return 'bg-blue-100 text-blue-800';
       case 'checked_in': return 'bg-green-100 text-green-800';
       case 'checked_out': return 'bg-gray-100 text-gray-800';
       case 'cancelled': return 'bg-red-100 text-red-800';
+      case 'no_show': return 'bg-orange-100 text-orange-800';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
@@ -172,15 +182,12 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Bookings</h1>
           <p className="text-gray-600">Manage bookings for {tenant?.name}</p>
         </div>
-        <Button className="bg-blue-600 hover:bg-blue-700">
-          <Plus className="w-4 h-4 mr-2" />
-          New Booking
-        </Button>
+        <NewBookingDialog tenantId={tenant.id} onCreated={handleBookingUpdated} label="Add booking" />
       </div>
 
       {/* Filters */}
@@ -366,11 +373,9 @@ export default function BookingsServerClient({ user, tenant, bookings }: Booking
           booking={selectedBooking}
           open={modalOpen}
           onOpenChange={setModalOpen}
-          onBookingUpdated={() => {
-            // Refresh the page to get updated data
-            window.location.reload();
-          }}
+          onBookingUpdated={handleBookingUpdated}
           tenantId={tenant.id}
+          tenantTimezone={tenant.timezone}
         />
       )}
     </div>

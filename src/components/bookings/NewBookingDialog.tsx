@@ -4,15 +4,19 @@ import { useState } from 'react'
 import { z } from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useRouter } from 'next/navigation'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { Plus } from 'lucide-react'
+import { toast } from 'sonner'
 import {
   Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
 } from '@/components/ui/form'
+import { notifyBookingsChanged } from '@/lib/bookings/operational-state'
 
 const Schema = z.object({
   reference: z.string().optional(),
@@ -32,11 +36,15 @@ type FormValues = z.infer<typeof Schema>
 export default function NewBookingDialog({
   onCreated,
   tenantId,
+  label = 'Add booking',
 }: {
   onCreated?: (booking: any) => void
   tenantId?: string
+  label?: string
 }) {
+  const router = useRouter()
   const [open, setOpen] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const form = useForm<FormValues>({
     resolver: zodResolver(Schema),
     defaultValues: {
@@ -54,27 +62,38 @@ export default function NewBookingDialog({
   })
 
   async function onSubmit(values: FormValues) {
-    const res = await fetch('/api/bookings/create', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...values, tenantId }),
-    })
-    const json = await res.json()
-    if (!res.ok) {
-      alert(json.error || 'Failed to create booking')
-      return
+    setSubmitting(true)
+    try {
+      const res = await fetch('/api/bookings/create', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        throw new Error(json.error || 'Failed to create booking')
+      }
+      toast.success(`Booking ${json.booking.reference} created`)
+      setOpen(false)
+      form.reset()
+      notifyBookingsChanged()
+      onCreated?.(json.booking)
+      router.refresh()
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to create booking')
+    } finally {
+      setSubmitting(false)
     }
-    alert(`Booking ${json.booking.reference} created`)
-    setOpen(false)
-    form.reset()
-    onCreated?.(json.booking)
   }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm" className="bg-brand-600 hover:bg-brand-700">+ New booking</Button>
+        <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white w-full sm:w-auto">
+          <Plus className="h-4 w-4 mr-2" />
+          {label}
+        </Button>
       </DialogTrigger>
       <DialogContent className="max-w-xl">
         <DialogHeader>
@@ -201,7 +220,9 @@ export default function NewBookingDialog({
 
             <div className="md:col-span-2 flex justify-end gap-2 pt-2">
               <Button type="button" variant="outline" onClick={()=>setOpen(false)}>Cancel</Button>
-              <Button type="submit">Create booking</Button>
+              <Button type="submit" disabled={submitting}>
+                {submitting ? 'Creating…' : 'Create booking'}
+              </Button>
             </div>
           </form>
         </Form>

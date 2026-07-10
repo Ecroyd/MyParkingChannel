@@ -7,13 +7,11 @@ export async function GET(req: NextRequest) {
     const supabase = await createServerClient();
     const adminClient = await createAdminClient();
 
-    // Get current user
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     if (userError || !user) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    // Get user's tenant
     const { data: userTenants, error: userTenantsError } = await adminClient
       .from('user_tenants')
       .select('tenant_id, role, is_default')
@@ -23,11 +21,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'No tenant access found' }, { status: 403 });
     }
 
-    // Get the default tenant or first tenant
     const defaultTenant = userTenants.find(ut => ut.is_default) || userTenants[0];
     const tenantId = defaultTenant.tenant_id;
 
-    // Get query parameters
     const { searchParams } = new URL(req.url);
     const from = searchParams.get('from');
     const to = searchParams.get('to');
@@ -36,13 +32,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Missing from or to parameters' }, { status: 400 });
     }
 
-    // Fetch bookings using admin client to bypass RLS
     const { data: bookings, error: bookingsError } = await adminClient
       .from('bookings')
-      .select('start_at, end_at, source, tenant_id')
+      .select('start_at, end_at, source, tenant_id, status')
       .eq('tenant_id', tenantId)
-      .lte('start_at', to)
-      .gte('end_at', from)
+      .lte('start_at', `${to}T23:59:59.999Z`)
+      .gte('end_at', `${from}T00:00:00.000Z`)
+      .in('status', ['reserved', 'checked_in', 'checked_out'])
       .order('start_at', { ascending: true });
 
     if (bookingsError) {
@@ -52,7 +48,8 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ 
       bookings: bookings || [],
-      tenantId 
+      tenantId,
+      fetchedAt: new Date().toISOString(),
     });
 
   } catch (error) {
@@ -60,4 +57,3 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-

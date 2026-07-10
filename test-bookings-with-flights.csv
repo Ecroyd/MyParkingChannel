@@ -1,0 +1,4 @@
+reference,customer_name,customer_email,plate,flight_number,arrival_date,arrival_time,departure_date,departure_time,money_charged,money_received
+REF001,John Smith,john@example.com,ABC123,BA123,2024-01-15,10:00,2024-01-20,14:00,50.00,50.00
+REF002,Jane Doe,jane@example.com,DEF456,EZY456,2024-01-16,09:30,2024-01-21,16:30,45.00,45.00
+REF003,Bob Wilson,bob@example.com,GHI789,,2024-01-17,11:15,2024-01-22,13:45,60.00,60.00

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BarChart,
   Bar,
@@ -13,6 +13,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { format, eachDayOfInterval } from "date-fns";
+import { BOOKINGS_CHANGED_EVENT } from "@/lib/bookings/operational-state";
 
 type Booking = {
   start_at: string;  // timestamptz
@@ -58,6 +59,7 @@ export default function DemandCurve({
 }) {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [dateRange, setDateRange] = useState('next14days');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
@@ -108,25 +110,32 @@ export default function DemandCurve({
 
   const { from, to } = getDateRange();
 
-  // 1) Fetch bookings that OVERLAP the window:
-  // start_at <= to AND end_at >= from
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const response = await fetch(`/api/bookings/data?from=${from}&to=${to}`);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const result = await response.json();
-        setBookings(result.bookings || []);
-      } catch (error) {
-        console.error("Error fetching bookings:", error);
-        setBookings([]);
+  const fetchBookings = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/bookings/data?from=${from}&to=${to}`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
-      setLoading(false);
-    })();
+      const result = await response.json();
+      setBookings(result.bookings || []);
+      setLastUpdated(result.fetchedAt ? new Date(result.fetchedAt) : new Date());
+    } catch (error) {
+      console.error("Error fetching bookings:", error);
+      setBookings([]);
+    }
+    setLoading(false);
   }, [from, to]);
+
+  useEffect(() => {
+    fetchBookings();
+  }, [fetchBookings]);
+
+  useEffect(() => {
+    const handler = () => fetchBookings();
+    window.addEventListener(BOOKINGS_CHANGED_EVENT, handler);
+    return () => window.removeEventListener(BOOKINGS_CHANGED_EVENT, handler);
+  }, [fetchBookings]);
 
   // 2) Build day list
   const days = useMemo(() => {
@@ -248,6 +257,11 @@ export default function DemandCurve({
         <div className="text-sm text-gray-600">
           Showing: {format(new Date(from), 'MMM d')} - {format(new Date(to), 'MMM d, yyyy')}
         </div>
+        {lastUpdated && (
+          <div className="text-sm text-gray-500">
+            Live forecast · Updated {format(lastUpdated, 'HH:mm')}
+          </div>
+        )}
       </div>
 
       {/* Chart */}

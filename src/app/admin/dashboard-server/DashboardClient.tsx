@@ -1,8 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import DemandCurve from '@/components/charts/DemandCurve';
 import BookingModal from '@/components/bookings/BookingModal';
+import NewBookingDialog from '@/components/bookings/NewBookingDialog';
+import { notifyBookingsChanged } from '@/lib/bookings/operational-state';
+import { useBookingRealtime } from '@/hooks/useBookingRealtime';
 
 interface DashboardClientProps {
   user: any;
@@ -36,8 +40,20 @@ export default function DashboardClient({
   revenueData,
   chartData
 }: DashboardClientProps) {
+  const router = useRouter();
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [modalOpen, setModalOpen] = useState(false);
+
+  const refresh = useCallback(() => {
+    router.refresh();
+  }, [router]);
+
+  useBookingRealtime(tenant?.id, refresh);
+
+  const handleBookingUpdated = () => {
+    notifyBookingsChanged();
+    refresh();
+  };
 
   const handleBookingClick = (booking: any) => {
     setSelectedBooking(booking);
@@ -47,13 +63,16 @@ export default function DashboardClient({
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
           <p className="text-gray-600">Welcome back, {user?.email}</p>
         </div>
-        <div className="text-sm text-gray-500">
-          {tenant?.name} • {tenant?.slug}
+        <div className="flex items-center gap-3">
+          <NewBookingDialog tenantId={tenant.id} onCreated={handleBookingUpdated} label="Add booking" />
+          <div className="text-sm text-gray-500 hidden sm:block">
+            {tenant?.name} • {tenant?.slug}
+          </div>
         </div>
       </div>
 
@@ -158,11 +177,9 @@ export default function DashboardClient({
           booking={selectedBooking}
           open={modalOpen}
           onOpenChange={setModalOpen}
-          onBookingUpdated={() => {
-            // Refresh the page to get updated data
-            window.location.reload();
-          }}
+          onBookingUpdated={handleBookingUpdated}
           tenantId={tenant.id}
+          tenantTimezone={tenant.timezone}
         />
       )}
     </div>
