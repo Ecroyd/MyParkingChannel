@@ -2,7 +2,7 @@
 import type { BookingHighlightCode } from '@/types/bookings';
 
 export const TODAY_BOOKING_SELECT =
-  'id, tenant_id, reference, customer_name, customer_email, customer_phone, plate, car_make, car_model, car_color, start_at, end_at, start_at_local, end_at_local, status, money_received, money_charged, source, flight_number, notes, stripe_payment_intent_id, checked_in_at, checked_out_at, arrived_at, departed_at, gate_status, highlight_code, ops_status, ops_hidden, ops_hidden_reason';
+  'id, tenant_id, reference, customer_name, customer_email, customer_phone, plate, car_make, car_model, car_color, start_at, end_at, start_at_local, end_at_local, status, money_received, money_charged, source, flight_number, return_flight_number, notes, stripe_payment_intent_id, checked_in_at, checked_out_at, arrived_at, departed_at, gate_status, highlight_code, ops_status, ops_hidden, ops_hidden_reason';
 
 export type TodayBookingRow = {
   id: string;
@@ -24,6 +24,7 @@ export type TodayBookingRow = {
   money_charged?: number | null;
   source?: string | null;
   flight_number?: string | null;
+  return_flight_number?: string | null;
   notes?: string | null;
   stripe_payment_intent_id?: string | null;
   checked_in_at?: string | null;

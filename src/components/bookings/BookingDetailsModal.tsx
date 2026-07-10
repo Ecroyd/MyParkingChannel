@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import { toMoney } from '@/lib/money';
 import { BookingHighlightIcon } from './BookingHighlightIcon';
 import { BookingHighlightCode } from '@/types/bookings';
+import { notifyBookingsChanged } from '@/lib/bookings/operational-state';
 import {
   Sheet,
   SheetContent,
@@ -29,6 +30,7 @@ type Booking = {
   money_received?: number | null;
   notes: string | null;
   flight_number: string | null;
+  return_flight_number?: string | null;
   is_incomplete?: boolean;
   missing_fields?: string[];
   stripe_payment_intent_id?: string | null;
@@ -180,6 +182,7 @@ export default function BookingDetailsModal({
                     })} />
                     <Info label="Charged" value={toMoney(Math.round((booking.money_charged ?? 0) * 100))} />
                     <Info label="Flight" value={booking.flight_number || '—'} />
+                    <Info label="Return flight" value={booking.return_flight_number || '—'} />
                     <div className="col-span-2">
                       <Info label="Notes" value={booking.notes || '—'} />
                     </div>
@@ -250,6 +253,7 @@ function EditForm({ booking, onSaved }: { booking: any; onSaved: () => void }) {
     car_model: booking.car_model || '',
     car_color: booking.car_color || '',
     flight_number: booking.flight_number || '',
+    return_flight_number: booking.return_flight_number || '',
     notes: booking.notes || '',
     start_at: booking.start_at ? new Date(booking.start_at).toISOString().slice(0, 16) : '',
     end_at: booking.end_at ? new Date(booking.end_at).toISOString().slice(0, 16) : '',
@@ -268,10 +272,11 @@ function EditForm({ booking, onSaved }: { booking: any; onSaved: () => void }) {
     setSaving(false);
 
     if (!res.ok) {
-      alert(json?.error || 'Update failed'); // or toast.error(...)
+      alert(json?.error || 'Update failed');
       return;
     }
 
+    notifyBookingsChanged();
     onSaved();
   };
 
@@ -299,7 +304,7 @@ function EditForm({ booking, onSaved }: { booking: any; onSaved: () => void }) {
         </div>
       </div>
       
-      {['customer_email','customer_phone','plate','car_make','car_model','car_color','flight_number'].map((k) => (
+      {['customer_email','customer_phone','plate','car_make','car_model','car_color','flight_number','return_flight_number'].map((k) => (
         <div key={k}>
           <label className="block text-xs text-gray-500 mb-1">{k.replace('_',' ')}</label>
           <input

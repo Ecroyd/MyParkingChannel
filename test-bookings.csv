@@ -1,0 +1,4 @@
+Booking ID,Reference,Customer Name,Email,Phone,Vehicle Registration,Car Make,Car Model,Car Color,Flight Number,Arrival Date,Arrival Time,Departure Date,Departure Time,Status,Money Received,Money Charged,Source,Created Date
+BK001,REF001,John Smith,john@example.com,07123456789,ABC123,Ford,Focus,Blue,BA123,01/01/2024,10:00,05/01/2024,14:00,Confirmed,£45.00,£50.00,Website,01/01/2024
+BK002,REF002,Jane Doe,jane@example.com,07987654321,DEF456,Toyota,Corolla,Red,EZY456,02/01/2024,09:30,06/01/2024,16:00,Pending,£40.00,£45.00,Manual,02/01/2024
+BK003,REF003,Bob Johnson,bob@example.com,07111222333,GHI789,BMW,3 Series,Black,AF789,03/01/2024,11:00,07/01/2024,13:00,Completed,£55.00,£60.00,Website,03/01/2024

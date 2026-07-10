@@ -1,14 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import DemandCurve from '@/components/charts/DemandCurve';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
+import NewBookingDialog from '@/components/bookings/NewBookingDialog';
 import DateRangeModal from '@/components/admin/DateRangeModal';
 import { useDateRangeModal } from '@/hooks/useDateRangeModal';
 import { Calendar } from 'lucide-react';
 import ExemptionsPanel from '../_components/ExemptionsPanel';
 import { BookingHighlightIcon } from '@/components/bookings/BookingHighlightIcon';
+import { notifyBookingsChanged } from '@/lib/bookings/operational-state';
+import { useBookingRealtime } from '@/hooks/useBookingRealtime';
 
 interface DashboardClientProps {
   user: any;
@@ -48,8 +52,20 @@ export default function DashboardClient({
   todayDepartures,
   demandCurveCapacityByDate
 }: DashboardClientProps) {
+  const router = useRouter();
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const { isOpen, currentDateRange, openModal, closeModal, handleDateRangeChange } = useDateRangeModal();
+
+  const refresh = useCallback(() => {
+    router.refresh();
+  }, [router]);
+
+  useBookingRealtime(tenant?.id, refresh);
+
+  const handleBookingUpdated = useCallback(() => {
+    notifyBookingsChanged();
+    refresh();
+  }, [refresh]);
 
   const handleBookingClick = (booking: any) => {
     setSelectedBookingId(booking.id);
@@ -63,7 +79,8 @@ export default function DashboardClient({
           <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
           <p className="text-gray-600">Welcome back, {user?.email}</p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <NewBookingDialog tenantId={tenant.id} onCreated={handleBookingUpdated} label="Add booking" />
           <div className="text-sm text-gray-500">
             {tenant?.name} • {tenant?.slug}
           </div>
@@ -309,10 +326,7 @@ export default function DashboardClient({
           booking={[...recentBookings, ...todayArrivals, ...todayDepartures].find(b => b.id === selectedBookingId) || null}
           open={!!selectedBookingId}
           onClose={() => setSelectedBookingId(null)}
-          onBookingUpdated={() => {
-            // Refresh the page to get updated data
-            window.location.reload();
-          }}
+          onBookingUpdated={handleBookingUpdated}
         />
       )}
 

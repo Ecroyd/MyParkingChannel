@@ -188,9 +188,7 @@ export default async function DashboardServerPage() {
     .from('bookings')
     .select('id')
     .eq('tenant_id', tenant.id)
-    .in('status', ['reserved', 'confirmed', 'checked_in'])
-    .lte('start_at', `${tomorrowStr}T00:00:00.000Z`)
-    .gte('end_at', `${todayStr}T00:00:00.000Z`);
+    .eq('status', 'checked_in');
 
   const activeBookingsCount = activeBookings?.length || 0;
 

@@ -2,6 +2,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { calculateCapacityForDate } from '@/lib/capacity/rolling';
 import { getDateRangeForQuery, tenantTodayDateKey } from '@/lib/timezone';
 import { TODAY_BOOKING_SELECT, type TodayBookingRow } from '@/lib/today/bookingSelect';
+import {
+  isCurrentlyParked,
+  isExcludedFromOperations,
+} from '@/lib/bookings/operational-state';
 
 export type TodayKpis = {
   arrivals: number;
@@ -107,9 +111,7 @@ export async function loadTodayPageData(opts: LoadOpts): Promise<TodayPageData> 
       .from('bookings')
       .select(TODAY_BOOKING_SELECT)
       .eq('tenant_id', tenantId)
-      .lt('start_at', rangeEnd)
-      .gt('end_at', rangeStart)
-      .neq('status', 'cancelled'),
+      .eq('status', 'checked_in'),
 
     withRangeEnd(
       adminClient
@@ -126,9 +128,7 @@ export async function loadTodayPageData(opts: LoadOpts): Promise<TodayPageData> 
           .from('bookings')
           .select('id, status, gate_status')
           .eq('tenant_id', tenantId)
-          .lte('start_at', now.toISOString())
-          .gte('end_at', now.toISOString())
-          .neq('status', 'cancelled')
+          .eq('status', 'checked_in')
       : Promise.resolve({ data: null as { id: string; status: string | null; gate_status: string | null }[] | null, error: null }),
 
     calculateCapacityForDate(tenantId, todayStr),
@@ -166,13 +166,13 @@ export async function loadTodayPageData(opts: LoadOpts): Promise<TodayPageData> 
     (b) => !isCancelledBooking(b) && !isNoShowBooking(b)
   );
   const operationalCurrentlyParked = currentlyParked.filter(
-    (b) => !isCancelledBooking(b) && !isNoShowBooking(b)
+    (b) => Boolean(b.status && isCurrentlyParked({ status: b.status }) && !isExcludedFromOperations(b.status))
   );
 
   let checkedInCount: number;
   if (checkedInNow && currentlyParkedNowResult.data) {
     checkedInCount = currentlyParkedNowResult.data.filter(
-      (b) => !isCancelledBooking(b) && !isNoShowBooking(b)
+      (b) => Boolean(b.status && isCurrentlyParked({ status: b.status }) && !isExcludedFromOperations(b.status))
     ).length;
   } else {
     checkedInCount = operationalCurrentlyParked.length;

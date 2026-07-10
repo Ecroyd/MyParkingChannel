@@ -8,11 +8,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { CalendarDays, Search, Plus, Filter, Trash2, Eye, Edit, ArrowUpDown } from 'lucide-react';
+import { CalendarDays, Search, Filter, Trash2, Eye, Edit, ArrowUpDown } from 'lucide-react';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
-import NewBookingModal from '@/components/bookings/NewBookingModal';
+import NewBookingDialog from '@/components/bookings/NewBookingDialog';
 import { BookingHighlightIcon } from '@/components/bookings/BookingHighlightIcon';
 import { DynamicPricingBadge } from '@/components/bookings/DynamicPricingBadge';
+import { notifyBookingsChanged } from '@/lib/bookings/operational-state';
 import { toast } from 'sonner';
 
 interface BookingsServerClientProps {
@@ -34,7 +35,6 @@ export default function BookingsServerClient({ user, tenant, bookings: initialBo
   const [channelFilter, setChannelFilter] = useState<string>('all');
   const [selectedBookings, setSelectedBookings] = useState<Set<string>>(new Set());
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
-  const [newBookingModalOpen, setNewBookingModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -325,6 +325,11 @@ export default function BookingsServerClient({ user, tenant, bookings: initialBo
     }
   };
 
+  const handleBookingUpdated = useCallback(() => {
+    notifyBookingsChanged();
+    void fetchBookings();
+  }, [fetchBookings]);
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -333,13 +338,7 @@ export default function BookingsServerClient({ user, tenant, bookings: initialBo
           <h1 className="text-2xl font-semibold text-gray-900">Bookings</h1>
           <p className="text-gray-600">Manage bookings for {tenant?.name}</p>
         </div>
-        <Button 
-          className="bg-blue-600 hover:bg-blue-700"
-          onClick={() => setNewBookingModalOpen(true)}
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          New Booking
-        </Button>
+        <NewBookingDialog tenantId={tenant.id} onCreated={handleBookingUpdated} label="Add booking" />
       </div>
 
       {/* Filters */}
@@ -627,23 +626,9 @@ export default function BookingsServerClient({ user, tenant, bookings: initialBo
           booking={filteredBookings.find(b => b.id === selectedBookingId) || null}
           open={!!selectedBookingId}
           onClose={() => setSelectedBookingId(null)}
-          onBookingUpdated={() => {
-            // Refresh bookings from API
-            fetchBookings();
-          }}
+          onBookingUpdated={handleBookingUpdated}
         />
       )}
-
-      {/* New Booking Modal */}
-      <NewBookingModal
-        tenantId={tenant.id}
-        open={newBookingModalOpen}
-        onClose={() => setNewBookingModalOpen(false)}
-        onBookingCreated={() => {
-          // Refresh bookings from API
-          fetchBookings();
-        }}
-      />
     </div>
   );
 }

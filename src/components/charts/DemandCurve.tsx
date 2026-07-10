@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useCallback, useMemo, useState } from "react";
 import {
   BarChart,
   Bar,
@@ -17,6 +17,7 @@ import DateRangeModal from '@/components/admin/DateRangeModal';
 import { useDateRangeModal } from '@/hooks/useDateRangeModal';
 import { colorForSourceKey } from '@/lib/supplier/chartColors';
 import { getSourceLabel } from '@/lib/supplier/labels';
+import { BOOKINGS_CHANGED_EVENT } from '@/lib/bookings/operational-state';
 
 type DemandDayApi = {
   date: string;
@@ -150,27 +151,37 @@ export default function DemandCurve({
 
   const { from, to } = getDateRange();
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const debugParam = showDebug ? '&debug=1' : '';
-        const response = await fetch(
-          `/api/analytics/demand-curve?from=${from}&to=${to}&tenant_id=${tenantId}${debugParam}`
-        );
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const result = await response.json();
-        setDays(result.days || []);
-        setApiDebug(Boolean(result.debug));
-      } catch (error) {
-        console.error("Error fetching demand curve:", error);
-        setDays([]);
+  const fetchDemand = useCallback(async () => {
+    setLoading(true);
+    try {
+      const debugParam = showDebug ? '&debug=1' : '';
+      const response = await fetch(
+        `/api/analytics/demand-curve?from=${from}&to=${to}&tenant_id=${tenantId}${debugParam}`
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
-      setLoading(false);
-    })();
+      const result = await response.json();
+      setDays(result.days || []);
+      setApiDebug(Boolean(result.debug));
+    } catch (error) {
+      console.error("Error fetching demand curve:", error);
+      setDays([]);
+    }
+    setLoading(false);
   }, [from, to, tenantId, showDebug]);
+
+  useEffect(() => {
+    void fetchDemand();
+  }, [fetchDemand]);
+
+  useEffect(() => {
+    const handler = () => {
+      void fetchDemand();
+    };
+    window.addEventListener(BOOKINGS_CHANGED_EVENT, handler);
+    return () => window.removeEventListener(BOOKINGS_CHANGED_EVENT, handler);
+  }, [fetchDemand]);
 
   const defaultCapacity = capacity ?? 100;
   const effectiveCapacityByDate = capacityByDate ?? {};
