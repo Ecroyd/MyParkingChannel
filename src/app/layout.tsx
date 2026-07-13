@@ -2,6 +2,7 @@ import './globals.css';
 import type { Metadata, Viewport } from 'next';
 import SwTools from '@/components/SwTools';
 import DevSwUnregister from '@/components/DevSwUnregister';
+import AuthSessionRecovery from '@/components/AuthSessionRecovery';
 import { Analytics } from "@vercel/analytics/next";
 
 export const metadata: Metadata = {
@@ -28,6 +29,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         {children}
+        <AuthSessionRecovery />
         {isDev ? <DevSwUnregister /> : null}
         {process.env.NEXT_PUBLIC_DEBUG_SITE === '1' ? <SwTools /> : null}
         <Analytics />

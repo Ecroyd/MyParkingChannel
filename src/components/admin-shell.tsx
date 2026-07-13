@@ -31,7 +31,19 @@ export default function AdminShell({ children }: AdminShellProps) {
   const loadTenantData = async () => {
     const {
       data: { session },
+      error: sessionError,
     } = await supabase.auth.getSession();
+
+    if (
+      sessionError &&
+      /Invalid Refresh Token|Refresh Token Not Found|Already Used/i.test(
+        sessionError.message
+      )
+    ) {
+      await supabase.auth.signOut({ scope: "local" });
+      router.push("/login");
+      return;
+    }
 
     if (!session) {
       router.push('/login');

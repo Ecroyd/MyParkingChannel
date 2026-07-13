@@ -16,13 +16,19 @@ const PLATFORM_HOSTS = [
 
 // IMPORTANT: service key is OK here because middleware runs on the server.
 // Do NOT expose it to the client.
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    auth: { persistSession: false },
+// Lazy-init so platform-host requests (e.g. localhost) do not crash when env is unset at module load.
+function getSupabaseAdmin() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new Error(
+      "Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY"
+    );
   }
-);
+  return createClient(url, key, {
+    auth: { persistSession: false },
+  });
+}
 
 function normalizeHost(rawHost: string | null): string {
   if (!rawHost) return "";
@@ -145,6 +151,7 @@ export async function middleware(req: NextRequest) {
 
     // If not a subdomain, look up in tenant_domains table
     if (!slug) {
+      const supabase = getSupabaseAdmin();
       const { data: domainRow, error: domainError } = await supabase
         .from("tenant_domains")
         .select("tenant_id, tenants!inner(slug)")
