@@ -127,7 +127,7 @@ function PhoneCell({ phone }: { phone?: string | null }) {
 
 function timeOnlyLabel(timestamp: string, timezone: string): string {
   const full = formatBookingDateTimeForTenant({ timestamp, timezone });
-  // format is "dd MMM, HH:mm" — prefer clock time when available
+  if (!full) return '—';
   const parts = full.split(', ');
   return parts.length > 1 ? parts[parts.length - 1] : full;
 }
@@ -161,11 +161,16 @@ function TodayBookingRow({
   onQuickAction,
   onHighlightSelect,
 }: TodayBookingRowProps) {
-  const timeField = section === 'departures' ? booking.end_at : booking.start_at;
+  const timeField = booking.start_at;
   const timeLabel = useMemo(
     () => timeOnlyLabel(timeField, timezone),
     [timeField, timezone]
   );
+  const expectedDepartureLabel = useMemo(
+    () => formatBookingDateTimeForTenant({ timestamp: booking.end_at, timezone }) || '—',
+    [booking.end_at, timezone]
+  );
+  const timeKindLabel = 'Arrival';
   const flightLabel =
     section === 'departures'
       ? departureFlightDisplay(booking)
@@ -274,7 +279,12 @@ function TodayBookingRow({
                 className="bg-white border-gray-300 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
               />
             </span>
-            <span className="font-medium tabular-nums">{timeLabel}</span>
+            <div className="flex flex-col leading-tight">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
+                {timeKindLabel}
+              </span>
+              <span className="font-medium tabular-nums">{timeLabel}</span>
+            </div>
           </div>
         </td>
         <td className="px-2 py-2 text-sm align-middle cursor-pointer" onClick={handleRowClick}>
@@ -306,6 +316,9 @@ function TodayBookingRow({
           <PhoneCell phone={booking.customer_phone} />
         </td>
         <td className="px-2 py-2 text-sm align-middle cursor-pointer whitespace-nowrap" onClick={handleRowClick}>
+          <span className="font-medium tabular-nums">{expectedDepartureLabel}</span>
+        </td>
+        <td className="px-2 py-2 text-sm align-middle cursor-pointer whitespace-nowrap" onClick={handleRowClick}>
           {flightLabel}
         </td>
         <td className="px-2 py-2 align-middle">{statusSelect}</td>
@@ -313,7 +326,7 @@ function TodayBookingRow({
 
       {/* Mobile card-style row */}
       <tr className={cn(rowClass, 'md:hidden')} tabIndex={0} onKeyDown={handleQuickKey}>
-        <td colSpan={6} className="px-3 py-3 align-middle" onClick={handleRowClick}>
+        <td colSpan={7} className="px-3 py-3 align-middle" onClick={handleRowClick}>
           <div className="flex flex-col gap-2">
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
@@ -331,7 +344,11 @@ function TodayBookingRow({
                 </span>
                 <div className="min-w-0">
                   <div className="font-medium truncate">{booking.customer_name || '—'}</div>
-                  <div className="text-xs opacity-80">{timeLabel}</div>
+                  <div className="text-xs opacity-80">
+                    {timeKindLabel} {timeLabel}
+                    {' · '}
+                    Expected departure {expectedDepartureLabel}
+                  </div>
                 </div>
               </div>
               <PlateBadge plate={booking.plate} />

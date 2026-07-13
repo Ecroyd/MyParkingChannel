@@ -1,5 +1,9 @@
 import { buildTenantLocalIso } from '@/lib/datetime/parse';
 import { resolveCustomerName } from '@/lib/bookings/normalizeCustomerName';
+import {
+  normalizePhoneDigits,
+  resolveCustomerContactDetails,
+} from '@/lib/ingest/customerContactDetails';
 import { normalizeUkPlate } from '@/lib/ingest/plateGuess';
 export type FlyparksStaging = {
   reference: string | null;
@@ -294,10 +298,11 @@ function parseVehicleDetails(value: string | null): {
 }
 
 function extractPhone(text: string, explicitPhone: string | null): string | null {
-  const raw = explicitPhone ?? text.match(/(?:Phone|Telephone|Mobile|Contact number)\s*:\s*([+0-9 ()-]{8,})/i)?.[1] ?? null;
-  if (!raw) return null;
-  const cleaned = raw.replace(/[^\d+]/g, "");
-  return cleaned.length >= 8 ? cleaned : null;
+  const raw =
+    explicitPhone ??
+    text.match(/(?:Phone|Telephone|Mobile|Contact number)\s*:\s*([+0-9 ()-]{8,})/i)?.[1] ??
+    null;
+  return normalizePhoneDigits(raw);
 }
 
 export function getFlyparksRequiredMissing(staging: Pick<FlyparksStaging, "reference" | "start_at" | "end_at" | "vehicle_reg">): string[] {
@@ -315,10 +320,24 @@ export function flyparksTextToStaging(rawText: string): FlyparksStaging {
   const reference =
     pickLabel(text, ["Reference", "Booking Reference", "YOUR BOOKING REFERENCE"])?.match(/[A-Z0-9-]{3,20}/i)?.[0] ?? null;
   const dearName = extractDearName(text);
-  const labelName = pickLabel(text, ["Your details", "Customer name", "Name"]);
+  const detailsBlock = pickLabel(text, ["Your details", "Customer name", "Name"]);
+  const labeledEmail = pickLabel(text, ["Email"]);
+  const labeledPhone = pickLabel(text, ["Phone", "Telephone", "Mobile", "Contact number"]);
+  const forwardedToEmail = extractForwardedCustomerEmail(text);
+
+  const contacts = resolveCustomerContactDetails({
+    detailsBlock,
+    labeledName: detailsBlock,
+    labeledEmail,
+    labeledPhone,
+    dearName,
+    bodyEmail: forwardedToEmail,
+  });
+
+  // Prefer labelled phone when present; otherwise phone extracted from the details block.
+  const phone = extractPhone(text, labeledPhone) ?? contacts.phone;
   const email =
-    extractForwardedCustomerEmail(text) ??
-    pickLabel(text, ["Email"]) ??
+    contacts.email ??
     (() => {
       const found = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? [];
       return (
@@ -330,13 +349,13 @@ export function flyparksTextToStaging(rawText: string): FlyparksStaging {
         ) ?? null
       );
     })();
+
   const customerResolved = resolveCustomerName({
-    customerName: labelName,
+    customerName: contacts.name,
     customerLastName: dearName,
     customerEmail: email,
   });
   const customerName = customerResolved.name;
-  const phone = extractPhone(text, pickLabel(text, ["Phone", "Telephone", "Mobile", "Contact number"]));
 
   const depDate = pickLabel(text, ["Departure date", "Departure Date", "Drop off date", "Drop Off Date"]);
   const arrTime = pickLabel(text, ["Arrival time", "Arrival Time", "Drop off time", "Drop Off Time"]);
@@ -378,6 +397,7 @@ export function flyparksTextToStaging(rawText: string): FlyparksStaging {
       kind: "flyparks_text_email",
       extracted: {
         reference,
+        customerDetailsRaw: detailsBlock,
         customerName,
         dearName,
         email,
@@ -402,6 +422,8 @@ export function flyparksTextToStaging(rawText: string): FlyparksStaging {
         totalCost: pickLabel(text, ["Total Cost"]),
         product: pickLabel(text, ["Product"]),
       },
+      // Preserve original ingest text for audit / repair (normalized form used for parse).
+      source_text: text,
       missing_required: [],
       body_preview: text.slice(0, 1000),
     },

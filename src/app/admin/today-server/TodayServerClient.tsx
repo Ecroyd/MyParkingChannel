@@ -866,6 +866,7 @@ export default function TodayServerClient({
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap min-w-[8.5rem]">Number plate</th>
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Telephone</th>
+                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Expected departure</th>
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
                       Flight / Return
                     </th>
@@ -875,7 +876,7 @@ export default function TodayServerClient({
                 <tbody className="bg-white divide-y divide-gray-200">
                   {groupedByDay.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
+                      <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
                         <div>No arrivals or departures in this period</div>
                         {(arrivals.length > 0 || departures.length > 0) && (
                           <div className="mt-2 text-sm text-amber-700">
@@ -901,7 +902,7 @@ export default function TodayServerClient({
                         <React.Fragment key={dayGroup.date}>
                           {/* Date Header */}
                           <tr className="bg-gray-100 border-t-2 border-gray-300">
-                            <td colSpan={6} className="px-4 py-3">
+                            <td colSpan={7} className="px-4 py-3">
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                   <span className="text-sm font-semibold text-gray-700">
@@ -950,7 +951,7 @@ export default function TodayServerClient({
                               {dayGroup.arrivals.length > 0 && (
                                 <>
                                   <tr className="bg-blue-50/40 border-t border-blue-100">
-                                    <td colSpan={6} className="py-1">
+                                    <td colSpan={7} className="py-1">
                                       <div className="flex items-center justify-center relative py-2">
                                         <span className="inline-flex items-center rounded-full bg-blue-600 text-white px-4 py-1 text-sm font-semibold uppercase">
                                           Arrivals
@@ -977,7 +978,7 @@ export default function TodayServerClient({
                               {dayGroup.departures.length > 0 && (
                                 <>
                                   <tr className="bg-green-600 border-t border-green-700">
-                                    <td colSpan={6} className="py-1">
+                                    <td colSpan={7} className="py-1">
                                       <div className="flex items-center justify-center relative py-2">
                                         <span className="inline-flex items-center rounded-full bg-green-500 text-white px-4 py-1 text-sm font-semibold uppercase">
                                           Departures
@@ -1047,6 +1048,7 @@ export default function TodayServerClient({
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase min-w-[8.5rem]">Number plate</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Telephone</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Expected departure</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Flight</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status / actions</th>
                 </tr>
@@ -1054,7 +1056,7 @@ export default function TodayServerClient({
               <tbody className="bg-white divide-y divide-gray-200">
                 {sortedCurrentlyParked.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
                       No cars currently parked
                     </td>
                   </tr>
