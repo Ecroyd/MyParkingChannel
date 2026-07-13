@@ -338,7 +338,7 @@ export default function BookingsServerClient({ user, tenant, bookings: initialBo
           onClick={() => setNewBookingModalOpen(true)}
         >
           <Plus className="w-4 h-4 mr-2" />
-          New Booking
+          Add booking
         </Button>
       </div>
 

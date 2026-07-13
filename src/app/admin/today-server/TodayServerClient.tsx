@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useTransition, useRef, useCallback } from 'react';
-import { LogIn, LogOut, Car, DollarSign, ArrowUpDown, ChevronDown, ChevronUp, KeyRound } from 'lucide-react';
+import { LogIn, LogOut, Car, DollarSign, ArrowUpDown, ChevronDown, ChevronUp, KeyRound, Plus } from 'lucide-react';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
+import NewBookingModal from '@/components/bookings/NewBookingModal';
 import DateRangeSelector from '@/components/admin/DateRangeSelector';
 import TodayBookingRow, { type TodayBoardBooking, type TodayOpsAction } from './TodayBookingRow';
 import type { TodayBookingRow as TodayBooking } from '@/lib/today/bookingSelect';
@@ -11,13 +12,28 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import {
   groupArrivalsAndDeparturesByDay,
-  groupOverlappingBookingsByDay,
 } from '@/lib/today/groupBookingsByDay';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
+import {
   GATE_STATUS,
 } from '@/lib/gateStatus';
+import {
+  isArrivalRemaining,
+  isCancelledBooking,
+  isCurrentlyParked,
+  isDepartureRemaining,
+  isKeysToTakeRemaining,
+  isNoShowBooking,
+} from '@/lib/ops/parkedState';
+import { formatBookingDateTimeForTenant } from '@/lib/datetime/parse';
+import { createClient } from '@/lib/supabase/client';
 
 import { BookingHighlightCode } from '@/types/bookings';
 
@@ -90,11 +106,12 @@ export default function TodayServerClient({
   const [filterKeysTaken, setFilterKeysTaken] = useState(false);
   const [filterArrivedKeyTaken, setFilterArrivedKeyTaken] = useState(false);
   const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
-  const [collapsedParkedDates, setCollapsedParkedDates] = useState<Set<string>>(new Set());
   const [pendingById, setPendingById] = useState<Record<string, boolean>>({});
   const pendingByIdRef = useRef<Record<string, boolean>>({});
   const [selectedBookingIds, setSelectedBookingIds] = useState<Set<string>>(new Set());
   const [recentlyUpdatedById, setRecentlyUpdatedById] = useState<Record<string, number>>({});
+  const [newBookingOpen, setNewBookingOpen] = useState(false);
+  const [parkedSheetOpen, setParkedSheetOpen] = useState(false);
   const [currentDateRange, setCurrentDateRange] = useState(initialDateRange);
   const [queryError, setQueryError] = useState(initialQueryError);
   const loadedRangeRef = useRef(`${initialDateRange.from}:${initialDateRange.to}`);
@@ -148,7 +165,21 @@ export default function TodayServerClient({
     const apply = (b: Booking) => (b.id === bookingId ? { ...b, ...patch } : b);
     setArrivals((prev) => prev.map(apply));
     setDepartures((prev) => prev.map(apply));
-    setCurrentlyParked((prev) => prev.map(apply));
+    setCurrentlyParked((prev) => {
+      const existing = prev.find((b) => b.id === bookingId);
+      const fromOthers =
+        arrivals.find((b) => b.id === bookingId) ||
+        departures.find((b) => b.id === bookingId) ||
+        existing;
+      if (!fromOthers && !existing) return prev;
+
+      const updated = { ...(existing || fromOthers)!, ...patch } as Booking;
+      const without = prev.filter((b) => b.id !== bookingId);
+      if (isCurrentlyParked(updated)) {
+        return [updated, ...without];
+      }
+      return without;
+    });
   };
 
   const restoreBookingInLists = (bookingId: string, snapshot: Booking | null) => {
@@ -344,7 +375,7 @@ export default function TodayServerClient({
       setKpis(data.kpis ?? defaultKpis);
       setArrivals(data.arrivals ?? []);
       setDepartures(data.departures ?? []);
-      setCurrentlyParked(data.currentlyParked ?? []);
+      setCurrentlyParked((data.currentlyParked ?? []).filter(isCurrentlyParked));
       setQueryError(data.queryError);
       loadedRangeRef.current = rangeKey;
     } catch (error) {
@@ -353,6 +384,31 @@ export default function TodayServerClient({
       setLoading(false);
     }
   }, []);
+
+  // Tenant-scoped realtime: keep parked/arrival/departure KPIs in sync across devices.
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`today-ops-${tenant.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'bookings',
+          filter: `tenant_id=eq.${tenant.id}`,
+        },
+        () => {
+          loadedRangeRef.current = '';
+          void fetchDataForDateRange(currentDateRange.from, currentDateRange.to);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [tenant.id, currentDateRange.from, currentDateRange.to, fetchDataForDateRange]);
 
   const handleDateRangeChange = useCallback((dateRange: { from: string; to: string }) => {
     setCurrentDateRange(dateRange);
@@ -383,30 +439,6 @@ export default function TodayServerClient({
   const sortedDepartures = useMemo(() => {
     return sortBookings(departures, departuresSort, 'end_at');
   }, [departures, departuresSort]);
-
-  function isCancelledBooking(b: { gate_status?: string | null; status?: string | null }) {
-    return b.status === 'cancelled' || b.gate_status === GATE_STATUS.CANCELLED;
-  }
-
-  function isNoShowBooking(b: { gate_status?: string | null }) {
-    return b.gate_status === GATE_STATUS.NO_SHOW;
-  }
-
-  function isArrivalRemaining(b: { gate_status?: string | null; status?: string | null }) {
-    return !isCancelledBooking(b) && !isNoShowBooking(b) && ![
-      GATE_STATUS.ARRIVED,
-      GATE_STATUS.ARRIVED_KEY_TAKEN,
-      GATE_STATUS.DEPARTED,
-    ].includes(b.gate_status as any);
-  }
-
-  function isDepartureRemaining(b: { gate_status?: string | null; status?: string | null }) {
-    return !isCancelledBooking(b) && !isNoShowBooking(b) && b.gate_status !== GATE_STATUS.DEPARTED;
-  }
-
-  function isKeysToTakeRemaining(b: { gate_status?: string | null; status?: string | null }) {
-    return !isCancelledBooking(b) && b.gate_status === GATE_STATUS.TAKE_KEY;
-  }
 
   function matchesKeyFilters<T extends { gate_status?: string | null }>(b: T) {
     if (filterArrivedKeyTaken) return b.gate_status === GATE_STATUS.ARRIVED_KEY_TAKEN;
@@ -458,25 +490,23 @@ export default function TodayServerClient({
     [allVisibleToday]
   );
 
+  const liveParked = useMemo(
+    () => currentlyParked.filter(isCurrentlyParked),
+    [currentlyParked]
+  );
+
   const liveKpis = useMemo(() => ({
     arrivalsRemaining: visibleArrivals.filter(isArrivalRemaining).length,
     departuresRemaining: visibleDepartures.filter(isDepartureRemaining).length,
     keysToTake: visibleArrivals.filter(isKeysToTakeRemaining).length,
-  }), [visibleArrivals, visibleDepartures]);
+    currentlyParked: liveParked.length,
+  }), [visibleArrivals, visibleDepartures, liveParked]);
+
+  const capacityRemaining = Math.max(0, (kpis.capacityLeft + kpis.checkedIn) - liveParked.length);
 
   const sortedCurrentlyParked = useMemo(() => {
-    return sortBookings(currentlyParked, parkedSort, 'start_at');
-  }, [currentlyParked, parkedSort]);
-
-  // Group currently parked by tenant-local day in the selected range
-  const groupedCurrentlyParked = useMemo(() => {
-    return groupOverlappingBookingsByDay(
-      sortedCurrentlyParked,
-      currentDateRange.from,
-      currentDateRange.to,
-      tenantTz
-    );
-  }, [sortedCurrentlyParked, currentDateRange, tenantTz]);
+    return sortBookings(liveParked, parkedSort, 'start_at');
+  }, [liveParked, parkedSort]);
 
   const groupedByDay = useMemo(() => {
     return groupArrivalsAndDeparturesByDay(visibleArrivals, visibleDepartures, tenantTz);
@@ -534,39 +564,43 @@ export default function TodayServerClient({
     }
   };
 
-  const StatCard = ({ label, value, delta, variant, rightSlot }: {
+  const StatCard = ({
+    label,
+    value,
+    delta,
+    variant,
+    rightSlot,
+    onClick,
+  }: {
     label: string;
     value: number;
     delta?: string;
     variant?: 'success' | 'danger' | 'info' | 'warning';
     rightSlot?: React.ReactNode;
+    onClick?: () => void;
   }) => {
-    const variantClasses = {
-      success: 'text-green-600 bg-green-50',
-      danger: 'text-red-600 bg-red-50',
-      info: 'text-blue-600 bg-blue-50',
-      warning: 'text-yellow-600 bg-yellow-50'
-    };
-
+    const color =
+      variant === 'success' ? 'border-green-200' :
+      variant === 'danger' ? 'border-red-200' :
+      variant === 'warning' ? 'border-yellow-200' :
+      variant === 'info' ? 'border-blue-200' : 'border-gray-200';
     return (
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <div className="flex items-center justify-between">
+      <button
+        type="button"
+        disabled={!onClick}
+        onClick={onClick}
+        className={`bg-white rounded-lg border ${color} p-4 text-left w-full ${onClick ? 'hover:bg-gray-50 cursor-pointer' : 'cursor-default'}`}
+      >
+        <div className="flex items-start justify-between gap-2">
           <div>
-            <p className="text-sm font-medium text-gray-600">{label}</p>
-            <p className="text-2xl font-bold text-gray-900">{value}</p>
-            {delta && (
-              <p className={`text-sm ${variantClasses[variant || 'info']}`}>
-                {delta}
-              </p>
-            )}
+            <p className="text-sm text-gray-600">{label}</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
+            {delta ? <p className="text-xs text-gray-500 mt-1">{delta}</p> : null}
+            {onClick ? <p className="text-xs text-blue-600 mt-1">View vehicles →</p> : null}
           </div>
-          {rightSlot && (
-            <div className="flex-shrink-0">
-              {rightSlot}
-            </div>
-          )}
+          {rightSlot}
         </div>
-      </div>
+      </button>
     );
   };
 
@@ -599,16 +633,25 @@ export default function TodayServerClient({
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Today's Overview</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Today&apos;s Overview</h1>
             <p className="text-gray-600">Welcome to {tenant.name}</p>
           </div>
-          <Button
-            variant={highlightMode ? 'default' : 'outline'}
-            onClick={() => setHighlightMode((v) => !v)}
-            className="shrink-0 w-full sm:w-auto"
-          >
-            {highlightMode ? 'Done highlighting' : 'Highlight bookings'}
-          </Button>
+          <div className="flex w-full sm:w-auto flex-col sm:flex-row gap-2">
+            <Button
+              className="shrink-0 w-full sm:w-auto"
+              onClick={() => setNewBookingOpen(true)}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Add booking
+            </Button>
+            <Button
+              variant={highlightMode ? 'default' : 'outline'}
+              onClick={() => setHighlightMode((v) => !v)}
+              className="shrink-0 w-full sm:w-auto"
+            >
+              {highlightMode ? 'Done highlighting' : 'Highlight bookings'}
+            </Button>
+          </div>
         </div>
 
         {/* Date Range Selector */}
@@ -658,13 +701,14 @@ export default function TodayServerClient({
           />
           <StatCard 
             label="Currently Parked" 
-            value={kpis.checkedIn} 
+            value={liveKpis.currentlyParked} 
             variant="info" 
             rightSlot={<Car className="h-4 w-4 text-blue-500" />}
+            onClick={() => setParkedSheetOpen(true)}
           />
           <StatCard 
             label="Capacity Remaining" 
-            value={kpis.capacityLeft}
+            value={capacityRemaining}
             rightSlot={<DollarSign className="h-4 w-4 text-green-500" />}
           />
         </div>
@@ -816,18 +860,22 @@ export default function TodayServerClient({
           {!arrivalsDeparturesCollapsed && (
             <div className="overflow-x-auto">
               <table className="min-w-full table-fixed divide-y divide-gray-200">
-                <thead className="bg-gray-50">
+                <thead className="bg-gray-50 hidden md:table-header-group">
                   <tr>
-                    <th colSpan={3} className="px-1.5 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ref / Customer / Plate</th>
-                    <th colSpan={3} className="px-1.5 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Arrival</th>
-                    <th colSpan={3} className="px-1.5 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Departure</th>
-                    <th colSpan={3} className="px-1.5 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Days / Amount / Status</th>
+                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Time</th>
+                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap min-w-[8.5rem]">Number plate</th>
+                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Telephone</th>
+                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                      Flight / Return
+                    </th>
+                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status / actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {groupedByDay.length === 0 ? (
                     <tr>
-                      <td colSpan={12} className="px-4 py-8 text-center text-gray-500">
+                      <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
                         <div>No arrivals or departures in this period</div>
                         {(arrivals.length > 0 || departures.length > 0) && (
                           <div className="mt-2 text-sm text-amber-700">
@@ -853,7 +901,7 @@ export default function TodayServerClient({
                         <React.Fragment key={dayGroup.date}>
                           {/* Date Header */}
                           <tr className="bg-gray-100 border-t-2 border-gray-300">
-                            <td colSpan={12} className="px-4 py-3">
+                            <td colSpan={6} className="px-4 py-3">
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                   <span className="text-sm font-semibold text-gray-700">
@@ -902,7 +950,7 @@ export default function TodayServerClient({
                               {dayGroup.arrivals.length > 0 && (
                                 <>
                                   <tr className="bg-blue-50/40 border-t border-blue-100">
-                                    <td colSpan={12} className="py-1">
+                                    <td colSpan={6} className="py-1">
                                       <div className="flex items-center justify-center relative py-2">
                                         <span className="inline-flex items-center rounded-full bg-blue-600 text-white px-4 py-1 text-sm font-semibold uppercase">
                                           Arrivals
@@ -929,7 +977,7 @@ export default function TodayServerClient({
                               {dayGroup.departures.length > 0 && (
                                 <>
                                   <tr className="bg-green-600 border-t border-green-700">
-                                    <td colSpan={12} className="py-1">
+                                    <td colSpan={6} className="py-1">
                                       <div className="flex items-center justify-center relative py-2">
                                         <span className="inline-flex items-center rounded-full bg-green-500 text-white px-4 py-1 text-sm font-semibold uppercase">
                                           Departures
@@ -964,13 +1012,15 @@ export default function TodayServerClient({
           )}
         </section>
 
-        {/* Currently Parked */}
+        {/* Currently Parked — live on-site vehicles only */}
         <section className="bg-white rounded-lg border border-gray-200">
           <div className="p-4 border-b border-gray-200">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Currently Parked</h2>
-                <p className="text-sm text-gray-600">Cars currently in the parking lot</p>
+                <p className="text-sm text-gray-600">
+                  Vehicles that have arrived and not yet departed ({liveKpis.currentlyParked})
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 <Label htmlFor="parkedSort" className="text-sm text-gray-600">Sort:</Label>
@@ -989,88 +1039,90 @@ export default function TodayServerClient({
               </div>
             </div>
           </div>
-<div className="overflow-x-auto">
-            <table className="min-w-full table-fixed divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50 hidden md:table-header-group">
                 <tr>
-                  <th colSpan={3} className="px-1.5 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ref / Customer / Plate</th>
-                  <th colSpan={3} className="px-1.5 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Arrival</th>
-                  <th colSpan={3} className="px-1.5 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Departure</th>
-                  <th colSpan={3} className="px-1.5 py-1.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Days / Amount / Status</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase min-w-[8.5rem]">Number plate</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Telephone</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Flight</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status / actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {groupedCurrentlyParked.length === 0 ? (
-                <tr>
-                  <td colSpan={12} className="px-4 py-8 text-center text-gray-500">
+                {sortedCurrentlyParked.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
                       No cars currently parked
                     </td>
                   </tr>
                 ) : (
-                  groupedCurrentlyParked.map((group, groupIndex) => {
-                    const isCollapsed = collapsedParkedDates.has(group.date);
-                    return (
-                      <React.Fragment key={group.date}>
-                        {/* Date Header */}
-                        <tr className="bg-gray-100 border-t-2 border-gray-300">
-                          <td colSpan={12} className="px-4 py-3">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                <span className="text-sm font-semibold text-gray-700">
-                                  {group.displayDate}
-                                </span>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    setCollapsedParkedDates(prev => {
-                                      const next = new Set(prev);
-                                      if (next.has(group.date)) {
-                                        next.delete(group.date);
-                                      } else {
-                                        next.add(group.date);
-                                      }
-                                      return next;
-                                    });
-                                  }}
-                                  className="h-6 w-6 p-0"
-                                >
-                                  {isCollapsed ? (
-                                    <ChevronDown className="h-4 w-4" />
-                                  ) : (
-                                    <ChevronUp className="h-4 w-4" />
-                                  )}
-                                </Button>
-                              </div>
-                              <span className="text-xs text-gray-500">
-                                {group.bookings.length} {group.bookings.length === 1 ? 'vehicle' : 'vehicles'}
-                              </span>
-                            </div>
-                          </td>
-                        </tr>
-                        {!isCollapsed && (
-                          <>
-                            {group.bookings.map((booking) => (
-                              <TodayBookingRow
-                                key={booking.id}
-                                {...rowProps}
-                                booking={booking}
-                                section="parked"
-                                isSelected={selectedBookingIds.has(booking.id)}
-                                isPending={Boolean(pendingById[booking.id])}
-                              />
-                            ))}
-                          </>
-                        )}
-                      </React.Fragment>
-                    );
-                  })
+                  sortedCurrentlyParked.map((booking) => (
+                    <TodayBookingRow
+                      key={booking.id}
+                      {...rowProps}
+                      booking={booking}
+                      section="parked"
+                      isSelected={selectedBookingIds.has(booking.id)}
+                      isPending={Boolean(pendingById[booking.id])}
+                    />
+                  ))
                 )}
               </tbody>
             </table>
           </div>
         </section>
       </div>
+
+      <Sheet open={parkedSheetOpen} onOpenChange={setParkedSheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Currently parked ({liveKpis.currentlyParked})</SheetTitle>
+          </SheetHeader>
+          <div className="mt-4 space-y-3">
+            {sortedCurrentlyParked.length === 0 ? (
+              <p className="text-sm text-gray-500">No vehicles on site.</p>
+            ) : (
+              sortedCurrentlyParked.map((booking) => (
+                <button
+                  key={booking.id}
+                  type="button"
+                  className="w-full rounded-lg border border-gray-200 p-3 text-left hover:bg-gray-50"
+                  onClick={() => {
+                    setParkedSheetOpen(false);
+                    setSelectedBookingId(booking.id);
+                  }}
+                >
+                  <div className="font-medium text-gray-900">{booking.customer_name || '—'}</div>
+                  <div className="mt-1 font-mono text-sm font-semibold uppercase tracking-wider text-gray-900">
+                    {(booking.plate || '—').toUpperCase()}
+                  </div>
+                  <div className="mt-1 text-xs text-gray-600">
+                    Ref {booking.reference} · Arrived{' '}
+                    {formatBookingDateTimeForTenant({
+                      timestamp: booking.arrived_at || booking.start_at,
+                      timezone: tenantTz,
+                    })}
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <NewBookingModal
+        tenantId={tenant.id}
+        open={newBookingOpen}
+        onClose={() => setNewBookingOpen(false)}
+        onBookingCreated={() => {
+          toast({ title: 'Booking created' });
+          loadedRangeRef.current = '';
+          void fetchDataForDateRange(currentDateRange.from, currentDateRange.to);
+        }}
+      />
 
       {/* Booking Details Modal */}
       {selectedBookingId && (
@@ -1081,7 +1133,10 @@ export default function TodayServerClient({
           }
           open={!!selectedBookingId}
           onClose={() => setSelectedBookingId(null)}
-          onBookingUpdated={() => {
+          onBookingUpdated={(saved) => {
+            if (saved?.id) {
+              patchBookingInLists(saved.id, saved as Partial<Booking>);
+            }
             loadedRangeRef.current = '';
             void fetchDataForDateRange(currentDateRange.from, currentDateRange.to);
           }}

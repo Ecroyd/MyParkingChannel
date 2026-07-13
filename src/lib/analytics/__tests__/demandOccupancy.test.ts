@@ -73,7 +73,7 @@ describe('demandOccupancy', () => {
     expect(days[0]?.excludedCancelledRefs).toContain('CANCEL1');
   });
 
-  it('includes no_show in bookedDemand but not actualOccupancy', () => {
+  it('excludes no_show from bookedDemand and actualOccupancy', () => {
     const noShow = booking({
       reference: 'NS1',
       start_at: '2026-06-24T10:00:00.000Z',
@@ -87,7 +87,9 @@ describe('demandOccupancy', () => {
       timezone: TZ,
       includeDebug: true,
     });
-    expect(days[0]?.bookedDemand).toBe(1);
+    expect(countsForBookedDemand(noShow)).toBe(false);
+    expect(countsForActualOccupancy(noShow)).toBe(false);
+    expect(days[0]?.bookedDemand).toBe(0);
     expect(days[0]?.actualOccupancy).toBe(0);
     expect(days[0]?.excludedNoShowRefs).toContain('NS1');
   });
@@ -274,7 +276,8 @@ describe('demandOccupancy', () => {
 
     for (const [day, count] of Object.entries(expectedActual)) {
       expect(result.find((r) => r.date === day)?.actualOccupancy).toBe(count);
-      expect(result.find((r) => r.date === day)?.bookedDemand).toBe(booked[day]);
+      // No-shows are excluded from future booked demand once marked.
+      expect(result.find((r) => r.date === day)?.bookedDemand).toBe(count);
     }
   });
 });

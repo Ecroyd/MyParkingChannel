@@ -29,6 +29,7 @@ type Booking = {
   money_received?: number | null;
   notes: string | null;
   flight_number: string | null;
+  return_flight_number?: string | null;
   is_incomplete?: boolean;
   missing_fields?: string[];
   stripe_payment_intent_id?: string | null;
@@ -74,25 +75,34 @@ export default function BookingDetailsModal({
   booking: Booking | null;
   open: boolean;
   onClose: () => void;
-  onBookingUpdated?: () => void;
+  onBookingUpdated?: (saved?: Booking | null) => void;
 }) {
   const [tab, setTab] = React.useState<'overview'|'edit'|'extend'|'refund'>('overview');
   const [loading, setLoading] = React.useState(false);
   const [payloadOpen, setPayloadOpen] = React.useState(false);
   const [payload, setPayload] = React.useState<any>(null);
   const [payloadLoading, setPayloadLoading] = React.useState(false);
+  const [localBooking, setLocalBooking] = React.useState<Booking | null>(booking);
 
-  const refresh = async () => {
+  React.useEffect(() => {
+    setLocalBooking(booking);
+    setTab('overview');
+  }, [booking?.id, open]);
+
+  const displayBooking = localBooking ?? booking;
+
+  const refresh = async (saved?: Booking | null) => {
+    if (saved) setLocalBooking(saved);
     if (onBookingUpdated) {
-      onBookingUpdated();
+      onBookingUpdated(saved ?? null);
     }
   };
 
   const loadPayload = async () => {
-    if (!booking?.id) return;
+    if (!displayBooking?.id) return;
     setPayloadLoading(true);
     try {
-      const res = await fetch(`/api/admin/bookings/${booking.id}/external-payload`);
+      const res = await fetch(`/api/admin/bookings/${displayBooking.id}/external-payload`);
       const json = await res.json();
       if (res.ok && json.payload) {
         setPayload(json.payload);
@@ -111,14 +121,14 @@ export default function BookingDetailsModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center">
-      <div className="bg-white w-full max-w-3xl rounded-2xl shadow-xl">
-        <div className="p-4 border-b flex items-center justify-between">
+      <div className="bg-white w-full max-w-3xl rounded-2xl shadow-xl max-h-[90vh] overflow-y-auto">
+        <div className="p-4 border-b flex items-center justify-between sticky top-0 bg-white z-10">
           <div className="flex items-center gap-3">
-            <BookingHighlightIcon highlightCode={booking?.highlight_code || 'none'} />
-            <h2 className="text-lg font-semibold">Booking {booking?.reference}</h2>
-            {booking?.is_incomplete && (
+            <BookingHighlightIcon highlightCode={displayBooking?.highlight_code || 'none'} />
+            <h2 className="text-lg font-semibold">Booking {displayBooking?.reference}</h2>
+            {displayBooking?.is_incomplete && (
               <span className="inline-flex px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded">
-                Incomplete ({booking.missing_fields?.join(', ')})
+                Incomplete ({displayBooking.missing_fields?.join(', ')})
               </span>
             )}
           </div>
@@ -142,49 +152,49 @@ export default function BookingDetailsModal({
         <div className="p-4">
           {loading && <p>Loading…</p>}
 
-              {!loading && booking && tab === 'overview' && (
+              {!loading && displayBooking && tab === 'overview' && (
                 <>
                   <div className="grid grid-cols-2 gap-4">
-                    <Info label="Customer" value={booking.customer_name} />
-                    <Info label="Email" value={booking.customer_email} />
-                    <Info label="Phone" value={booking.customer_phone || '—'} />
-                    <Info label="Plate" value={booking.plate} />
-                    <Info label="Make" value={booking.car_make || '—'} />
-                    <Info label="Model" value={booking.car_model || '—'} />
-                    <Info label="Colour" value={booking.car_color || '—'} />
+                    <Info label="Customer" value={displayBooking.customer_name} />
+                    <Info label="Email" value={displayBooking.customer_email} />
+                    <Info label="Phone" value={displayBooking.customer_phone || '—'} />
+                    <Info label="Plate" value={displayBooking.plate} />
+                    <Info label="Make" value={displayBooking.car_make || '—'} />
+                    <Info label="Model" value={displayBooking.car_model || '—'} />
+                    <Info label="Colour" value={displayBooking.car_color || '—'} />
                     <Info label="Source/Channel" value={
                       <div className="flex flex-col">
                         <span className="text-sm font-medium">
-                          {getBookingSourceLabel(booking)}
+                          {getBookingSourceLabel(displayBooking)}
                         </span>
-                        {booking.external_source && booking.source && (
+                        {displayBooking.external_source && displayBooking.source && (
                           <span className="text-xs text-gray-500">
-                            {formatBookingSource(booking.source)}
+                            {formatBookingSource(displayBooking.source)}
                           </span>
                         )}
                       </div>
                     } />
-                    <Info label="Arrival Date & Time" value={new Date(booking.start_at).toLocaleString('en-GB', { 
+                    <Info label="Arrival Date & Time" value={new Date(displayBooking.start_at).toLocaleString('en-GB', { 
                       day: '2-digit',
                       month: '2-digit',
                       year: 'numeric',
                       hour: '2-digit',
                       minute: '2-digit'
                     })} />
-                    <Info label="Departure Date & Time" value={new Date(booking.end_at).toLocaleString('en-GB', { 
+                    <Info label="Departure Date & Time" value={new Date(displayBooking.end_at).toLocaleString('en-GB', { 
                       day: '2-digit',
                       month: '2-digit',
                       year: 'numeric',
                       hour: '2-digit',
                       minute: '2-digit'
                     })} />
-                    <Info label="Charged" value={toMoney(Math.round((booking.money_charged ?? 0) * 100))} />
-                    <Info label="Flight" value={booking.flight_number || '—'} />
+                    <Info label="Charged" value={toMoney(Math.round((displayBooking.money_charged ?? 0) * 100))} />
+                    <Info label="Flight" value={displayBooking.flight_number || '—'} />
                     <div className="col-span-2">
-                      <Info label="Notes" value={booking.notes || '—'} />
+                      <Info label="Notes" value={displayBooking.notes || '—'} />
                     </div>
                   </div>
-                  {booking.source === 'cavu' && (
+                  {displayBooking.source === 'cavu' && (
                     <div className="mt-4 pt-4 border-t">
                       <button
                         onClick={loadPayload}
@@ -198,16 +208,23 @@ export default function BookingDetailsModal({
                 </>
               )}
 
-          {!loading && booking && tab === 'edit' && (
-            <EditForm booking={booking} onSaved={async () => { await refresh(); setTab('overview'); }} />
+          {!loading && displayBooking && tab === 'edit' && (
+            <EditForm
+              key={displayBooking.id + String(displayBooking.start_at) + String(displayBooking.end_at)}
+              booking={displayBooking}
+              onSaved={async (saved) => {
+                await refresh(saved);
+                setTab('overview');
+              }}
+            />
           )}
 
-          {!loading && booking && tab === 'extend' && (
-            <ExtendForm booking={booking} onExtended={async () => { await refresh(); setTab('overview'); }} />
+          {!loading && displayBooking && tab === 'extend' && (
+            <ExtendForm booking={displayBooking} onExtended={async () => { await refresh(); setTab('overview'); }} />
           )}
 
-          {!loading && booking && tab === 'refund' && (
-            <RefundForm booking={booking} onRefunded={async () => { await refresh(); setTab('overview'); }} />
+          {!loading && displayBooking && tab === 'refund' && (
+            <RefundForm booking={displayBooking} onRefunded={async () => { await refresh(); setTab('overview'); }} />
           )}
         </div>
       </div>
@@ -241,8 +258,26 @@ function Info({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function EditForm({ booking, onSaved }: { booking: any; onSaved: () => void }) {
+function toDatetimeLocalValue(iso: string | null | undefined, timeZone = 'Europe/London'): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
+}
+
+function EditForm({ booking, onSaved }: { booking: any; onSaved: (saved: any) => void }) {
   const [form, setForm] = React.useState({
+    customer_name: booking.customer_name || '',
     customer_email: booking.customer_email || '',
     customer_phone: booking.customer_phone || '',
     plate: booking.plate || '',
@@ -250,34 +285,51 @@ function EditForm({ booking, onSaved }: { booking: any; onSaved: () => void }) {
     car_model: booking.car_model || '',
     car_color: booking.car_color || '',
     flight_number: booking.flight_number || '',
+    return_flight_number: booking.return_flight_number || '',
     notes: booking.notes || '',
-    start_at: booking.start_at ? new Date(booking.start_at).toISOString().slice(0, 16) : '',
-    end_at: booking.end_at ? new Date(booking.end_at).toISOString().slice(0, 16) : '',
+    start_at: toDatetimeLocalValue(booking.start_at),
+    end_at: toDatetimeLocalValue(booking.end_at),
   });
   const [saving, setSaving] = React.useState(false);
+  const [saveState, setSaveState] = React.useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [error, setError] = React.useState<string>('');
 
   const save = async () => {
     setSaving(true);
-    const res = await fetch(`/api/bookings/${booking.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
-    });
+    setSaveState('saving');
+    setError('');
+    try {
+      const res = await fetch(`/api/bookings/${booking.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(form),
+      });
 
-    const json = await res.json().catch(() => ({}));
-    setSaving(false);
+      const json = await res.json().catch(() => ({}));
 
-    if (!res.ok) {
-      alert(json?.error || 'Update failed'); // or toast.error(...)
-      return;
+      if (!res.ok || !json?.id) {
+        throw new Error(json?.error || 'Update failed — booking was not saved');
+      }
+
+      setSaveState('saved');
+      onSaved(json);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Update failed';
+      setError(message);
+      setSaveState('error');
+    } finally {
+      setSaving(false);
     }
-
-    onSaved();
   };
 
   return (
     <div className="grid gap-3">
-      {/* Date fields */}
+      {error && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          {error}
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="block text-xs text-gray-500 mb-1">Start Date & Time</label>
@@ -285,7 +337,10 @@ function EditForm({ booking, onSaved }: { booking: any; onSaved: () => void }) {
             type="datetime-local"
             className="w-full border rounded p-2"
             value={form.start_at}
-            onChange={e=>setForm(prev=>({ ...prev, start_at: e.target.value }))}
+            onChange={(e) => {
+              setSaveState('idle');
+              setForm((prev) => ({ ...prev, start_at: e.target.value }));
+            }}
           />
         </div>
         <div>
@@ -294,28 +349,58 @@ function EditForm({ booking, onSaved }: { booking: any; onSaved: () => void }) {
             type="datetime-local"
             className="w-full border rounded p-2"
             value={form.end_at}
-            onChange={e=>setForm(prev=>({ ...prev, end_at: e.target.value }))}
+            onChange={(e) => {
+              setSaveState('idle');
+              setForm((prev) => ({ ...prev, end_at: e.target.value }));
+            }}
           />
         </div>
       </div>
-      
-      {['customer_email','customer_phone','plate','car_make','car_model','car_color','flight_number'].map((k) => (
+
+      {[
+        ['customer_name', 'Customer name'],
+        ['customer_email', 'Email'],
+        ['customer_phone', 'Telephone'],
+        ['plate', 'Number plate'],
+        ['car_make', 'Car make'],
+        ['car_model', 'Car model'],
+        ['car_color', 'Car colour'],
+        ['flight_number', 'Flight'],
+        ['return_flight_number', 'Return flight'],
+      ].map(([k, label]) => (
         <div key={k}>
-          <label className="block text-xs text-gray-500 mb-1">{k.replace('_',' ')}</label>
+          <label className="block text-xs text-gray-500 mb-1">{label}</label>
           <input
             className="w-full border rounded p-2"
             value={(form as any)[k]}
-            onChange={e=>setForm(prev=>({ ...prev, [k]: e.target.value }))}
+            onChange={(e) => {
+              setSaveState('idle');
+              setForm((prev) => ({ ...prev, [k]: e.target.value }));
+            }}
           />
         </div>
       ))}
       <div>
-        <label className="block text-xs text-gray-500 mb-1">notes</label>
-        <textarea className="w-full border rounded p-2" value={form.notes}
-          onChange={e=>setForm(prev=>({ ...prev, notes: e.target.value }))} />
+        <label className="block text-xs text-gray-500 mb-1">Notes</label>
+        <textarea
+          className="w-full border rounded p-2"
+          value={form.notes}
+          onChange={(e) => {
+            setSaveState('idle');
+            setForm((prev) => ({ ...prev, notes: e.target.value }));
+          }}
+        />
       </div>
-      <button onClick={save} disabled={saving} className="px-4 py-2 rounded bg-black text-white w-fit">
-        {saving ? 'Saving…' : 'Save changes'}
+      <button
+        onClick={save}
+        disabled={saving}
+        className="px-4 py-2 rounded bg-black text-white w-fit disabled:opacity-50"
+      >
+        {saveState === 'saving'
+          ? 'Saving…'
+          : saveState === 'saved'
+            ? 'Booking updated ✓'
+            : 'Save changes'}
       </button>
     </div>
   );

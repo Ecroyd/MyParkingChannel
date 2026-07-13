@@ -11,13 +11,20 @@ type Body = {
   customer_email: string
   customer_phone?: string
   plate: string
-  startAt: string // ISO or datetime-local string
-  endAt: string   // ISO or datetime-local string
+  /** Preferred camelCase keys */
+  startAt?: string
+  endAt?: string
+  /** NewBookingModal historically sent snake_case — accept both */
+  start_at?: string
+  end_at?: string
   money_charged?: number
   money_received?: number
   notes?: string
   flight_number?: string
-  tenantId?: string // optional override if you support switching tenants
+  return_flight_number?: string
+  car_make?: string
+  car_model?: string
+  car_color?: string
 }
 
 export async function POST(req: NextRequest) {
@@ -29,23 +36,27 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  // 2) resolve tenant id (if you have a "current tenant" cookie/context, use it; otherwise first membership)
-  let tenantId = body.tenantId
-  if (!tenantId) {
-    const { data: mem } = await supabase
-      .from('user_tenants')
-      .select('tenant_id')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: true })
-      .limit(1)
-      .maybeSingle()
-    tenantId = mem?.tenant_id ?? null
+  // 2) tenant from authenticated membership only — never trust browser-supplied tenantId
+  const adminClient = createAdminClient()
+  const { data: membership } = await adminClient
+    .from('user_tenants')
+    .select('tenant_id, is_default')
+    .eq('user_id', user.id)
+
+  if (!membership?.length) {
+    return NextResponse.json({ error: 'No tenant context' }, { status: 400 })
   }
-  if (!tenantId) return NextResponse.json({ error: 'No tenant context' }, { status: 400 })
+  const tenantId =
+    membership.find((m) => m.is_default)?.tenant_id ?? membership[0].tenant_id
 
   // 3) normalize times → TIMESTAMPTZ (treat as UK timezone)
-  const start_at = new Date(body.startAt)
-  const end_at = new Date(body.endAt)
+  const startRaw = body.startAt ?? body.start_at
+  const endRaw = body.endAt ?? body.end_at
+  if (!startRaw || !endRaw) {
+    return NextResponse.json({ error: 'Start and end dates are required' }, { status: 400 })
+  }
+  const start_at = new Date(startRaw)
+  const end_at = new Date(endRaw)
   if (Number.isNaN(start_at.getTime()) || Number.isNaN(end_at.getTime())) {
     return NextResponse.json({ error: 'Invalid dates' }, { status: 400 })
   }
@@ -142,20 +153,25 @@ export async function POST(req: NextRequest) {
     customer_email: body.customer_email,
     customer_phone: body.customer_phone || null,
     plate: normalizedPlate,
+    car_make: body.car_make || null,
+    car_model: body.car_model || null,
+    car_color: body.car_color || null,
     start_at: start_at_uk.toISOString(),
     end_at: end_at_uk.toISOString(),
     status: 'reserved',
+    gate_status: 'reserved',
     source: 'manual',
     money_charged: totalAmount,
     money_received: body.money_received ?? 0,
     notes: body.notes ?? null,
     flight_number: body.flight_number?.toUpperCase() || null,
+    return_flight_number: body.return_flight_number?.toUpperCase() || null,
     is_incomplete: false,
     missing_fields: null,
     dedupe_key: dedupeKey
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await adminClient
     .from('bookings')
     .insert(payload)
     .select('id, reference')

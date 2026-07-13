@@ -175,7 +175,6 @@ function CreateForm({
         credentials: 'include',
         body: JSON.stringify({
           ...form,
-          tenantId,
           money_charged: form.money_charged ? parseFloat(form.money_charged) : undefined,
           money_received: form.money_received ? parseFloat(form.money_received) : undefined,
         }),

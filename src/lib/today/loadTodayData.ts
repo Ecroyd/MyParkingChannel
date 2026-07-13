@@ -2,6 +2,12 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { calculateCapacityForDate } from '@/lib/capacity/rolling';
 import { getDateRangeForQuery, tenantTodayDateKey } from '@/lib/timezone';
 import { TODAY_BOOKING_SELECT, type TodayBookingRow } from '@/lib/today/bookingSelect';
+import {
+  isCancelledBooking,
+  isCurrentlyParked,
+  isNoShowBooking,
+} from '@/lib/ops/parkedState';
+import { GATE_STATUS } from '@/lib/gateStatus';
 
 export type TodayKpis = {
   arrivals: number;
@@ -27,14 +33,6 @@ export type TodayPageData = {
   rangeTo: string;
   queryError?: string;
 };
-
-function isCancelledBooking(booking: { status?: string | null; gate_status?: string | null }) {
-  return booking.status === 'cancelled' || booking.gate_status === 'cancelled';
-}
-
-function isNoShowBooking(booking: { gate_status?: string | null }) {
-  return booking.gate_status === 'no_show';
-}
 
 export { tenantTodayDateKey };
 
@@ -63,7 +61,6 @@ export async function loadTodayPageData(opts: LoadOpts): Promise<TodayPageData> 
     fromDate,
     toDate,
     tenantTimezone,
-    checkedInNow = false,
     tenant: tenantInput,
   } = opts;
 
@@ -71,7 +68,6 @@ export async function loadTodayPageData(opts: LoadOpts): Promise<TodayPageData> 
   const rangeStart = fromUTC.toISOString();
   const rangeEnd = toUTC.toISOString();
 
-  const now = new Date();
   const todayStr = tenantTodayDateKey(tenantTimezone);
 
   const [
@@ -79,7 +75,6 @@ export async function loadTodayPageData(opts: LoadOpts): Promise<TodayPageData> 
     departuresResult,
     currentlyParkedResult,
     rangeBookingsResult,
-    currentlyParkedNowResult,
     todayCapacity,
     tenantResult,
   ] = await Promise.all([
@@ -103,13 +98,22 @@ export async function loadTodayPageData(opts: LoadOpts): Promise<TodayPageData> 
       rangeEnd
     ).order('end_at', { ascending: false }),
 
+    // Live operational parked: actually arrived, not departed.
+    // Prefer gate_status path; also pull legacy timestamp rows.
     adminClient
       .from('bookings')
       .select(TODAY_BOOKING_SELECT)
       .eq('tenant_id', tenantId)
-      .lt('start_at', rangeEnd)
-      .gt('end_at', rangeStart)
-      .neq('status', 'cancelled'),
+      .neq('status', 'cancelled')
+      .or(
+        [
+          `gate_status.eq.${GATE_STATUS.ARRIVED}`,
+          `gate_status.eq.${GATE_STATUS.ARRIVED_KEY_TAKEN}`,
+          'and(arrived_at.not.is.null,departed_at.is.null)',
+          'and(checked_in_at.not.is.null,checked_out_at.is.null,status.eq.checked_in)',
+        ].join(',')
+      )
+      .order('arrived_at', { ascending: false }),
 
     withRangeEnd(
       adminClient
@@ -120,16 +124,6 @@ export async function loadTodayPageData(opts: LoadOpts): Promise<TodayPageData> 
       'start_at',
       rangeEnd
     ).not('money_received', 'is', null),
-
-    checkedInNow
-      ? adminClient
-          .from('bookings')
-          .select('id, status, gate_status')
-          .eq('tenant_id', tenantId)
-          .lte('start_at', now.toISOString())
-          .gte('end_at', now.toISOString())
-          .neq('status', 'cancelled')
-      : Promise.resolve({ data: null as { id: string; status: string | null; gate_status: string | null }[] | null, error: null }),
 
     calculateCapacityForDate(tenantId, todayStr),
 
@@ -147,7 +141,6 @@ export async function loadTodayPageData(opts: LoadOpts): Promise<TodayPageData> 
     departuresResult.error,
     currentlyParkedResult.error,
     rangeBookingsResult.error,
-    currentlyParkedNowResult.error,
     tenantResult.error,
   ]
     .filter(Boolean)
@@ -159,25 +152,16 @@ export async function loadTodayPageData(opts: LoadOpts): Promise<TodayPageData> 
 
   const arrivals = (arrivalsResult.data ?? []) as TodayBookingRow[];
   const departures = (departuresResult.data ?? []) as TodayBookingRow[];
-  const currentlyParked = (currentlyParkedResult.data ?? []) as TodayBookingRow[];
+  const currentlyParkedRaw = (currentlyParkedResult.data ?? []) as TodayBookingRow[];
 
   const operationalArrivals = arrivals.filter((b) => !isCancelledBooking(b));
   const operationalDepartures = departures.filter(
     (b) => !isCancelledBooking(b) && !isNoShowBooking(b)
   );
-  const operationalCurrentlyParked = currentlyParked.filter(
-    (b) => !isCancelledBooking(b) && !isNoShowBooking(b)
-  );
+  // Authoritative resolver — query is a candidate set; never disagree with isCurrentlyParked.
+  const operationalCurrentlyParked = currentlyParkedRaw.filter(isCurrentlyParked);
 
-  let checkedInCount: number;
-  if (checkedInNow && currentlyParkedNowResult.data) {
-    checkedInCount = currentlyParkedNowResult.data.filter(
-      (b) => !isCancelledBooking(b) && !isNoShowBooking(b)
-    ).length;
-  } else {
-    checkedInCount = operationalCurrentlyParked.length;
-  }
-
+  const checkedInCount = operationalCurrentlyParked.length;
   const totalCapacity = todayCapacity ?? 0;
   const totalRevenue =
     rangeBookingsResult.data?.reduce((sum, b) => sum + (b.money_received || 0), 0) ?? 0;

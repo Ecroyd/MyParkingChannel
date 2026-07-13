@@ -6,7 +6,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { BookingHighlightIcon } from '@/components/bookings/BookingHighlightIcon';
-import { DynamicPricingBadge } from '@/components/bookings/DynamicPricingBadge';
 import BookingHighlightPicker from './BookingHighlightPicker';
 import { cn } from '@/lib/utils';
 import {
@@ -17,6 +16,7 @@ import {
 } from '@/lib/gateStatus';
 import { BookingHighlightCode } from '@/types/bookings';
 import { formatBookingDateTimeForTenant } from '@/lib/datetime/parse';
+import { departureFlightDisplay } from '@/lib/ops/parkedState';
 
 export type TodayOpsAction =
   | 'reserved'
@@ -31,20 +31,18 @@ export type TodayBoardBooking = {
   id: string;
   reference: string;
   customer_name: string | null;
+  customer_phone?: string | null;
   plate: string | null;
   start_at: string;
   end_at: string;
   status: string | null;
-  money_charged?: number | null;
+  flight_number?: string | null;
+  return_flight_number?: string | null;
   gate_status?: string | null;
   highlight_code?: BookingHighlightCode | null;
   ops_hidden?: boolean | null;
   ops_hidden_reason?: string | null;
   is_incomplete?: boolean;
-  dynamic_pricing_applied?: boolean;
-  dynamic_pricing_multiplier?: number | null;
-  dynamic_pricing_occupancy_percent?: number | null;
-  dynamic_pricing_rule_id?: string | null;
 };
 
 type BoardSection = 'arrivals' | 'departures' | 'parked';
@@ -104,6 +102,36 @@ function getRowStyleClasses(
   return `${rowBg} ${text}`;
 }
 
+function PlateBadge({ plate }: { plate: string | null | undefined }) {
+  const value = (plate || '').trim().toUpperCase() || '—';
+  return (
+    <span className="inline-flex max-w-[9rem] shrink-0 items-center justify-center whitespace-nowrap rounded border border-gray-300 bg-gray-100 px-2 py-0.5 font-mono text-sm font-semibold uppercase tracking-wider text-gray-900">
+      {value}
+    </span>
+  );
+}
+
+function PhoneCell({ phone }: { phone?: string | null }) {
+  const value = (phone || '').trim();
+  if (!value) return <span className="text-sm text-gray-500">—</span>;
+  return (
+    <a
+      href={`tel:${value.replace(/\s+/g, '')}`}
+      className="text-sm text-blue-700 underline-offset-2 hover:underline"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {value}
+    </a>
+  );
+}
+
+function timeOnlyLabel(timestamp: string, timezone: string): string {
+  const full = formatBookingDateTimeForTenant({ timestamp, timezone });
+  // format is "dd MMM, HH:mm" — prefer clock time when available
+  const parts = full.split(', ');
+  return parts.length > 1 ? parts[parts.length - 1] : full;
+}
+
 export type TodayBookingRowProps = {
   booking: TodayBoardBooking;
   section?: BoardSection;
@@ -133,20 +161,15 @@ function TodayBookingRow({
   onQuickAction,
   onHighlightSelect,
 }: TodayBookingRowProps) {
-  const stayDays = useMemo(() => {
-    const start = new Date(booking.start_at);
-    const end = new Date(booking.end_at);
-    return Math.ceil(Math.abs(end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-  }, [booking.start_at, booking.end_at]);
-
-  const startLabel = useMemo(
-    () => formatBookingDateTimeForTenant({ timestamp: booking.start_at, timezone }),
-    [booking.start_at, timezone]
+  const timeField = section === 'departures' ? booking.end_at : booking.start_at;
+  const timeLabel = useMemo(
+    () => timeOnlyLabel(timeField, timezone),
+    [timeField, timezone]
   );
-  const endLabel = useMemo(
-    () => formatBookingDateTimeForTenant({ timestamp: booking.end_at, timezone }),
-    [booking.end_at, timezone]
-  );
+  const flightLabel =
+    section === 'departures'
+      ? departureFlightDisplay(booking)
+      : (booking.flight_number || '').trim() || '—';
 
   const isKeyTaken = Boolean(
     booking.gate_status === GATE_STATUS.TAKE_KEY ||
@@ -189,134 +212,139 @@ function TodayBookingRow({
     }
   };
 
-  return (
-    <tr className={rowClass} tabIndex={0} onKeyDown={handleQuickKey}>
-      <td colSpan={3} className="px-1.5 py-1 cursor-pointer align-middle text-inherit" onClick={handleRowClick}>
-        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm">
+  const statusSelect = (
+    <div className="flex flex-wrap items-center gap-1" onClick={(e) => e.stopPropagation()}>
+      <Select
+        value={displayGateStatus === '' ? undefined : displayGateStatus}
+        onValueChange={handleGateStatusChange}
+        disabled={isPending}
+      >
+        <SelectTrigger className="h-7 px-1 py-0 bg-transparent border-0 shadow-none gap-1 cursor-pointer focus:ring-0 focus:ring-offset-0 min-w-0 w-auto [&>svg]:shrink-0 [&>span:first-of-type]:sr-only">
+          <SelectValue />
           <span
-            onClick={(e) => e.stopPropagation()}
-            onMouseDown={(e) => e.preventDefault()}
-            className="inline-flex items-center"
+            className={cn(
+              'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium leading-none text-inherit',
+              gateStatusPillClass(displayGateStatus)
+            )}
           >
-            <Checkbox
-              checked={isSelected}
-              onCheckedChange={(checked) => onSelectChange(booking.id, checked === true)}
-              aria-label={`Select booking ${booking.reference}`}
-              className="bg-white border-gray-300 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
-            />
+            {gateStatusLabel(displayGateStatus)}
           </span>
-          {isKeyTaken && (
-            <span className="inline-flex items-center text-inherit" title="Key taken">
-              <KeyRound className="h-4 w-4 shrink-0" />
-            </span>
-          )}
-          <span className="font-medium">{booking.reference}</span>
-          {highlightMode ? (
-            <div
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-              className="inline-flex"
-            >
-              <BookingHighlightPicker
-                bookingId={booking.id}
-                highlightCode={effectiveHighlightCode}
-                effectiveHighlightCode={effectiveHighlightCode}
-                onSelect={onHighlightSelect}
-              />
-            </div>
-          ) : !isKeyTaken ? (
-            <BookingHighlightIcon highlightCode={effectiveHighlightCode} />
-          ) : null}
-          <span>{booking.customer_name}</span>
-          <span className="text-sm font-semibold font-mono text-gray-900 bg-gray-200 px-2 py-0.5 rounded tracking-wide">
-            {booking.plate}
-          </span>
-          {booking.is_incomplete && (
-            <span className="inline-flex items-center h-5 rounded-md px-1.5 py-0.5 text-xs font-medium bg-amber-50 text-amber-800">
-              Incomplete
-            </span>
-          )}
-          {booking.status === 'cancelled' && (
-            <span className="inline-flex items-center h-5 rounded-md px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-800">
-              Cancelled
-            </span>
-          )}
-          {booking.dynamic_pricing_applied && (
-            <DynamicPricingBadge
-              applied={booking.dynamic_pricing_applied}
-              multiplier={booking.dynamic_pricing_multiplier}
-              occupancyPercent={booking.dynamic_pricing_occupancy_percent}
-              ruleId={booking.dynamic_pricing_rule_id}
-            />
-          )}
-          {booking.ops_hidden && (
+        </SelectTrigger>
+        <SelectContent align="end" className="z-[100]">
+          {GATE_STATUS_OPTIONS.map((opt) => (
+            <SelectItem key={opt.value} value={opt.value}>
+              {opt.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {booking.ops_hidden && showHidden && onUnhide && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-6 text-xs"
+          onClick={(e) => {
+            e.stopPropagation();
+            onUnhide(booking);
+          }}
+        >
+          Unhide
+        </Button>
+      )}
+      {isPending && <span className="text-xs text-blue-800">Saving…</span>}
+    </div>
+  );
+
+  return (
+    <>
+      {/* Desktop row */}
+      <tr className={cn(rowClass, 'hidden md:table-row')} tabIndex={0} onKeyDown={handleQuickKey}>
+        <td className="whitespace-nowrap px-2 py-2 text-sm align-middle cursor-pointer" onClick={handleRowClick}>
+          <div className="flex items-center gap-2">
             <span
-              className="inline-flex items-center h-5 rounded-md px-1.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-600"
-              title={booking.ops_hidden_reason || 'Hidden'}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.preventDefault()}
+              className="inline-flex items-center"
             >
-              HIDDEN
+              <Checkbox
+                checked={isSelected}
+                onCheckedChange={(checked) => onSelectChange(booking.id, checked === true)}
+                aria-label={`Select booking ${booking.reference}`}
+                className="bg-white border-gray-300 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+              />
             </span>
-          )}
-          {isPending && (
-            <span className="inline-flex items-center h-5 rounded-md px-1.5 py-0.5 text-xs font-medium bg-blue-50 text-blue-800">
-              Saving...
-            </span>
-          )}
-          {booking.ops_hidden && showHidden && onUnhide && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-6 text-xs"
-              onClick={(e) => {
-                e.stopPropagation();
-                onUnhide(booking);
-              }}
-            >
-              Unhide
-            </Button>
-          )}
-        </div>
-      </td>
-      <td colSpan={3} className="px-1.5 py-1 cursor-pointer align-middle text-inherit" onClick={handleRowClick}>
-        <span className="text-xs font-normal">{startLabel}</span>
-      </td>
-      <td colSpan={3} className="px-1.5 py-1 cursor-pointer align-middle text-inherit" onClick={handleRowClick}>
-        <span className="text-xs font-normal">{endLabel}</span>
-      </td>
-      <td colSpan={3} className="px-1.5 py-1 align-middle text-inherit" onClick={(e) => e.stopPropagation()}>
-        <div className="flex flex-col md:flex-row md:items-center md:justify-end gap-1 md:gap-2">
-          <div className="flex flex-wrap justify-end gap-1 text-sm">
-            <span>{stayDays}d</span>
-            <span>£{booking.money_charged || 0}</span>
+            <span className="font-medium tabular-nums">{timeLabel}</span>
           </div>
-          <Select
-            value={displayGateStatus === '' ? undefined : displayGateStatus}
-            onValueChange={handleGateStatusChange}
-            disabled={isPending}
-          >
-            <SelectTrigger className="h-7 px-1 py-0 bg-transparent border-0 shadow-none gap-1 cursor-pointer focus:ring-0 focus:ring-offset-0 min-w-0 w-auto [&>svg]:shrink-0 [&>span:first-of-type]:sr-only">
-              <SelectValue />
-              <span
-                className={cn(
-                  'inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium leading-none text-inherit',
-                  gateStatusPillClass(displayGateStatus)
-                )}
+        </td>
+        <td className="px-2 py-2 text-sm align-middle cursor-pointer" onClick={handleRowClick}>
+          <div className="flex items-center gap-1.5 min-w-0">
+            {isKeyTaken && <KeyRound className="h-4 w-4 shrink-0" />}
+            {highlightMode ? (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                className="inline-flex"
               >
-                {gateStatusLabel(displayGateStatus)}
-              </span>
-            </SelectTrigger>
-            <SelectContent align="end" className="z-[100]">
-              {GATE_STATUS_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </td>
-    </tr>
+                <BookingHighlightPicker
+                  bookingId={booking.id}
+                  highlightCode={effectiveHighlightCode}
+                  effectiveHighlightCode={effectiveHighlightCode}
+                  onSelect={onHighlightSelect}
+                />
+              </div>
+            ) : !isKeyTaken ? (
+              <BookingHighlightIcon highlightCode={effectiveHighlightCode} />
+            ) : null}
+            <span className="truncate">{booking.customer_name || '—'}</span>
+          </div>
+        </td>
+        <td className="px-2 py-2 align-middle cursor-pointer" onClick={handleRowClick}>
+          <PlateBadge plate={booking.plate} />
+        </td>
+        <td className="px-2 py-2 align-middle whitespace-nowrap">
+          <PhoneCell phone={booking.customer_phone} />
+        </td>
+        <td className="px-2 py-2 text-sm align-middle cursor-pointer whitespace-nowrap" onClick={handleRowClick}>
+          {flightLabel}
+        </td>
+        <td className="px-2 py-2 align-middle">{statusSelect}</td>
+      </tr>
+
+      {/* Mobile card-style row */}
+      <tr className={cn(rowClass, 'md:hidden')} tabIndex={0} onKeyDown={handleQuickKey}>
+        <td colSpan={6} className="px-3 py-3 align-middle" onClick={handleRowClick}>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <span
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.preventDefault()}
+                  className="inline-flex"
+                >
+                  <Checkbox
+                    checked={isSelected}
+                    onCheckedChange={(checked) => onSelectChange(booking.id, checked === true)}
+                    aria-label={`Select booking ${booking.reference}`}
+                    className="bg-white border-gray-300 data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                  />
+                </span>
+                <div className="min-w-0">
+                  <div className="font-medium truncate">{booking.customer_name || '—'}</div>
+                  <div className="text-xs opacity-80">{timeLabel}</div>
+                </div>
+              </div>
+              <PlateBadge plate={booking.plate} />
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+              <PhoneCell phone={booking.customer_phone} />
+              <span>{section === 'departures' ? 'Return: ' : 'Flight: '}{flightLabel}</span>
+            </div>
+            {statusSelect}
+          </div>
+        </td>
+      </tr>
+    </>
   );
 }
 

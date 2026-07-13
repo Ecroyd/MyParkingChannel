@@ -2,7 +2,8 @@
  * Shared booked demand and actual occupancy for demand curve + dynamic pricing.
  *
  * Booked demand = spaces sold/committed per tenant-local day.
- * Does NOT filter ops_hidden, departed, or no_show.
+ * Excludes cancelled and no-show. Does NOT filter ops_hidden or departed
+ * (departed stays still occupied those stay dates historically).
  */
 import { zonedTimeToUtc } from 'date-fns-tz';
 import { createAdminClient } from '@/lib/supabase/admin';
@@ -44,7 +45,7 @@ export function isNoShowForDemand(booking: DemandBookingRow): boolean {
 }
 
 export function countsForBookedDemand(booking: DemandBookingRow): boolean {
-  return !isCancelledForDemand(booking);
+  return !isCancelledForDemand(booking) && !isNoShowForDemand(booking);
 }
 
 export function countsForActualOccupancy(booking: DemandBookingRow): boolean {
@@ -148,11 +149,11 @@ export function aggregateDemandByDay(opts: {
 
       if (isNoShowForDemand(booking)) {
         if (opts.includeDebug) excludedNoShowRefs.push(ref);
-      } else {
-        actualOccupancy += 1;
+        continue;
       }
 
       bookedDemand += 1;
+      actualOccupancy += 1;
       if (opts.includeDebug) countedRefs.push(ref);
 
       const sourceKey = keyFromSource(booking.source);

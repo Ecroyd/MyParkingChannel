@@ -110,6 +110,7 @@ export default function DemandCurve({
   const [days, setDays] = useState<DemandDayApi[]>([]);
   const [apiDebug, setApiDebug] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [dateRange, setDateRange] = useState('next14days');
   const { isOpen, closeModal, handleDateRangeChange } = useDateRangeModal();
   const [customStartDate, setCustomStartDate] = useState('');
@@ -164,12 +165,37 @@ export default function DemandCurve({
         const result = await response.json();
         setDays(result.days || []);
         setApiDebug(Boolean(result.debug));
+        setLastUpdatedAt(new Date());
       } catch (error) {
         console.error("Error fetching demand curve:", error);
         setDays([]);
       }
       setLoading(false);
     })();
+  }, [from, to, tenantId, showDebug]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      setLastUpdatedAt(null);
+      // Force refetch by bumping dependency via reload of same range
+      void (async () => {
+        try {
+          const debugParam = showDebug ? '&debug=1' : '';
+          const response = await fetch(
+            `/api/analytics/demand-curve?from=${from}&to=${to}&tenant_id=${tenantId}${debugParam}`
+          );
+          if (!response.ok) return;
+          const result = await response.json();
+          setDays(result.days || []);
+          setLastUpdatedAt(new Date());
+        } catch {
+          /* ignore background refresh errors */
+        }
+      })();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
   }, [from, to, tenantId, showDebug]);
 
   const defaultCapacity = capacity ?? 100;
@@ -236,6 +262,20 @@ export default function DemandCurve({
 
   return (
     <div className="w-full">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-gray-500">
+          Live forecast
+          {lastUpdatedAt
+            ? ` · Updated ${lastUpdatedAt.toLocaleTimeString('en-GB', {
+                hour: '2-digit',
+                minute: '2-digit',
+                timeZone: tenantTimezone,
+              })}`
+            : ''}
+          {' · '}
+          Timezone {tenantTimezone}
+        </p>
+      </div>
       <div className="mb-4 flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2">
           <label htmlFor="dateRange" className="text-sm font-medium text-gray-700">

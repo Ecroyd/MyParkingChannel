@@ -4,11 +4,14 @@ import { useState } from 'react';
 import Link from 'next/link';
 import DemandCurve from '@/components/charts/DemandCurve';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
+import NewBookingModal from '@/components/bookings/NewBookingModal';
 import DateRangeModal from '@/components/admin/DateRangeModal';
 import { useDateRangeModal } from '@/hooks/useDateRangeModal';
-import { Calendar } from 'lucide-react';
+import { Calendar, Plus } from 'lucide-react';
 import ExemptionsPanel from '../_components/ExemptionsPanel';
 import { BookingHighlightIcon } from '@/components/bookings/BookingHighlightIcon';
+import { Button } from '@/components/ui/button';
+import { useRouter } from 'next/navigation';
 
 interface DashboardClientProps {
   user: any;
@@ -48,7 +51,9 @@ export default function DashboardClient({
   todayDepartures,
   demandCurveCapacityByDate
 }: DashboardClientProps) {
+  const router = useRouter();
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
+  const [newBookingOpen, setNewBookingOpen] = useState(false);
   const { isOpen, currentDateRange, openModal, closeModal, handleDateRangeChange } = useDateRangeModal();
 
   const handleBookingClick = (booking: any) => {
@@ -58,12 +63,12 @@ export default function DashboardClient({
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
           <p className="text-gray-600">Welcome back, {user?.email}</p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="text-sm text-gray-500">
             {tenant?.name} • {tenant?.slug}
           </div>
@@ -72,6 +77,10 @@ export default function DashboardClient({
               {currentDateRange.from} to {currentDateRange.to}
             </div>
           )}
+          <Button onClick={() => setNewBookingOpen(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            Add booking
+          </Button>
           <button
             onClick={openModal}
             className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
@@ -310,11 +319,20 @@ export default function DashboardClient({
           open={!!selectedBookingId}
           onClose={() => setSelectedBookingId(null)}
           onBookingUpdated={() => {
-            // Refresh the page to get updated data
-            window.location.reload();
+            router.refresh();
           }}
         />
       )}
+
+      <NewBookingModal
+        tenantId={tenant.id}
+        open={newBookingOpen}
+        onClose={() => setNewBookingOpen(false)}
+        onBookingCreated={() => {
+          setNewBookingOpen(false);
+          router.refresh();
+        }}
+      />
 
       {/* Date Range Modal */}
       <DateRangeModal
