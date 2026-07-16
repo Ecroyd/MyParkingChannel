@@ -60,11 +60,11 @@ function getRowStyleClasses(
 
   if (section === 'arrivals') {
     if (s === 'no_show' || s === 'cancelled') {
-      rowBg = 'bg-red-600';
+      rowBg = 'bg-red-500';
       text = 'text-black [&_*]:!text-black';
     } else if (isArrivedKeyTaken) {
       rowBg = 'bg-yellow-400';
-      text = 'text-red-600 [&_*]:!text-red-600';
+      text = 'text-red-700 [&_*]:!text-red-700';
     } else if (isTakeKey) {
       rowBg = 'bg-yellow-400';
       text = 'text-black [&_*]:!text-black';
@@ -74,25 +74,25 @@ function getRowStyleClasses(
     }
   } else if (section === 'departures') {
     if (s === 'no_show') {
-      rowBg = 'bg-red-600';
+      rowBg = 'bg-red-500';
       text = 'text-black [&_*]:!text-black';
     } else if (isArrivedKeyTaken) {
       rowBg = 'bg-yellow-400';
-      text = 'text-red-600 [&_*]:!text-red-600';
+      text = 'text-red-700 [&_*]:!text-red-700';
     } else if (isTakeKey) {
       rowBg = 'bg-yellow-400';
       text = 'text-black [&_*]:!text-black';
     } else {
-      rowBg = 'bg-green-600';
+      rowBg = 'bg-green-500';
       text = 'text-black';
     }
   } else if (section === 'parked' || section === undefined) {
     if (s === 'no_show') {
-      rowBg = 'bg-red-600';
+      rowBg = 'bg-red-500';
       text = 'text-black [&_*]:!text-black';
     } else if (isArrivedKeyTaken) {
       rowBg = 'bg-yellow-400';
-      text = 'text-red-600 [&_*]:!text-red-600';
+      text = 'text-red-700 [&_*]:!text-red-700';
     } else if (isTakeKey) {
       rowBg = 'bg-yellow-400';
       text = 'text-black [&_*]:!text-black';
@@ -309,6 +309,9 @@ function TodayBookingRow({
             <span className="truncate">{booking.customer_name || '—'}</span>
           </div>
         </td>
+        <td className="px-2 py-2 text-sm align-middle cursor-pointer whitespace-nowrap" onClick={handleRowClick}>
+          <span className="font-mono text-xs font-medium tabular-nums">{booking.reference || '—'}</span>
+        </td>
         <td className="px-2 py-2 align-middle cursor-pointer" onClick={handleRowClick}>
           <PlateBadge plate={booking.plate} />
         </td>
@@ -326,7 +329,7 @@ function TodayBookingRow({
 
       {/* Mobile card-style row */}
       <tr className={cn(rowClass, 'md:hidden')} tabIndex={0} onKeyDown={handleQuickKey}>
-        <td colSpan={7} className="px-3 py-3 align-middle" onClick={handleRowClick}>
+        <td colSpan={8} className="px-3 py-3 align-middle" onClick={handleRowClick}>
           <div className="flex flex-col gap-2">
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
@@ -345,6 +348,8 @@ function TodayBookingRow({
                 <div className="min-w-0">
                   <div className="font-medium truncate">{booking.customer_name || '—'}</div>
                   <div className="text-xs opacity-80">
+                    <span className="font-mono">{booking.reference || '—'}</span>
+                    {' · '}
                     {timeKindLabel} {timeLabel}
                     {' · '}
                     Expected departure {expectedDepartureLabel}

@@ -46,6 +46,39 @@ describe('parkedState', () => {
     expect(isCurrentlyParked(b)).toBe(true);
   });
 
+  it('does not count take_key without an arrival timestamp', () => {
+    expect(
+      isCurrentlyParked({
+        status: 'reserved',
+        gate_status: GATE_STATUS.TAKE_KEY,
+        anpr_status: 'not_arrived',
+      })
+    ).toBe(false);
+  });
+
+  it('counts arrived_key_taken with an open arrival', () => {
+    expect(
+      isCurrentlyParked({
+        status: 'checked_in',
+        gate_status: GATE_STATUS.ARRIVED_KEY_TAKEN,
+        arrived_at: '2026-07-13T10:00:00Z',
+        anpr_status: 'on_site',
+      })
+    ).toBe(true);
+  });
+
+  it('a departed timestamp overrides stale on-site state', () => {
+    expect(
+      isCurrentlyParked({
+        status: 'checked_in',
+        gate_status: GATE_STATUS.ARRIVED_KEY_TAKEN,
+        anpr_status: 'on_site',
+        arrived_at: '2026-07-02T09:46:00Z',
+        departed_at: '2026-07-16T13:27:00Z',
+      })
+    ).toBe(false);
+  });
+
   it('prefers return_flight_number for departures display', () => {
     expect(departureFlightDisplay({ return_flight_number: 'BA123', flight_number: 'BA999' })).toBe('BA123');
     expect(departureFlightDisplay({ return_flight_number: null, flight_number: 'BA999' })).toBe('BA999');

@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { createServerClient } from '@/lib/supabase/server';
+import { applyBookingOccupancyAction } from '@/lib/ops/occupancyAction';
 
 /**
  * Normalize plate: uppercase, remove non-alphanumeric
@@ -70,7 +71,7 @@ export async function PATCH(
     // Fetch the booking
     const { data: booking, error: bookingError } = await adminClient
       .from('bookings')
-      .select('id, tenant_id, plate, start_at, end_at, checked_in_at, checked_out_at, anpr_status')
+      .select('id, tenant_id, plate, start_at, end_at, checked_in_at, checked_out_at, arrived_at, departed_at, anpr_status')
       .eq('id', bookingId)
       .eq('tenant_id', event.tenant_id)
       .single();
@@ -108,38 +109,19 @@ export async function PATCH(
       );
     }
 
-    // Update booking based on direction
-    const bookingUpdates: any = {};
-
-    if (event.direction === 'in') {
-      // Set arrival
-      bookingUpdates.checked_in_at = eventAt.toISOString();
-      bookingUpdates.anpr_status = 'on_site';
-      // Clear departure if it was set
-      if (booking.checked_out_at) {
-        bookingUpdates.checked_out_at = null;
-      }
-    } else if (event.direction === 'out') {
-      // Set departure
-      bookingUpdates.checked_out_at = eventAt.toISOString();
-      bookingUpdates.anpr_status = 'departed';
-      // Ensure checked_in_at is set if missing
-      if (!booking.checked_in_at) {
-        bookingUpdates.checked_in_at = eventAt.toISOString();
-      }
-    }
-
-    // Update booking if there are updates
-    if (Object.keys(bookingUpdates).length > 0) {
-      const { error: updateBookingError } = await adminClient
-        .from('bookings')
-        .update(bookingUpdates)
-        .eq('id', bookingId)
-        .eq('tenant_id', event.tenant_id);
-
-      if (updateBookingError) {
-        console.error('[ANPR Events Resolve] Update booking error:', updateBookingError);
-        // Continue anyway - event is already updated
+    // Occupancy ledger + full departure/arrival state (idempotent)
+    if (event.direction === 'in' || event.direction === 'out') {
+      try {
+        await applyBookingOccupancyAction({
+          bookingId,
+          action: event.direction === 'in' ? 'arrived' : 'departed',
+          actorUserId: user.id,
+          source: 'correction',
+          eventAt: eventAt.toISOString(),
+          metadata: { anprEventId: eventId, correctedPlate: correctedPlate ?? null },
+        });
+      } catch (err) {
+        console.error('[ANPR Events Resolve] Occupancy action failed:', err);
       }
     }
 

@@ -34,6 +34,7 @@ import {
 } from '@/lib/ops/parkedState';
 import { formatBookingDateTimeForTenant } from '@/lib/datetime/parse';
 import { createClient } from '@/lib/supabase/client';
+import OccupancyTimelineChart from '@/components/charts/OccupancyTimelineChart';
 
 import { BookingHighlightCode } from '@/types/bookings';
 
@@ -114,9 +115,14 @@ export default function TodayServerClient({
   const [parkedSheetOpen, setParkedSheetOpen] = useState(false);
   const [currentDateRange, setCurrentDateRange] = useState(initialDateRange);
   const [queryError, setQueryError] = useState(initialQueryError);
+  const [occupancyRefreshKey, setOccupancyRefreshKey] = useState(0);
   const loadedRangeRef = useRef(`${initialDateRange.from}:${initialDateRange.to}`);
   const bulkToolbarRef = useRef<HTMLDivElement>(null);
   const tenantTz = tenant.timezone || 'Europe/London';
+
+  const bumpOccupancyRefresh = useCallback(() => {
+    setOccupancyRefreshKey((k) => k + 1);
+  }, []);
 
   function compensateBulkToolbarScroll(delta: number) {
     if (delta === 0) return;
@@ -216,13 +222,27 @@ export default function TodayServerClient({
       case 'no_show':
         return { gate_status: GATE_STATUS.NO_SHOW, highlight_code: 'none', ops_hidden: false, ops_hidden_reason: null };
       case 'cancelled':
-        return { gate_status: GATE_STATUS.CANCELLED, status: 'cancelled', checked_in_at: null, checked_out_at: null, highlight_code: 'none', ops_hidden: true, ops_hidden_reason: 'cancelled' };
+        return {
+          gate_status: GATE_STATUS.CANCELLED,
+          status: 'cancelled',
+          arrived_at: null,
+          departed_at: null,
+          checked_in_at: null,
+          checked_out_at: null,
+          highlight_code: 'none',
+          ops_hidden: true,
+          ops_hidden_reason: 'cancelled',
+        };
       default:
         return {};
     }
   };
 
-  const updateBookingStatus = async (bookingId: string, action: OpsAction): Promise<boolean> => {
+  const updateBookingStatus = async (
+    bookingId: string,
+    action: OpsAction,
+    opts?: { operationId?: string; source?: 'manual' | 'bulk' }
+  ): Promise<boolean> => {
     const booking = findBookingById(bookingId);
     if (!booking || pendingByIdRef.current[bookingId]) return false;
 
@@ -238,7 +258,12 @@ export default function TodayServerClient({
       const res = await fetch('/api/admin/bookings/ops-status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bookingId, action }),
+        body: JSON.stringify({
+          bookingId,
+          action,
+          operationId: opts?.operationId,
+          source: opts?.source ?? 'manual',
+        }),
       });
       const data = (await parseJsonFromResponse(res)) as { booking?: Partial<Booking>; error?: string };
       if (!res.ok || !data.booking) {
@@ -247,6 +272,7 @@ export default function TodayServerClient({
 
       patchBookingInLists(bookingId, data.booking);
       logOpsClick('save success', { bookingId, action });
+      bumpOccupancyRefresh();
       return true;
     } catch (err: unknown) {
       restoreBookingInLists(bookingId, snapshot);
@@ -401,6 +427,7 @@ export default function TodayServerClient({
         () => {
           loadedRangeRef.current = '';
           void fetchDataForDateRange(currentDateRange.from, currentDateRange.to);
+          bumpOccupancyRefresh();
         }
       )
       .subscribe();
@@ -408,7 +435,7 @@ export default function TodayServerClient({
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [tenant.id, currentDateRange.from, currentDateRange.to, fetchDataForDateRange]);
+  }, [tenant.id, currentDateRange.from, currentDateRange.to, fetchDataForDateRange, bumpOccupancyRefresh]);
 
   const handleDateRangeChange = useCallback((dateRange: { from: string; to: string }) => {
     setCurrentDateRange(dateRange);
@@ -499,10 +526,11 @@ export default function TodayServerClient({
     arrivalsRemaining: visibleArrivals.filter(isArrivalRemaining).length,
     departuresRemaining: visibleDepartures.filter(isDepartureRemaining).length,
     keysToTake: visibleArrivals.filter(isKeysToTakeRemaining).length,
-    currentlyParked: liveParked.length,
-  }), [visibleArrivals, visibleDepartures, liveParked]);
+    // Shared occupancy resolver (chart + KPI), not liveParked.length
+    currentlyParked: kpis.checkedIn,
+  }), [visibleArrivals, visibleDepartures, kpis.checkedIn]);
 
-  const capacityRemaining = Math.max(0, (kpis.capacityLeft + kpis.checkedIn) - liveParked.length);
+  const capacityRemaining = Math.max(0, kpis.capacityLeft);
 
   const sortedCurrentlyParked = useMemo(() => {
     return sortBookings(liveParked, parkedSort, 'start_at');
@@ -546,7 +574,18 @@ export default function TodayServerClient({
       return;
     }
 
-    const results = await Promise.all(ids.map(async (id) => ({ id, ok: await updateBookingStatus(id, action) })));
+    const batchId = crypto.randomUUID();
+    const results = await Promise.all(
+      ids.map(async (id) => {
+        // Deterministic-ish operation id per booking within this bulk batch for retry safety
+        const operationId = crypto.randomUUID();
+        void batchId;
+        return {
+          id,
+          ok: await updateBookingStatus(id, action, { operationId, source: 'bulk' }),
+        };
+      })
+    );
     const failed = results.filter((result) => !result.ok);
     setSelectedBookingIds((prev) => {
       const next = new Set(prev);
@@ -664,6 +703,17 @@ export default function TodayServerClient({
             skipInitialFetch
           />
         </div>
+
+        <OccupancyTimelineChart
+          tenantId={tenant.id}
+          from={currentDateRange.from}
+          to={currentDateRange.to}
+          tenantTimezone={tenantTz}
+          refreshKey={occupancyRefreshKey}
+          onCurrentOccupancy={(count) => {
+            setKpis((prev) => ({ ...prev, checkedIn: count }));
+          }}
+        />
 
         {queryError && (
           <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -864,6 +914,7 @@ export default function TodayServerClient({
                   <tr>
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Time</th>
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Reference</th>
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap min-w-[8.5rem]">Number plate</th>
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Telephone</th>
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Expected departure</th>
@@ -876,7 +927,7 @@ export default function TodayServerClient({
                 <tbody className="bg-white divide-y divide-gray-200">
                   {groupedByDay.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                      <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                         <div>No arrivals or departures in this period</div>
                         {(arrivals.length > 0 || departures.length > 0) && (
                           <div className="mt-2 text-sm text-amber-700">
@@ -902,7 +953,7 @@ export default function TodayServerClient({
                         <React.Fragment key={dayGroup.date}>
                           {/* Date Header */}
                           <tr className="bg-gray-100 border-t-2 border-gray-300">
-                            <td colSpan={7} className="px-4 py-3">
+                            <td colSpan={8} className="px-4 py-3">
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                   <span className="text-sm font-semibold text-gray-700">
@@ -951,7 +1002,7 @@ export default function TodayServerClient({
                               {dayGroup.arrivals.length > 0 && (
                                 <>
                                   <tr className="bg-blue-50/40 border-t border-blue-100">
-                                    <td colSpan={7} className="py-1">
+                                    <td colSpan={8} className="py-1">
                                       <div className="flex items-center justify-center relative py-2">
                                         <span className="inline-flex items-center rounded-full bg-blue-600 text-white px-4 py-1 text-sm font-semibold uppercase">
                                           Arrivals
@@ -978,7 +1029,7 @@ export default function TodayServerClient({
                               {dayGroup.departures.length > 0 && (
                                 <>
                                   <tr className="bg-green-600 border-t border-green-700">
-                                    <td colSpan={7} className="py-1">
+                                    <td colSpan={8} className="py-1">
                                       <div className="flex items-center justify-center relative py-2">
                                         <span className="inline-flex items-center rounded-full bg-green-500 text-white px-4 py-1 text-sm font-semibold uppercase">
                                           Departures
@@ -1046,6 +1097,7 @@ export default function TodayServerClient({
                 <tr>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Reference</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase min-w-[8.5rem]">Number plate</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Telephone</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Expected departure</th>
@@ -1056,7 +1108,7 @@ export default function TodayServerClient({
               <tbody className="bg-white divide-y divide-gray-200">
                 {sortedCurrentlyParked.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                       No cars currently parked
                     </td>
                   </tr>

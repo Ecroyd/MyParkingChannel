@@ -4,9 +4,12 @@ import { getDateRangeForQuery, tenantTodayDateKey } from '@/lib/timezone';
 import { TODAY_BOOKING_SELECT, type TodayBookingRow } from '@/lib/today/bookingSelect';
 import {
   isCancelledBooking,
-  isCurrentlyParked,
   isNoShowBooking,
 } from '@/lib/ops/parkedState';
+import {
+  getCurrentOccupancy,
+  isAuthoritativeOnSite,
+} from '@/lib/analytics/occupancyTimeseries';
 import { GATE_STATUS } from '@/lib/gateStatus';
 
 export type TodayKpis = {
@@ -29,6 +32,14 @@ export type TodayPageData = {
   arrivals: TodayBookingRow[];
   departures: TodayBookingRow[];
   currentlyParked: TodayBookingRow[];
+  occupancyDataQuality?: {
+    missingArrivalDespiteOnSite: number;
+    openButCancelledOrNoShow: number;
+    departureBeforeArrival: number;
+    duplicateActiveArrivalEvents: number;
+    negativeOccupancyDetected: boolean;
+  };
+  occupancyMode?: string;
   rangeFrom: string;
   rangeTo: string;
   queryError?: string;
@@ -77,6 +88,7 @@ export async function loadTodayPageData(opts: LoadOpts): Promise<TodayPageData> 
     rangeBookingsResult,
     todayCapacity,
     tenantResult,
+    currentOccupancy,
   ] = await Promise.all([
     withRangeEnd(
       adminClient
@@ -98,8 +110,7 @@ export async function loadTodayPageData(opts: LoadOpts): Promise<TodayPageData> 
       rangeEnd
     ).order('end_at', { ascending: false }),
 
-    // Live operational parked: actually arrived, not departed.
-    // Prefer gate_status path; also pull legacy timestamp rows.
+    // Candidate set for the parked sheet — KPI count comes from getCurrentOccupancy.
     adminClient
       .from('bookings')
       .select(TODAY_BOOKING_SELECT)
@@ -134,6 +145,8 @@ export async function loadTodayPageData(opts: LoadOpts): Promise<TodayPageData> 
           .select('id, name, slug, timezone, default_capacity')
           .eq('id', tenantId)
           .single(),
+
+    getCurrentOccupancy(tenantId),
   ]);
 
   const queryErrors = [
@@ -158,10 +171,10 @@ export async function loadTodayPageData(opts: LoadOpts): Promise<TodayPageData> 
   const operationalDepartures = departures.filter(
     (b) => !isCancelledBooking(b) && !isNoShowBooking(b)
   );
-  // Authoritative resolver — query is a candidate set; never disagree with isCurrentlyParked.
-  const operationalCurrentlyParked = currentlyParkedRaw.filter(isCurrentlyParked);
+  // Sheet list uses authoritative on-site; KPI uses shared resolver.
+  const operationalCurrentlyParked = currentlyParkedRaw.filter(isAuthoritativeOnSite);
 
-  const checkedInCount = operationalCurrentlyParked.length;
+  const checkedInCount = currentOccupancy.occupiedCount;
   const totalCapacity = todayCapacity ?? 0;
   const totalRevenue =
     rangeBookingsResult.data?.reduce((sum, b) => sum + (b.money_received || 0), 0) ?? 0;
@@ -178,6 +191,8 @@ export async function loadTodayPageData(opts: LoadOpts): Promise<TodayPageData> 
     arrivals: operationalArrivals,
     departures: operationalDepartures,
     currentlyParked: operationalCurrentlyParked,
+    occupancyDataQuality: currentOccupancy.dataQuality,
+    occupancyMode: currentOccupancy.mode,
     rangeFrom: fromDate,
     rangeTo: toDate,
     queryError: queryErrors.length > 0 ? queryErrors.join('; ') : undefined,

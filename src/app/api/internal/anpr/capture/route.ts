@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import crypto from 'crypto';
+import { applyBookingOccupancyAction } from '@/lib/ops/occupancyAction';
 
 /**
  * Simple decryption helper (matches pattern from other integrations)
@@ -289,39 +290,19 @@ export async function POST(req: NextRequest) {
       if (matchedBooking) {
         bookingId = matchedBooking.id;
 
-        // Update booking ops fields
-        const bookingUpdates: any = {};
-
-        if (body.direction === 'in') {
-          // Arrival: set arrived_at if null
-          if (!matchedBooking.arrived_at) {
-            bookingUpdates.arrived_at = occurredAtIso;
-          }
-          bookingUpdates.ops_status = 'arrived';
-        } else {
-          // Departure: set departed_at if null
-          if (!matchedBooking.departed_at) {
-            bookingUpdates.departed_at = occurredAtIso;
-          }
-          bookingUpdates.ops_status = 'departed';
+        try {
+          await applyBookingOccupancyAction({
+            bookingId: matchedBooking.id,
+            action: body.direction === 'in' ? 'arrived' : 'departed',
+            source: 'anpr',
+            eventAt: occurredAtIso,
+            metadata: { provider: 'internal_capture' },
+          });
+          result = 'allow';
+          reason = null;
+        } catch (err) {
+          console.error('[ANPR Capture] Occupancy action failed:', err);
         }
-
-        // Update booking if there are updates
-        if (Object.keys(bookingUpdates).length > 0) {
-          const { error: updateBookingError } = await supabase
-            .from('bookings')
-            .update(bookingUpdates)
-            .eq('id', matchedBooking.id);
-
-          if (updateBookingError) {
-            console.error('[ANPR Capture] Failed to update booking:', updateBookingError);
-            // Continue anyway - we still want to update the gate_event
-          }
-        }
-
-        // Update gate_events with booking match info
-        result = 'allow';
-        reason = null;
       }
     }
 

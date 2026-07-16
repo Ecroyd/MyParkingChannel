@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { headers } from 'next/headers'
 import { zonedTimeToUtc } from 'date-fns-tz'
 import { parseISO } from 'date-fns'
+import { applyBookingOccupancyAction } from '@/lib/ops/occupancyAction'
 
 export async function POST(request: Request) {
   const supabase = await createAdminClient()
@@ -82,31 +83,24 @@ export async function POST(request: Request) {
       // Check-in: within 30 minutes of start time
       result = 'allow'
       reason = 'Valid check-in'
-      
-      // Update booking status, timestamps, and gate_status
-      await supabase
-        .from('bookings')
-        .update({ 
-          status: 'checked_in',
-          checked_in_at: eventTime.toISOString(),
-          checked_out_at: null,
-          gate_status: 'arrived'
-        })
-        .eq('id', booking.id)
+      await applyBookingOccupancyAction({
+        bookingId: booking.id,
+        action: 'arrived',
+        source: 'anpr',
+        eventAt: eventTime.toISOString(),
+        metadata: { gateDeviceId: device.id, mode: 'anpr' },
+      })
     } else if (booking.status === 'checked_in' && timeToEnd <= 30) {
       // Check-out: within 30 minutes of end time
       result = 'allow'
       reason = 'Valid check-out'
-      
-      // Update booking status, timestamps, and gate_status
-      await supabase
-        .from('bookings')
-        .update({ 
-          status: 'checked_out',
-          checked_out_at: eventTime.toISOString(),
-          gate_status: 'departed'
-        })
-        .eq('id', booking.id)
+      await applyBookingOccupancyAction({
+        bookingId: booking.id,
+        action: 'departed',
+        source: 'anpr',
+        eventAt: eventTime.toISOString(),
+        metadata: { gateDeviceId: device.id, mode: 'anpr' },
+      })
     } else if (booking.status === 'checked_in') {
       result = 'allow'
       reason = 'Already checked in'

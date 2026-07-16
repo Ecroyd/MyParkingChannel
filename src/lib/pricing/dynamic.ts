@@ -184,3 +184,14 @@ export async function computeOccupancyPercent(opts: {
   return maxBookedDemandOccupancyPercent(days);
 }
 
+/**
+ * Live physical occupancy count for capacity / same-instant KPIs.
+ * Uses the same authoritative resolver as Today Currently Parked and Actual Now.
+ * Day-horizon dynamic pricing thresholds still use booked demand via computeOccupancyPercent.
+ */
+export async function getCurrentPhysicalOccupancyCount(tenantId: string): Promise<number> {
+  const { getCurrentOccupancy } = await import('@/lib/analytics/occupancyTimeseries');
+  const result = await getCurrentOccupancy(tenantId);
+  return result.occupiedCount;
+}
+

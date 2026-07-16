@@ -11,6 +11,7 @@ import {
   generateCameraId,
 } from '@/lib/anpr/videofit-utils';
 import { getDirectionForVideofit } from '@/lib/anpr/camera-mapping';
+import { applyBookingOccupancyAction } from '@/lib/ops/occupancyAction';
 
 /**
  * Normalize plate: uppercase, remove non-alphanumeric
@@ -226,7 +227,7 @@ export async function POST(req: NextRequest) {
       // Find candidate bookings for this tenant + plate
       const { data: candidateBookings } = await supabase
         .from('bookings')
-        .select('id, plate, start_at, end_at, checked_in_at, checked_out_at, anpr_status')
+        .select('id, plate, start_at, end_at, checked_in_at, checked_out_at, arrived_at, departed_at, anpr_status')
         .eq('tenant_id', tenantId)
         .neq('status', 'cancelled')
         .order('start_at', { ascending: true });
@@ -275,33 +276,24 @@ export async function POST(req: NextRequest) {
           matchedBookingId = bestMatch.id;
           matchStatus = 'matched';
 
-          // Update booking based on direction
-          const bookingUpdates: any = {};
-
+          // Occupancy ledger + booking state (idempotent)
           if (direction === 'in') {
-            // Set arrival
-            bookingUpdates.checked_in_at = eventAtDate.toISOString();
-            bookingUpdates.anpr_status = 'on_site';
-            // Clear departure if it was set
-            if (bestMatch.checked_out_at) {
-              bookingUpdates.checked_out_at = null;
-            }
+            await applyBookingOccupancyAction({
+              bookingId: bestMatch.id,
+              action: 'arrived',
+              source: 'anpr',
+              eventAt: eventAtDate.toISOString(),
+              metadata: { provider: 'videofit', anprEventId: newEvent.id },
+            });
           } else if (direction === 'out') {
-            // Set departure
-            bookingUpdates.checked_out_at = eventAtDate.toISOString();
-            bookingUpdates.anpr_status = 'departed';
-            // Ensure checked_in_at is set if missing
-            if (!bestMatch.checked_in_at) {
-              bookingUpdates.checked_in_at = eventAtDate.toISOString();
-            }
+            await applyBookingOccupancyAction({
+              bookingId: bestMatch.id,
+              action: 'departed',
+              source: 'anpr',
+              eventAt: eventAtDate.toISOString(),
+              metadata: { provider: 'videofit', anprEventId: newEvent.id },
+            });
           }
-
-          // Update booking
-          await supabase
-            .from('bookings')
-            .update(bookingUpdates)
-            .eq('id', bestMatch.id)
-            .eq('tenant_id', tenantId);
 
           // Update event status
           await supabase
