@@ -46,6 +46,11 @@ const PLATFORM_BY_CHANNEL: Record<string, ImportPlatformAttribution> = {
     platformId: "parkvia",
     parserKey: "parkvia_email_body",
   },
+  PARKCLOUD_EMAIL: {
+    bookingSource: "parkvia",
+    platformId: "parkvia",
+    parserKey: "parkvia_email_body",
+  },
   HOLIDAY_EXTRAS_EXTZ10: {
     bookingSource: "holiday_extras",
     platformId: "holiday_extras_extz10",

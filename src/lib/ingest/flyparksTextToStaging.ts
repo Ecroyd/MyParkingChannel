@@ -138,9 +138,10 @@ export function normalizeFlyparksEmailText(input: string | null | undefined): st
 
   text = text
     .replace(new RegExp(`\\b(${LABEL_PATTERN})\\s*:`, "gi"), "\n$1:")
-    .replace(/\b(YOUR BOOKING REFERENCE)\s+([A-Z0-9-]{3,20})\b/gi, "\n$1: $2")
-    .replace(/\b(Drop off date|Drop off time|Pick up date|Pick up time)\s+(\d{1,2}\/\d{1,2}\/\d{2,4}|\d{1,2}:\d{2})\b/gi, "\n$1: $2")
-    .replace(/\b(Car Parking|Total Cost)\s+(£|Â£)?\s*([0-9]+(?:\.[0-9]{1,2})?)\b/gi, "\n$1: £$3");
+    .replace(/\b(YOUR BOOKING REFERENCE):?\s+([A-Z0-9-]{3,20})\b/gi, "\n$1: $2")
+    .replace(/\b(Drop off date|Drop off time|Pick up date|Pick up time):?\s+(\d{1,2}\/\d{1,2}\/\d{2,4}|\d{1,2}:\d{2})\b/gi, "\n$1: $2")
+    .replace(/\b(Car Parking|Total Cost):?\s+(£|Â£)?\s*([0-9]+(?:\.[0-9]{1,2})?)\b/gi, "\n$1: £$3")
+    .replace(/\b(Return flight number):?\s*$/gim, "\n$1: ");  // Handle empty return flight
 
   return text
     .split("\n")
@@ -158,6 +159,11 @@ export function looksLikeFlyparksDirectEmail(subject: string | null | undefined,
   ).length;
 
   if (/flyparks/i.test(subject ?? "") && /(payment successful|booking confirmation)/i.test(subject ?? "")) {
+    return true;
+  }
+
+  // New format: ***BOOKING RECEIPT***
+  if (haystack.includes("***booking receipt***") || haystack.includes("booking receipt")) {
     return true;
   }
 
@@ -198,9 +204,16 @@ function extractTime(value: string | null): string | null {
   return value.match(/\b(\d{1,2}:\d{2})\b/)?.[1] ?? null;
 }
 
+const CUSTOMER_TITLES = /^(MR|MRS|MS|MISS|DR|SIR|MADAM|PROF|REV)\.?\s+/i;
+
 function extractDearName(text: string): string | null {
   const m = text.match(/\bDear\s+([A-Za-z][A-Za-z' -]{0,40}?)\s*,/i);
-  return m?.[1]?.trim() || null;
+  let name = m?.[1]?.trim() || null;
+  if (name) {
+    // Strip title prefix but preserve hyphenated surnames
+    name = name.replace(CUSTOMER_TITLES, "").trim();
+  }
+  return name || null;
 }
 
 function extractForwardedCustomerEmail(text: string): string | null {
@@ -278,9 +291,21 @@ function parseVehicleDetails(value: string | null): {
   registration: string | null;
 } {
   if (!value) return { make: null, model: null, colour: null, registration: null };
-  const tokens = value.trim().split(/\s+/).filter(Boolean);
+  
+  // Remove filler punctuation (dots, dashes, underscores) that appear before the plate
+  const cleaned = value.replace(/[.\-_\s]+/g, " ").trim();
+  const tokens = cleaned.split(/\s+/).filter(Boolean);
+  
   const plateIndex = tokens.findLastIndex((token) => normalizeUkPlate(token) !== null);
-  if (plateIndex < 0) return { make: null, model: value.trim() || null, colour: null, registration: null };
+  if (plateIndex < 0) {
+    // Try harder: look for plate pattern in original string
+    const plateMatch = value.match(/\b([A-Z]{2}\d{2}\s?[A-Z]{3})\b/i);
+    if (plateMatch) {
+      const registration = normalizeUkPlate(plateMatch[1]);
+      return { make: null, model: null, colour: null, registration };
+    }
+    return { make: null, model: value.trim() || null, colour: null, registration: null };
+  }
 
   const registration = normalizeUkPlate(tokens[plateIndex]);
   const beforePlate = tokens.slice(0, plateIndex);
@@ -373,7 +398,9 @@ export function flyparksTextToStaging(rawText: string): FlyparksStaging {
   const vehicleRegistration =
     normalizeUkPlate(pickLabel(text, ["Vehicle registration", "Vehicle Registration"])) ??
     vehicleDetails.registration;
-  const totalCostRaw = pickLabel(text, ["Total Cost", "Parking Cost", "Car Parking", "Product Base Cost"]);
+  
+  // Prefer Total Cost, fall back to Car Parking
+  const totalCostRaw = pickLabel(text, ["Total Cost"]) ?? pickLabel(text, ["Car Parking", "Parking Cost", "Product Base Cost"]);
   const totalPrice = parseMoney(totalCostRaw);
 
   const staging: FlyparksStaging = {

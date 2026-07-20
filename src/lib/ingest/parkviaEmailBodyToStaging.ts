@@ -45,8 +45,12 @@ export function looksLikeParkViaEmail(opts: {
   const body = opts.body ?? "";
   return (
     /parkvia/i.test(from) ||
+    /parkcloud/i.test(from) ||
     /ParkVia\s*-\s*Notification/i.test(subject) ||
-    /ParkVia\s*-\s*New Booking Notification/i.test(body)
+    /ParkCloud\s*-\s*Notification/i.test(subject) ||
+    /ParkVia\s*-\s*New Booking Notification/i.test(body) ||
+    /ParkCloud\s*-\s*New Booking Notification/i.test(body) ||
+    (/park(via|cloud)/i.test(body) && /booking\s+ref/i.test(body) && /registration\s+number/i.test(body))
   );
 }
 

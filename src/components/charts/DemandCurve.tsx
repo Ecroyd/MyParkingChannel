@@ -120,18 +120,21 @@ export default function DemandCurve({
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
 
+    const addDays = (dateStr: string, days: number): string => {
+      const date = new Date(dateStr + 'T12:00:00Z');
+      date.setUTCDate(date.getUTCDate() + days);
+      return date.toISOString().split('T')[0];
+    };
+
     switch (dateRange) {
       case 'next7days': {
-        const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
-        return { from: todayStr, to: nextWeek.toISOString().split('T')[0] };
+        return { from: todayStr, to: addDays(todayStr, 6) };
       }
       case 'next30days': {
-        const nextMonth = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
-        return { from: todayStr, to: nextMonth.toISOString().split('T')[0] };
+        return { from: todayStr, to: addDays(todayStr, 29) };
       }
       case 'next90days': {
-        const nextQuarter = new Date(today.getTime() + 90 * 24 * 60 * 60 * 1000);
-        return { from: todayStr, to: nextQuarter.toISOString().split('T')[0] };
+        return { from: todayStr, to: addDays(todayStr, 89) };
       }
       case 'custom':
         if (customStartDate && customEndDate && new Date(customStartDate) <= new Date(customEndDate)) {
@@ -140,13 +143,11 @@ export default function DemandCurve({
         break;
       case 'next14days':
       default: {
-        const nextTwoWeeks = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
-        return { from: todayStr, to: nextTwoWeeks.toISOString().split('T')[0] };
+        return { from: todayStr, to: addDays(todayStr, 13) };
       }
     }
 
-    const fallback = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
-    return { from: todayStr, to: fallback.toISOString().split('T')[0] };
+    return { from: todayStr, to: addDays(todayStr, 13) };
   };
 
   const { from, to } = getDateRange();
@@ -157,7 +158,8 @@ export default function DemandCurve({
       try {
         const debugParam = showDebug ? '&debug=1' : '';
         const response = await fetch(
-          `/api/analytics/demand-curve?from=${from}&to=${to}&tenant_id=${tenantId}${debugParam}`
+          `/api/analytics/demand-curve?from=${from}&to=${to}&tenant_id=${tenantId}${debugParam}`,
+          { cache: 'no-store' }
         );
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
@@ -183,7 +185,8 @@ export default function DemandCurve({
         try {
           const debugParam = showDebug ? '&debug=1' : '';
           const response = await fetch(
-            `/api/analytics/demand-curve?from=${from}&to=${to}&tenant_id=${tenantId}${debugParam}`
+            `/api/analytics/demand-curve?from=${from}&to=${to}&tenant_id=${tenantId}${debugParam}`,
+            { cache: 'no-store' }
           );
           if (!response.ok) return;
           const result = await response.json();
@@ -196,6 +199,31 @@ export default function DemandCurve({
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [from, to, tenantId, showDebug]);
+
+  // Refetch when component remounts (e.g., navigating back to dashboard from date range)
+  useEffect(() => {
+    const handleFocus = () => {
+      setLastUpdatedAt(null);
+      void (async () => {
+        try {
+          const debugParam = showDebug ? '&debug=1' : '';
+          const response = await fetch(
+            `/api/analytics/demand-curve?from=${from}&to=${to}&tenant_id=${tenantId}${debugParam}`,
+            { cache: 'no-store' }
+          );
+          if (!response.ok) return;
+          const result = await response.json();
+          setDays(result.days || []);
+          setLastUpdatedAt(new Date());
+        } catch {
+          /* ignore */
+        }
+      })();
+    };
+    
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
   }, [from, to, tenantId, showDebug]);
 
   const defaultCapacity = capacity ?? 100;
