@@ -50,23 +50,23 @@ const baseConfig = {
         value: isDev 
           ? `
             default-src 'self';
-            script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://va.vercel-scripts.com;
+            script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://va.vercel-scripts.com https://vercel.live;
             style-src 'self' 'unsafe-inline';
             img-src 'self' data: blob: https:;
             media-src 'self' https:;
             font-src 'self' data: https:;
-            connect-src 'self' https://*.supabase.co wss://*.supabase.co https://js.stripe.com https://api.stripe.com;
-            frame-src 'self' https://js.stripe.com;
+            connect-src 'self' https://*.supabase.co wss://*.supabase.co https://js.stripe.com https://api.stripe.com https://vercel.live;
+            frame-src 'self' https://js.stripe.com https://vercel.live;
           `.replace(/\n/g, " ") // remove line breaks for HTTP header
           : `
             default-src 'self';
-            script-src 'self' 'unsafe-inline' https://js.stripe.com https://va.vercel-scripts.com;
+            script-src 'self' 'unsafe-inline' https://js.stripe.com https://va.vercel-scripts.com https://vercel.live;
             style-src 'self' 'unsafe-inline';
             img-src 'self' data: blob: https:;
             media-src 'self' https:;
             font-src 'self' data: https:;
-            connect-src 'self' https://*.supabase.co wss://*.supabase.co https://js.stripe.com https://api.stripe.com;
-            frame-src 'self' https://js.stripe.com;
+            connect-src 'self' https://*.supabase.co wss://*.supabase.co https://js.stripe.com https://api.stripe.com https://vercel.live;
+            frame-src 'self' https://js.stripe.com https://vercel.live;
           `.replace(/\n/g, " ") // remove line breaks for HTTP header
       }
     ];
