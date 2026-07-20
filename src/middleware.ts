@@ -33,8 +33,15 @@ function normalizeHost(rawHost: string | null): string {
 function isPlatformHost(rawHost: string | null, normalizedHost: string): boolean {
   if (!rawHost && !normalizedHost) return true;
   // Check both raw and normalized against platform hosts
-  return PLATFORM_HOSTS.includes(rawHost ?? "") || 
-         PLATFORM_HOSTS.some(ph => normalizeHost(ph) === normalizedHost);
+  if (PLATFORM_HOSTS.includes(rawHost ?? "") || 
+      PLATFORM_HOSTS.some(ph => normalizeHost(ph) === normalizedHost)) {
+    return true;
+  }
+  // Treat all Vercel preview/deployment domains as platform hosts
+  if (normalizedHost.includes('.vercel.app')) {
+    return true;
+  }
+  return false;
 }
 
 export const config = {
