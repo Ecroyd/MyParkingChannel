@@ -300,7 +300,7 @@ export function parseHolidayExtrasExtz10Text(text: string): HolidayExtrasParseRe
     }
 
     const startAt = toLocalIsoFromYYMMDD(f[4], f[8], 1);
-    const endAt = toLocalIsoFromYYMMDD(f[9], f[15], 0);
+    const endAt = toLocalIsoFromYYMMDD(f[9], f[14], 0);
     if (!startAt) {
       stats.skipped_invalid_date++;
       continue;
@@ -311,7 +311,7 @@ export function parseHolidayExtrasExtz10Text(text: string): HolidayExtrasParseRe
     const initial = trim(f[6]);
     const lastName = trim(f[3]);
     const customerName = [title, initial, lastName].filter(Boolean).join(" ") || null;
-    const vehicleReg = normalizeReg(f[17]);
+    const vehicleReg = normalizeReg(f[15]);
     const rawFields = Object.fromEntries(f.map((value, index) => [String(index), value]));
 
     bookings.push({
@@ -321,13 +321,13 @@ export function parseHolidayExtrasExtz10Text(text: string): HolidayExtrasParseRe
       start_at: startAt,
       end_at: endAt ?? startAt,
       vehicle_registration: vehicleReg,
-      vehicle_make: trim(f[19]) || null,
-      vehicle_model: trim(f[20]) || null,
-      vehicle_colour: trim(f[21]) || null,
+      vehicle_make: trim(f[17]) || null,
+      vehicle_model: trim(f[18]) || null,
+      vehicle_colour: trim(f[19]) || null,
       customer_firstname: initial || null,
       customer_lastname: lastName || null,
       customer_email: null,
-      customer_phone: trim(f[22]) || null,
+      customer_phone: trim(f[20]) || null,
       outbound_flight_number: null,
       return_flight_number: null,
       total_price: price,
@@ -338,7 +338,7 @@ export function parseHolidayExtrasExtz10Text(text: string): HolidayExtrasParseRe
       notes: [
         "EXTZ10 import",
         f[7] ? `Passengers: ${trim(f[7])}` : null,
-        f[18] ? `Days parked: ${trim(f[18])}` : null,
+        f[16] ? `Days parked: ${trim(f[16])}` : null,
         f[11] ? `Product type code: ${trim(f[11])}` : null,
       ].filter(Boolean).join("; "),
       raw: {
@@ -356,10 +356,10 @@ export function parseHolidayExtrasExtz10Text(text: string): HolidayExtrasParseRe
         hotel_overnight_date: trim(f[4]) || null,
         arrival_time: trim(f[8]) || null,
         return_date: trim(f[9]) || null,
-        return_time: trim(f[15]) || null,
+        return_time: trim(f[14]) || null,
         product_code: trim(f[10]) || null,
         product_type_code: trim(f[11]) || null,
-        days_parked: trim(f[18]) || null,
+        days_parked: trim(f[16]) || null,
         vehicle_registration: vehicleReg,
       },
     });
