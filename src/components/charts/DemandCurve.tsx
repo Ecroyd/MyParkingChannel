@@ -201,31 +201,6 @@ export default function DemandCurve({
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [from, to, tenantId, showDebug]);
 
-  // Refetch when component remounts (e.g., navigating back to dashboard from date range)
-  useEffect(() => {
-    const handleFocus = () => {
-      setLastUpdatedAt(null);
-      void (async () => {
-        try {
-          const debugParam = showDebug ? '&debug=1' : '';
-          const response = await fetch(
-            `/api/analytics/demand-curve?from=${from}&to=${to}&tenant_id=${tenantId}${debugParam}`,
-            { cache: 'no-store' }
-          );
-          if (!response.ok) return;
-          const result = await response.json();
-          setDays(result.days || []);
-          setLastUpdatedAt(new Date());
-        } catch {
-          /* ignore */
-        }
-      })();
-    };
-    
-    window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
-  }, [from, to, tenantId, showDebug]);
-
   const defaultCapacity = capacity ?? 100;
   const effectiveCapacityByDate = capacityByDate ?? {};
 
