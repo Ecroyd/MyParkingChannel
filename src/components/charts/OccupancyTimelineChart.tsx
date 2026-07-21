@@ -228,12 +228,13 @@ export default function OccupancyTimelineChart({
     return () => abortRef.current?.abort();
   }, [fetchSeries, refreshKey]);
 
+  // Poll every 30 minutes instead of on every focus event
   useEffect(() => {
-    const onFocus = () => {
+    const intervalId = setInterval(() => {
       void fetchSeries();
-    };
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    }, 30 * 60 * 1000); // 30 minutes
+
+    return () => clearInterval(intervalId);
   }, [fetchSeries]);
 
   const daySpan = useMemo(() => {
