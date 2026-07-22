@@ -93,6 +93,8 @@ export type DirectionsBlock = ContentBlockBase & {
   heading?: string;
   body?: string;
   mapEnabled?: boolean;
+  imageUrl?: string;
+  imageAlt?: string;
 };
 
 export type HotelParkingBlock = ContentBlockBase & {
@@ -279,6 +281,8 @@ export function parseContentBlock(raw: unknown, index = 0): ContentBlock | null 
         heading: asString(raw.heading),
         body: asString(raw.body),
         mapEnabled: asBool(raw.mapEnabled ?? raw.map_enabled, true),
+        imageUrl: asString(raw.imageUrl) ?? asString(raw.image_url),
+        imageAlt: asString(raw.imageAlt) ?? asString(raw.image_alt),
       };
     case "hotel_parking":
       return {

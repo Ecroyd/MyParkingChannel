@@ -221,6 +221,8 @@ export default async function TenantHome({
           what3words={p?.what3words as string | null}
           latitude={(p?.latitude as string | number | null) ?? null}
           longitude={(p?.longitude as string | number | null) ?? null}
+          imageUrl={home.locationBlock?.imageUrl || home.heroImageUrl}
+          imageAlt={home.locationBlock?.imageAlt || home.heroImageAlt}
         />
       ) : null}
 

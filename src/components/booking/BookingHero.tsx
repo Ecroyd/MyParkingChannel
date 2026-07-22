@@ -18,6 +18,8 @@ interface BookingHeroProps {
   trustPoints?: string[];
   heroImageUrl?: string | null;
   heroImageAlt?: string | null;
+  /** When true (default for map-style assets), show image inset left instead of full-bleed. */
+  heroImageInset?: boolean;
 }
 
 export default function BookingHero({
@@ -31,6 +33,7 @@ export default function BookingHero({
   trustPoints,
   heroImageUrl,
   heroImageAlt,
+  heroImageInset = true,
 }: BookingHeroProps) {
   const style = (site?.booking_modal_style ?? "card").toLowerCase();
   const h1 = heading || "Airport parking made simple";
@@ -38,6 +41,8 @@ export default function BookingHero({
     tagline ||
     "Secure parking, straightforward pricing and an easy arrival experience.";
   const points = (trustPoints || []).slice(0, 3);
+  const showInsetMap = Boolean(heroImageUrl) && heroImageInset;
+  const showBleedBackground = Boolean(heroImageUrl) && !heroImageInset;
 
   if (style === "banner") {
     return (
@@ -52,13 +57,12 @@ export default function BookingHero({
       id="parking"
       className="relative overflow-hidden border-b border-slate-200/80"
     >
-      {/* Background: image + overlay, or brand tonal split */}
-      {heroImageUrl ? (
+      {showBleedBackground ? (
         <div className="pointer-events-none absolute inset-0">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={heroImageUrl}
-            alt={heroImageAlt || ""}
+            src={heroImageUrl!}
+            alt=""
             width={1920}
             height={1080}
             className="h-full w-full object-cover"
@@ -82,6 +86,20 @@ export default function BookingHero({
 
       <div className="relative mx-auto grid min-h-[560px] w-full max-w-[1240px] items-center gap-10 px-4 py-12 sm:px-6 sm:py-14 lg:grid-cols-[1.12fr_0.88fr] lg:gap-14 lg:px-8 lg:py-16">
         <div className="max-w-xl text-white lg:max-w-none">
+          {showInsetMap ? (
+            <div className="mb-7 overflow-hidden rounded-2xl border border-white/20 bg-white shadow-[0_12px_40px_rgba(0,0,0,0.28)]">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={heroImageUrl!}
+                alt={heroImageAlt || "Map showing car park location"}
+                width={900}
+                height={560}
+                className="aspect-[16/10] w-full object-cover object-center"
+                fetchPriority="high"
+              />
+            </div>
+          ) : null}
+
           {eyebrow ? (
             <p className="mb-4 text-xs font-semibold uppercase tracking-[0.16em] text-white/75 sm:text-[13px]">
               {eyebrow}
@@ -129,7 +147,6 @@ export default function BookingHero({
         </div>
       </div>
 
-      {/* businessName kept for a11y context; not rendered as a second logo/H1 */}
       <span className="sr-only">{businessName}</span>
     </section>
   );
