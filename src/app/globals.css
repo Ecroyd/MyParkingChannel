@@ -63,6 +63,29 @@ body {
     min-height: 100%;
   }
 
+  /* Public tenant marketing sites — calm, professional surface */
+  .tenant-site {
+    --tenant-ink: #0f172a;
+    --tenant-muted: #64748b;
+    --tenant-line: #e2e8f0;
+    --tenant-surface: #ffffff;
+    --tenant-canvas: #f8fafc;
+    --tenant-action: #0f172a;
+    --tenant-action-fg: #ffffff;
+    --tenant-secondary: #0284c7;
+    background: var(--tenant-canvas);
+    color: var(--tenant-ink);
+    font-feature-settings: "ss01" on, "kern" on;
+  }
+
+  .tenant-panel {
+    @apply rounded-xl border border-slate-200/90 bg-white;
+  }
+
+  .tenant-link {
+    @apply text-sky-800 underline-offset-4 transition-colors hover:text-sky-950 hover:underline;
+  }
+
   .card {
     @apply rounded-2xl p-5 shadow-md;
     @apply glass dark:glass-dark;

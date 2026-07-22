@@ -29,18 +29,34 @@ export async function getTenantStripeAccountId(tenantId: string) {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from('tenant_stripe')
-    .select('stripe_account_id, connected')
+    .select('stripe_account_id, connected, mode')
     .eq('tenant_id', tenantId)
     .maybeSingle();
 
   if (error) throw error;
-  return { accountId: data?.stripe_account_id ?? null, connected: !!data?.connected };
+  return {
+    accountId: data?.stripe_account_id ?? null,
+    connected: !!data?.connected,
+    mode: (data?.mode as 'test' | 'live' | null) ?? null,
+  };
 }
 
-export async function setTenantStripeAccountId(tenantId: string, accountId: string, connected = false) {
+export async function setTenantStripeAccountId(
+  tenantId: string,
+  accountId: string,
+  connected = false,
+  mode?: 'test' | 'live' | null,
+) {
   const supabase = await getServerSupabase();
+  const payload: Record<string, unknown> = {
+    tenant_id: tenantId,
+    stripe_account_id: accountId,
+    connected,
+    updated_at: new Date().toISOString(),
+  };
+  if (mode !== undefined) payload.mode = mode;
   const { error } = await supabase
     .from('tenant_stripe')
-    .upsert({ tenant_id: tenantId, stripe_account_id: accountId, connected, updated_at: new Date().toISOString() });
+    .upsert(payload);
   if (error) throw error;
 }

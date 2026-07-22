@@ -1,6 +1,14 @@
 // src/app/sites/[slug]/layout.tsx
 import type { Metadata, Viewport } from "next";
+import { Manrope } from "next/font/google";
 import { getSiteContext } from "@/lib/site";
+import { TenantIntegrations } from "@/components/site/TenantIntegrations";
+
+const tenantFont = Manrope({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-tenant",
+});
 
 export const dynamic = "force-dynamic";
 
@@ -36,17 +44,27 @@ export async function generateViewport({
   const ctx = await getSiteContext(resolvedParams.slug);
 
   if (!ctx) {
-    return { themeColor: "#0ea5e9" };
+    return { themeColor: "#0f172a" };
   }
 
   return {
-    themeColor: ctx.branding?.theme_color || "#0ea5e9",
+    themeColor: ctx.tenant.brand_primary || ctx.branding?.theme_color || "#0f172a",
   };
 }
 
-export default function SiteLayout({ children }: { children: React.ReactNode }) {
+export default async function SiteLayout({
+  children,
+  params,
+}: {
+  children: React.ReactNode;
+  params: Promise<{ slug: string }>;
+}) {
+  const { slug } = await params;
   return (
-    <div className="min-h-screen bg-glass-gradient text-slate-800">
+    <div
+      className={`${tenantFont.variable} ${tenantFont.className} tenant-site flex min-h-screen flex-col bg-[#f8fafc] text-slate-800 antialiased`}
+    >
+      <TenantIntegrations slug={slug} />
       {children}
     </div>
   );

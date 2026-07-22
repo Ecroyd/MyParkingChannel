@@ -23,11 +23,18 @@ export const ADMIN_NAV: NavNode[] = [
     href: "/admin/bookings-server",
     section: "Core",
     children: [
-      { key: "bookings-upload", label: "Import Data", href: "/admin/bookings/upload" },
-      { key: "bookings-email-imports", label: "Email Imports", href: "/admin/bookings/email-imports" },
-      { key: "email-ingest-failures", label: "Email Ingest Failures", href: "/admin/email-ingest", minRole: "admin" },
-      { key: "bookings-parsed-files", label: "Parsed Files & Sources", href: "/admin/bookings/email-imports/parsed-files" },
-      { key: "bookings-import-runs", label: "Import Runs", href: "/admin/bookings/import-runs" },
+      {
+        key: "bookings-imports",
+        label: "Imports",
+        // Folder only — collapsed by default in the sidebar
+        children: [
+          { key: "bookings-upload", label: "Import Data", href: "/admin/bookings/upload" },
+          { key: "bookings-email-imports", label: "Email Imports", href: "/admin/bookings/email-imports" },
+          { key: "email-ingest-failures", label: "Email Ingest Failures", href: "/admin/email-ingest", minRole: "admin" },
+          { key: "bookings-parsed-files", label: "Parsed Files & Sources", href: "/admin/bookings/email-imports/parsed-files" },
+          { key: "bookings-import-runs", label: "Import Runs", href: "/admin/bookings/import-runs" },
+        ],
+      },
     ],
   },
   { key: "booking-rules", label: "Booking Rules", href: "/admin/booking-rules", section: "Core", minRole: "admin" },

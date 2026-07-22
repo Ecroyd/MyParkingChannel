@@ -7,6 +7,12 @@ import BackButton from '@/components/success/BackButton';
 import BookingProcessor from '@/components/success/BookingProcessor';
 import PollForSession from '@/components/success/PollForSession';
 import { createAdminClient } from '@/lib/supabase/admin';
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: 'Booking confirmation',
+  robots: { index: false, follow: false, googleBot: { index: false, follow: false } },
+};
 
 async function getBookingByCheckoutSessionId(sessionId: string) {
   const admin = createAdminClient();

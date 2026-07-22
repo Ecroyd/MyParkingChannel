@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 
 interface FAQ {
   q: string;
@@ -13,30 +13,33 @@ interface FAQAccordionProps {
 }
 
 export default function FAQAccordion({ faqs }: FAQAccordionProps) {
-  const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const [openIndex, setOpenIndex] = useState<number | null>(0);
 
   return (
-    <div className="space-y-4">
-      {faqs.map((faq, index) => (
-        <div key={index} className="border border-slate-200 rounded-xl overflow-hidden">
-          <button
-            onClick={() => setOpenIndex(openIndex === index ? null : index)}
-            className="w-full px-6 py-4 text-left bg-white hover:bg-slate-50 transition-colors flex items-center justify-between"
-          >
-            <span className="font-medium text-slate-900">{faq.q}</span>
-            {openIndex === index ? (
-              <ChevronUp className="h-5 w-5 text-slate-500" />
-            ) : (
-              <ChevronDown className="h-5 w-5 text-slate-500" />
-            )}
-          </button>
-          {openIndex === index && (
-            <div className="px-6 pb-4 bg-slate-50">
-              <p className="text-slate-700 leading-relaxed">{faq.a}</p>
-            </div>
-          )}
-        </div>
-      ))}
+    <div className="divide-y divide-slate-200 border-y border-slate-200">
+      {faqs.map((faq, index) => {
+        const open = openIndex === index;
+        return (
+          <div key={index}>
+            <button
+              type="button"
+              onClick={() => setOpenIndex(open ? null : index)}
+              className="flex w-full items-center justify-between gap-4 py-4 text-left"
+              aria-expanded={open}
+            >
+              <span className="font-medium text-slate-900">{faq.q}</span>
+              <ChevronDown
+                className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${
+                  open ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+            {open ? (
+              <p className="pb-4 text-sm leading-relaxed text-slate-600">{faq.a}</p>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }

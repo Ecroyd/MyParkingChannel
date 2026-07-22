@@ -174,6 +174,72 @@ export async function middleware(req: NextRequest) {
       return NextResponse.rewrite(url);
     }
 
+    // Resolve tenant-scoped redirects before page rendering (genuine HTTP redirect).
+    // Localhost / platform hosts never reach this branch.
+    try {
+      const requestPath = url.pathname === "/" ? "/" : url.pathname.replace(/\/+$/, "") || "/";
+      const { data: siteRow } = await supabase
+        .from("sites")
+        .select("id, tenant_id")
+        .eq("slug", slug)
+        .maybeSingle();
+
+      if (siteRow?.id) {
+        const { data: redirectRow } = await supabase
+          .from("site_redirects")
+          .select("id, new_path, status_code")
+          .eq("site_id", siteRow.id)
+          .eq("active", true)
+          .eq("old_path", requestPath)
+          .maybeSingle();
+
+        if (redirectRow?.new_path) {
+          void supabase
+            .from("site_redirects")
+            .update({ last_hit_at: new Date().toISOString() })
+            .eq("id", redirectRow.id);
+
+          const status = redirectRow.status_code === 302 ? 302 : 301;
+          const target = redirectRow.new_path;
+          if (/^https?:\/\//i.test(target)) {
+            return NextResponse.redirect(target, status);
+          }
+          const dest = url.clone();
+          dest.pathname = target.startsWith("/") ? target : `/${target}`;
+          return NextResponse.redirect(dest, status);
+        }
+
+        // Non-primary production domains → verified primary.
+        // Never redirect localhost (custom-domain branch only).
+        const { data: domains } = await supabase
+          .from("tenant_domains")
+          .select("domain, is_primary, verified")
+          .eq("tenant_id", siteRow.tenant_id);
+
+        const verifiedPrimary = (domains ?? []).find((d) => d.is_primary && d.verified);
+        if (verifiedPrimary?.domain) {
+          const primaryHost = normalizeHost(String(verifiedPrimary.domain));
+          if (primaryHost && primaryHost !== normalizedHost) {
+            const { data: seoSettings } = await supabase
+              .from("site_seo_settings")
+              .select("indexing_mode")
+              .eq("site_id", siteRow.id)
+              .maybeSingle();
+            // Only enforce when live (not staging/migration noindex mode)
+            if (!seoSettings || seoSettings.indexing_mode === "live_indexable") {
+              const dest = new URL(
+                `${url.pathname}${url.search}`,
+                `https://${primaryHost}`
+              );
+              return NextResponse.redirect(dest, 301);
+            }
+          }
+        }
+      }
+    } catch (redirectErr) {
+      console.error("[TENANT_REDIRECT] error", redirectErr);
+    }
+
     // 2) Rewrite to the tenant site, preserving the rest of the path
     // Example:
     //   /           → /sites/flyparksexeter

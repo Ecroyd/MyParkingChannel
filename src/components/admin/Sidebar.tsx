@@ -13,6 +13,11 @@ function isActive(path: string, href?: string) {
   return path === href || path.startsWith(href + "/");
 }
 
+function nodeOrDescendantActive(path: string, node: NavNode): boolean {
+  if (isActive(path, node.href)) return true;
+  return (node.children || []).some((c) => nodeOrDescendantActive(path, c));
+}
+
 function Chevron({ open }: { open: boolean }) {
   return (
     <svg
@@ -22,6 +27,83 @@ function Chevron({ open }: { open: boolean }) {
     >
       <path d="M7.293 14.707a1 1 0 0 1 0-1.414L10.586 10 7.293 6.707a1 1 0 1 1 1.414-1.414l4 4a1 1 0 0 1 0 1.414l-4 4a1 1 0 0 1-1.414 0z" />
     </svg>
+  );
+}
+
+/** Nested nav folder — collapsed by default; auto-opens when a child route is active. */
+function NavFolder({
+  node,
+  pathname,
+  allowed,
+  depth = 0,
+}: {
+  node: NavNode;
+  pathname: string;
+  allowed: (n: NavNode) => boolean;
+  depth?: number;
+}) {
+  const children = (node.children || []).filter(allowed);
+  const hasActiveChild = children.some((c) => nodeOrDescendantActive(pathname, c));
+  const [open, setOpen] = React.useState(hasActiveChild);
+
+  React.useEffect(() => {
+    if (hasActiveChild) setOpen(true);
+  }, [hasActiveChild, pathname]);
+
+  const pad = depth === 0 ? "mx-4" : "mx-5";
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className={[
+          pad,
+          "flex w-[calc(100%-2rem)] items-center justify-between rounded-lg px-3 py-1.5 text-[13px] transition",
+          hasActiveChild ? "text-black font-medium" : "text-black/70 hover:bg-white",
+        ].join(" ")}
+      >
+        <span className="truncate">{node.label}</span>
+        <Chevron open={open} />
+      </button>
+      <div
+        className={`overflow-hidden transition-[max-height] duration-200 ${
+          open ? "max-h-[800px]" : "max-h-0"
+        }`}
+      >
+        <ul className="mt-1 mb-1 space-y-0.5">
+          {children.map((child) => {
+            if (child.children && child.children.length > 0 && !child.href) {
+              return (
+                <NavFolder
+                  key={child.key}
+                  node={child}
+                  pathname={pathname}
+                  allowed={allowed}
+                  depth={depth + 1}
+                />
+              );
+            }
+            const childActive = isActive(pathname, child.href);
+            return (
+              <li key={child.key}>
+                <Link
+                  href={child.href!}
+                  className={[
+                    depth === 0 ? "mx-5" : "mx-6",
+                    "block rounded-lg px-3 py-1.5 text-[13px] transition",
+                    childActive ? "bg-black text-white" : "text-black/70 hover:bg-white",
+                  ].join(" ")}
+                >
+                  {child.label}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </li>
   );
 }
 
@@ -51,10 +133,7 @@ export default function Sidebar({ features = [] as string[], userRole }: { featu
     const m = new Map<string, boolean>();
     for (const [section, nodes] of Object.entries(groups)) {
       // auto-open if any link in the section matches the current route
-      const match = nodes.some(n =>
-        isActive(pathname!, n.href) ||
-        (n.children || []).some(c => isActive(pathname!, c.href))
-      );
+      const match = nodes.some((n) => nodeOrDescendantActive(pathname!, n));
       m.set(section, match);
     }
     return m;
@@ -125,9 +204,11 @@ export default function Sidebar({ features = [] as string[], userRole }: { featu
               >
                 <ul className="mt-1 space-y-1">
                   {nodes.map((node) => {
-                    const topActive =
-                      isActive(pathname!, node.href) ||
-                      (node.children || []).some(c => isActive(pathname!, c.href));
+                    const directChildren = (node.children || []).filter(allowed);
+                    const linkChildren = directChildren.filter((c) => c.href && !c.children?.length);
+                    const folderChildren = directChildren.filter(
+                      (c) => c.children && c.children.length > 0
+                    );
 
                     return (
                       <li key={node.key}>
@@ -137,7 +218,7 @@ export default function Sidebar({ features = [] as string[], userRole }: { featu
                             href={node.href}
                             className={[
                               "mx-2 block rounded-xl px-3 py-2 text-sm transition",
-                              topActive
+                              isActive(pathname!, node.href)
                                 ? "bg-black text-white shadow-sm"
                                 : "text-black/80 hover:bg-white",
                             ].join(" ")}
@@ -146,10 +227,10 @@ export default function Sidebar({ features = [] as string[], userRole }: { featu
                           </Link>
                         )}
 
-                        {/* Children (sub headings) */}
-                        {node.children && node.children.length > 0 && (
+                        {/* Direct link children (e.g. Pricing → Dynamic Pricing) */}
+                        {linkChildren.length > 0 && (
                           <ul className="mt-1 mb-2">
-                            {node.children.filter(allowed).map((child) => {
+                            {linkChildren.map((child) => {
                               const childActive = isActive(pathname!, child.href);
                               return (
                                 <li key={child.key}>
@@ -167,6 +248,20 @@ export default function Sidebar({ features = [] as string[], userRole }: { featu
                                 </li>
                               );
                             })}
+                          </ul>
+                        )}
+
+                        {/* Nested folders (e.g. Bookings → Imports) — collapsed by default */}
+                        {folderChildren.length > 0 && (
+                          <ul className="mt-1 mb-2">
+                            {folderChildren.map((folder) => (
+                              <NavFolder
+                                key={folder.key}
+                                node={folder}
+                                pathname={pathname!}
+                                allowed={allowed}
+                              />
+                            ))}
                           </ul>
                         )}
                       </li>

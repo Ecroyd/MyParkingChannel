@@ -1,112 +1,20 @@
-import { NextResponse } from 'next/server';
-import { getServerSupabase } from '@/lib/supabase/server';
-import { createAdminClient } from '@/lib/supabase/server-admin';
+import { NextResponse } from "next/server";
+import { requireSeoAdminContext } from "@/lib/seo/admin-context";
 
+/** Back-compat status endpoint used by older clients. */
 export async function GET() {
-  try {
-    const supabase = await getServerSupabase();
-    
-    // Get the current user
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      return NextResponse.json({ 
-        status: 'error', 
-        message: 'Not authenticated',
-        setupRequired: false 
-      }, { status: 401 });
-    }
-
-    // Get user's tenant with fallback to admin client
-    let userTenant;
-    let tenantError;
-    
-    const { data: userTenantData, error: userTenantError } = await supabase
-      .from('user_tenants')
-      .select(`
-        tenant_id,
-        role,
-        tenants (
-          id,
-          name,
-          slug,
-          timezone
-        )
-      `)
-      .eq('user_id', user.id)
-      .single();
-
-    userTenant = userTenantData;
-    tenantError = userTenantError;
-
-    // If regular client fails, try admin client
-    if (tenantError || !userTenant?.tenants) {
-      console.log('🔍 Site SEO: Regular client failed, trying admin client...');
-      const adminClient = await createAdminClient();
-      const { data: adminUserTenant, error: adminTenantError } = await adminClient
-        .from('user_tenants')
-        .select(`
-          tenant_id,
-          role,
-          tenants (
-            id,
-            name,
-            slug,
-            timezone
-          )
-        `)
-        .eq('user_id', user.id)
-        .single();
-      
-      userTenant = adminUserTenant;
-      tenantError = adminTenantError;
-    }
-
-    if (tenantError || !userTenant?.tenants) {
-      return NextResponse.json({ 
-        status: 'error', 
-        message: 'No tenant found for user',
-        setupRequired: false 
-      }, { status: 404 });
-    }
-
-    const tenant = userTenant.tenants;
-
-    // Check if the tenant_public_profile table exists by trying to query it
-    const { data: profile, error: profileError } = await supabase
-      .from('tenant_public_profile')
-      .select('id')
-      .eq('tenant_id', (tenant as any).id)
-      .limit(1);
-
-    if (profileError && profileError.code === 'PGRST116') {
-      // Table doesn't exist
-      return NextResponse.json({ 
-        status: 'error', 
-        message: 'Database setup required',
-        setupRequired: true,
-        tenantId: (tenant as any).id 
-      });
-    }
-
-    return NextResponse.json({ 
-      status: 'ok', 
-      message: 'Ready',
-      setupRequired: false,
-      tenantId: (tenant as any).id,
-      tenant: {
-        id: (tenant as any).id,
-        name: (tenant as any).name,
-        slug: (tenant as any).slug,
-        timezone: (tenant as any).timezone
-      }
-    });
-
-  } catch (error: any) {
-    console.error('Site SEO status error:', error);
-    return NextResponse.json({ 
-      status: 'error', 
-      message: error.message || 'Internal server error',
-      setupRequired: false 
-    }, { status: 500 });
+  const auth = await requireSeoAdminContext();
+  if (!auth.ok) {
+    return NextResponse.json(
+      { status: "error", message: auth.error, setupRequired: false },
+      { status: auth.status }
+    );
   }
+
+  return NextResponse.json({
+    status: "ok",
+    tenantId: auth.ctx.tenantId,
+    siteId: auth.ctx.siteId,
+    setupRequired: false,
+  });
 }
