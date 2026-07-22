@@ -11,6 +11,7 @@ import type {
 } from "./types";
 import type { DomainCandidate } from "./canonical";
 import { hasUsableAddress } from "./public-address";
+import { parseGoogleReviewsConfig } from "./google-reviews-config";
 
 export type HealthInput = {
   settings: SiteSeoSettings | null;
@@ -83,15 +84,22 @@ export function runSeoHealthChecks(input: HealthInput): HealthCheck[] {
       "items" in reviewsBlock &&
       Array.isArray(reviewsBlock.items) &&
       reviewsBlock.items.some((i) => typeof i?.quote === "string" && i.quote.trim());
-    if (!hasQuotes) {
+    const googleReviews = parseGoogleReviewsConfig(input.settings?.presentation_json);
+    const hasGoogleReviews =
+      googleReviews.enabled &&
+      googleReviews.sectionEnabled &&
+      Boolean(googleReviews.placeId.trim());
+    // Optional recommendation only — never critical; skip when any reviews path is configured
+    if (!hasQuotes && !hasGoogleReviews) {
       checks.push({
         id: "missing_homepage_reviews",
         severity: "recommended",
-        title: "No approved homepage reviews",
+        title: "Optional reviews",
         detail:
-          "The public reviews section is hidden until approved testimonial quotes are added to the homepage content blocks.",
+          "Optional: Connect approved customer or Google reviews to strengthen visitor trust.",
         pagePath: homePage.path,
-        fixHint: "Add a reviews content block with real customer quotes (do not invent reviews).",
+        fixHint:
+          "Add approved testimonial quotes in homepage content, or connect Google reviews under Site SEO → Integrations.",
       });
     }
   }

@@ -73,6 +73,7 @@ export const ADMIN_NAV: NavNode[] = [
       { key: "tenants", label: "Tenants", href: "/admin/tenants", section: "Platform Management", feature: "platform_admin" },
       { key: "tenants-new", label: "Add Tenant", href: "/admin/tenants/new", section: "Platform Management", feature: "platform_admin" },
       { key: "platform-email", label: "Platform Email", href: "/admin/platform/email-settings", section: "Platform Management", feature: "platform_admin" },
+      { key: "platform-google-places", label: "Google Places", href: "/admin/platform/google-places", section: "Platform Management", feature: "platform_admin" },
       { key: "platform-environment", label: "Environment", href: "/admin/platform/environment", section: "Platform Management", feature: "platform_admin" },
 
   // ——— Settings ———

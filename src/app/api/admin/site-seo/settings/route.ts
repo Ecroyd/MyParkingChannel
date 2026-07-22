@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { requireSeoAdminContext } from "@/lib/seo/admin-context";
 import { createAdminClient } from "@/lib/supabase/server-admin";
 import { invalidateSiteSeoCaches } from "@/lib/seo/cache";
+import {
+  mergeGoogleReviewsIntoPresentation,
+  parseGoogleReviewsConfig,
+} from "@/lib/seo/google-reviews-config";
 
 export async function PUT(req: Request) {
   const auth = await requireSeoAdminContext();
@@ -19,6 +23,15 @@ export async function PUT(req: Request) {
     created_at: _c,
     ...safe
   } = body ?? {};
+
+  // Durably store Google reviews config only (never review bodies / ratings / avatars)
+  if (safe.presentation_json != null) {
+    const parsed = parseGoogleReviewsConfig(safe.presentation_json);
+    safe.presentation_json = mergeGoogleReviewsIntoPresentation(
+      safe.presentation_json,
+      parsed
+    );
+  }
 
   const admin = createAdminClient();
   const { data, error } = await admin

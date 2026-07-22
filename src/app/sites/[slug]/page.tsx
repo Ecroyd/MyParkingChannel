@@ -14,8 +14,10 @@ import {
   FaqPreviewSection,
   FinalCtaSection,
 } from "@/components/site/home/HomeSections";
+import GoogleReviewsSection from "@/components/site/home/GoogleReviewsSection";
 import { buildFaqPageJsonLd } from "@/lib/seo/json-ld";
 import type { SitePageRow } from "@/lib/seo/types";
+import { parseGoogleReviewsConfig } from "@/lib/seo/google-reviews-config";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -168,6 +170,12 @@ export default async function TenantHome({
         : ((p!.external_review_links as Array<{ url?: string }>)[0]?.url ?? null)
       : null;
 
+  const googleReviews = parseGoogleReviewsConfig(seo?.bundle.settings?.presentation_json);
+  const showGoogleReviews =
+    googleReviews.enabled &&
+    googleReviews.sectionEnabled &&
+    Boolean(googleReviews.placeId.trim());
+
   return (
     <div style={theme} className="flex min-h-screen flex-col">
       {jsonLdScripts.map((script, i) => (
@@ -238,6 +246,10 @@ export default async function TenantHome({
           items={home.reviews.items ?? []}
           externalUrl={externalReview}
         />
+      ) : null}
+
+      {showGoogleReviews ? (
+        <GoogleReviewsSection slug={resolvedParams.slug} />
       ) : null}
 
       {home.sections.faq && home.faqs.length ? (

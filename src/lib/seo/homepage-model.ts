@@ -29,6 +29,8 @@ export type PresentationJson = {
   heroImageUrl?: string;
   heroImageAlt?: string;
   trustPoints?: string[];
+  /** Durable Google reviews display config only — never review bodies. */
+  googleReviews?: Record<string, unknown>;
 };
 
 export type HomepageModel = {

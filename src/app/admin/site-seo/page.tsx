@@ -24,6 +24,11 @@ import { UploadTenantLogo } from "@/components/admin/UploadTenantLogo";
 import { CONTENT_BLOCK_TYPES } from "@/lib/seo/content-blocks";
 import { previewRedirectChain } from "@/lib/seo/redirects";
 import { pageHealthWarnings } from "@/lib/seo/health";
+import {
+  mergeGoogleReviewsIntoPresentation,
+  parseGoogleReviewsConfig,
+  type GoogleReviewsConfig,
+} from "@/lib/seo/google-reviews-config";
 
 type Bundle = {
   context: {
@@ -126,6 +131,53 @@ export default function SiteSeoAdminPage() {
   );
 
   const address = (profile.address as Record<string, string>) || {};
+
+  const googleReviews = useMemo(
+    () => parseGoogleReviewsConfig(settings.presentation_json),
+    [settings.presentation_json]
+  );
+
+  function patchGoogleReviews(patch: Partial<GoogleReviewsConfig>) {
+    const next = { ...parseGoogleReviewsConfig(settings.presentation_json), ...patch };
+    setSettings({
+      ...settings,
+      presentation_json: mergeGoogleReviewsIntoPresentation(
+        settings.presentation_json,
+        next
+      ),
+    });
+  }
+
+  async function previewGoogleConnection() {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/admin/site-seo/google-reviews/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          placeId: googleReviews.placeId,
+          maxReviews: googleReviews.maxReviews,
+        }),
+      });
+      const json = await res.json();
+      await load();
+      if (!json.success) {
+        throw new Error(json.error || "Connection failed");
+      }
+      toast({
+        title: "Connected",
+        description: `Place “${json.preview?.displayName || "OK"}” — ${json.preview?.reviewCountReturned ?? 0} review(s) returned.`,
+      });
+    } catch (e: unknown) {
+      toast({
+        title: "Connection failed",
+        description: e instanceof Error ? e.message : "Preview failed",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function saveSettings() {
     setSaving(true);
@@ -1444,6 +1496,143 @@ export default function SiteSeoAdminPage() {
               </Field>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Google reviews</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-slate-600">
+                Optional. Uses the platform Google Places key. Review text is fetched live
+                from Google and is not stored in Supabase.
+              </p>
+              <div className="flex flex-wrap items-center gap-6">
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch
+                    checked={googleReviews.enabled}
+                    onCheckedChange={(v) => patchGoogleReviews({ enabled: v })}
+                  />
+                  Enable Google reviews
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch
+                    checked={googleReviews.sectionEnabled}
+                    onCheckedChange={(v) => patchGoogleReviews({ sectionEnabled: v })}
+                  />
+                  Show on homepage
+                </label>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label="Google Place ID">
+                  <Input
+                    value={googleReviews.placeId}
+                    onChange={(e) => patchGoogleReviews({ placeId: e.target.value })}
+                    placeholder="ChIJ…"
+                  />
+                </Field>
+                <Field label="Number of reviews (1–3)">
+                  <select
+                    className="flex h-9 w-full rounded-md border px-3 text-sm"
+                    value={googleReviews.maxReviews}
+                    onChange={(e) =>
+                      patchGoogleReviews({
+                        maxReviews: Number(e.target.value) as 1 | 2 | 3,
+                      })
+                    }
+                  >
+                    <option value={1}>1</option>
+                    <option value={2}>2</option>
+                    <option value={3}>3</option>
+                  </select>
+                </Field>
+                <Field label="Section heading">
+                  <Input
+                    value={googleReviews.heading}
+                    onChange={(e) => patchGoogleReviews({ heading: e.target.value })}
+                  />
+                </Field>
+                <Field label="Maps / reviews URL override (optional)">
+                  <Input
+                    value={googleReviews.mapsUrlOverride ?? ""}
+                    onChange={(e) =>
+                      patchGoogleReviews({
+                        mapsUrlOverride: e.target.value.trim() || null,
+                      })
+                    }
+                  />
+                </Field>
+              </div>
+              <Field label="Section introduction">
+                <Textarea
+                  rows={2}
+                  value={googleReviews.intro}
+                  onChange={(e) => patchGoogleReviews({ intro: e.target.value })}
+                />
+              </Field>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch
+                    checked={googleReviews.showAggregateRating}
+                    onCheckedChange={(v) =>
+                      patchGoogleReviews({ showAggregateRating: v })
+                    }
+                  />
+                  Show aggregate rating
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch
+                    checked={googleReviews.showReviewCount}
+                    onCheckedChange={(v) => patchGoogleReviews({ showReviewCount: v })}
+                  />
+                  Show total review count
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch
+                    checked={googleReviews.showReviewerAvatar}
+                    onCheckedChange={(v) =>
+                      patchGoogleReviews({ showReviewerAvatar: v })
+                    }
+                  />
+                  Show reviewer avatar
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch
+                    checked={googleReviews.showReviewDate}
+                    onCheckedChange={(v) => patchGoogleReviews({ showReviewDate: v })}
+                  />
+                  Show review date
+                </label>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                Connection: <strong>{googleReviews.lastConnectionStatus}</strong>
+                {googleReviews.lastCheckedAt
+                  ? ` · checked ${new Date(googleReviews.lastCheckedAt).toLocaleString()}`
+                  : null}
+                {googleReviews.lastConnectionError ? (
+                  <span className="mt-1 block text-red-600">
+                    Last error: {googleReviews.lastConnectionError}
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={saving || !googleReviews.placeId.trim()}
+                  onClick={() => void previewGoogleConnection()}
+                >
+                  Preview connection
+                </Button>
+                <Button onClick={() => void saveSettings()} disabled={saving}>
+                  Save Google reviews settings
+                </Button>
+              </div>
+              <p className="text-xs text-slate-500">
+                Platform API key is managed under Admin → Google Places.
+              </p>
+            </CardContent>
+          </Card>
+
           <Button onClick={() => void saveSettings()} disabled={saving}>
             Save integrations
           </Button>
