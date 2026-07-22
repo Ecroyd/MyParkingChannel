@@ -2,15 +2,34 @@
 
 import { useEffect, useState } from 'react';
 
-interface PaymentsClientProps {
-  // Add any props you need from the server component
+type StripeMode = 'test' | 'live';
+
+interface ConnectStatus {
+  connected?: boolean;
+  accountId?: string;
+  id?: string;
+  mode?: StripeMode | null;
+  platformMode?: StripeMode;
+  needsReconnect?: boolean;
+  charges_enabled?: boolean;
+  payouts_enabled?: boolean;
+  details_submitted?: boolean;
+  error?: string;
 }
 
-export default function PaymentsClient({}: PaymentsClientProps) {
-  const [status, setStatus] = useState<any>(null);
+function defaultModeForHost(): StripeMode {
+  // Client-side: production host defaults to live; localhost stays on test
+  if (typeof window === 'undefined') return 'test';
+  const host = window.location.hostname;
+  if (host === 'localhost' || host === '127.0.0.1') return 'test';
+  return 'live';
+}
+
+export default function PaymentsClient() {
+  const [status, setStatus] = useState<ConnectStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [disconnecting, setDisconnecting] = useState(false);
-  const [stripeMode, setStripeMode] = useState<'test' | 'live'>('test');
+  const [stripeMode, setStripeMode] = useState<StripeMode>(defaultModeForHost);
 
   async function refresh() {
     setLoading(true);
@@ -22,8 +41,14 @@ export default function PaymentsClient({}: PaymentsClientProps) {
         setLoading(false);
         return;
       }
-      const s = await response.json();
+      const s: ConnectStatus = await response.json();
       setStatus(s);
+      // Prefer stored connection mode, then platform mode from API
+      if (s.mode === 'test' || s.mode === 'live') {
+        setStripeMode(s.mode);
+      } else if (s.platformMode === 'test' || s.platformMode === 'live') {
+        setStripeMode(s.platformMode);
+      }
     } catch (error) {
       console.error('Fetch error:', error);
       setStatus({ connected: false, error: 'Failed to fetch status' });
@@ -43,8 +68,9 @@ export default function PaymentsClient({}: PaymentsClientProps) {
         body: JSON.stringify({ mode: stripeMode })
       });
       if (!res.ok) {
-        console.error('Onboard API Error:', res.status, res.statusText);
-        alert(`Failed to create Stripe account: ${res.status}`);
+        const errBody = await res.json().catch(() => ({}));
+        console.error('Onboard API Error:', res.status, errBody);
+        alert(errBody.error || `Failed to create Stripe account: ${res.status}`);
         return;
       }
       const json = await res.json();
@@ -66,7 +92,6 @@ export default function PaymentsClient({}: PaymentsClientProps) {
 
     setDisconnecting(true);
     try {
-      // Get tenant ID first
       const response = await fetch('/api/admin/tenant/current');
       if (!response.ok) {
         throw new Error('Failed to get tenant ID');
@@ -87,7 +112,7 @@ export default function PaymentsClient({}: PaymentsClientProps) {
       }
 
       alert('Stripe connection disconnected successfully');
-      await refresh(); // Refresh the status
+      await refresh();
     } catch (error) {
       console.error('Disconnect error:', error);
       alert(`Error: ${error instanceof Error ? error.message : 'Failed to disconnect'}`);
@@ -95,6 +120,15 @@ export default function PaymentsClient({}: PaymentsClientProps) {
       setDisconnecting(false);
     }
   }
+
+  const displayMode: StripeMode =
+    (status?.connected && (status.mode === 'test' || status.mode === 'live')
+      ? status.mode
+      : stripeMode);
+
+  const showReconnectBanner =
+    !!status?.needsReconnect ||
+    (!!status?.mode && !!status?.platformMode && status.mode !== status.platformMode);
 
   return (
     <section className="rounded-xl border p-4">
@@ -104,8 +138,9 @@ export default function PaymentsClient({}: PaymentsClientProps) {
           <label className="text-sm text-gray-600">Mode:</label>
           <select 
             value={stripeMode} 
-            onChange={(e) => setStripeMode(e.target.value as 'test' | 'live')}
+            onChange={(e) => setStripeMode(e.target.value as StripeMode)}
             className="text-sm border rounded px-2 py-1"
+            disabled={!!status?.connected}
           >
             <option value="test">Test</option>
             <option value="live">Live</option>
@@ -113,19 +148,35 @@ export default function PaymentsClient({}: PaymentsClientProps) {
         </div>
       </div>
       {loading && <div>Loading…</div>}
+      {!loading && showReconnectBanner && (
+        <div className="mb-3 bg-amber-50 border border-amber-200 rounded p-3 space-y-2">
+          <p className="text-sm text-amber-900 font-medium">Reconnect required for live payments</p>
+          <p className="text-sm text-amber-800">
+            {status?.error ||
+              'This tenant is still linked to a test Stripe account. Disconnect, switch Mode to Live, then Connect again.'}
+          </p>
+          <button
+            className="rounded bg-red-600 text-white px-3 py-2 hover:bg-red-700 text-sm"
+            onClick={disconnectStripe}
+            disabled={disconnecting}
+          >
+            {disconnecting ? 'Disconnecting...' : 'Disconnect test account'}
+          </button>
+        </div>
+      )}
       {!loading && !status?.connected && (
         <div className="space-y-3">
           <div className="flex items-center space-x-2">
             <p className="text-sm">You're not connected yet.</p>
             <span className={`text-xs px-2 py-1 rounded ${
-              stripeMode === 'test' 
+              displayMode === 'test' 
                 ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' 
                 : 'bg-red-100 text-red-800 border border-red-200'
             }`}>
-              {stripeMode === 'test' ? 'TEST MODE' : 'LIVE MODE'}
+              {displayMode === 'test' ? 'TEST MODE' : 'LIVE MODE'}
             </span>
           </div>
-          {status?.error && (
+          {status?.error && !showReconnectBanner && (
             <div className="bg-red-50 border border-red-200 rounded p-3">
               <p className="text-sm text-red-800">{status.error}</p>
             </div>
@@ -144,13 +195,18 @@ export default function PaymentsClient({}: PaymentsClientProps) {
             <div className="w-3 h-3 bg-green-500 rounded-full"></div>
             <span className="font-medium text-green-700">Connected to Stripe</span>
             <span className={`text-xs px-2 py-1 rounded ${
-              stripeMode === 'test' 
+              displayMode === 'test' 
                 ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' 
                 : 'bg-red-100 text-red-800 border border-red-200'
             }`}>
-              {stripeMode === 'test' ? 'TEST MODE' : 'LIVE MODE'}
+              {displayMode === 'test' ? 'TEST MODE' : 'LIVE MODE'}
             </span>
           </div>
+          {displayMode === 'test' && status.platformMode === 'live' && (
+            <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm text-amber-900">
+              Platform is live, but this tenant is still on a test Connect account. Disconnect and reconnect in Live mode to take real card payments.
+            </div>
+          )}
           <div className="space-y-1 text-sm text-gray-600">
             <div>Account ID: <b>{status.accountId ?? status.id}</b></div>
             <div>Charges enabled: <b>{String(status.charges_enabled)}</b></div>

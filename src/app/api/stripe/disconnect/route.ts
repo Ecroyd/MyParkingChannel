@@ -42,6 +42,8 @@ export async function POST(req: Request) {
         stripe_publishable_key: null,
         stripe_secret_key: null,
         stripe_webhook_secret: null,
+        mode: null,
+        updated_at: new Date().toISOString(),
       })
       .eq('tenant_id', tenant_id);
 

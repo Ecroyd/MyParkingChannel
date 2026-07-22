@@ -9,15 +9,26 @@ export async function GET(req: Request) {
 
   try {
     // Determine mode from state (e.g., "tenantId:test" or "tenantId:live")
-    const isTest = state.toLowerCase().includes("test");
+    const requestedMode = state.split(":")[1] || "";
+    const forceTest = process.env.STRIPE_MODE === "test";
+    const connectMode: "test" | "live" = forceTest
+      ? "test"
+      : requestedMode === "live"
+        ? "live"
+        : requestedMode === "test"
+          ? "test"
+          : process.env.NODE_ENV === "production"
+            ? "live"
+            : "test";
+    const isTest = connectMode === "test";
 
     // Select the correct Stripe secret key
     const stripeSecret = isTest
-      ? process.env.STRIPE_SECRET_KEY_TEST
-      : process.env.STRIPE_SECRET_KEY_LIVE;
+      ? (process.env.STRIPE_SECRET_KEY_TEST ?? (process.env.STRIPE_SECRET_KEY?.startsWith("sk_test_") ? process.env.STRIPE_SECRET_KEY : undefined))
+      : (process.env.STRIPE_SECRET_KEY_LIVE ?? (process.env.STRIPE_SECRET_KEY?.startsWith("sk_live_") ? process.env.STRIPE_SECRET_KEY : undefined));
 
     if (!stripeSecret) {
-      throw new Error("Missing Stripe secret key for mode: " + (isTest ? "test" : "live"));
+      throw new Error("Missing Stripe secret key for mode: " + connectMode);
     }
 
     // Exchange authorization code for access token
@@ -70,7 +81,7 @@ export async function GET(req: Request) {
         stripe_publishable_key: accountData.publishable_key,
         stripe_secret_key: data.access_token,
         connected: true,
-        mode: isTest ? "test" : "live", // Store the mode (test or live)
+        mode: connectMode,
       });
 
     if (stripeError) {
@@ -101,7 +112,7 @@ export async function GET(req: Request) {
     // Get the current host to build the correct redirect URL
     const host = req.headers.get('host') || 'myparkingchannel.app';
     const protocol = 'https'; // Always use HTTPS for production
-    const redirectUrl = `${protocol}://${host}/admin/payments?success=stripe_connected&tenant=${tenantId}&mode=${isTest ? "test" : "live"}&connected=true`;
+    const redirectUrl = `${protocol}://${host}/admin/payments?success=stripe_connected&tenant=${tenantId}&mode=${connectMode}&connected=true`;
     
     return NextResponse.redirect(redirectUrl);
   } catch (err) {

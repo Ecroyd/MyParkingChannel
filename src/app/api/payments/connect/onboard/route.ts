@@ -1,7 +1,7 @@
 // app/api/payments/connect/onboard/route.ts
 import { NextResponse } from 'next/server';
 import { ROOT_URL, isStripeConfigured, stripe } from '@/lib/stripe';
-import { getAuthedUserTenantId, getTenantStripeAccountId, setTenantStripeAccountId, getServerSupabase } from '@/lib/supabase-server';
+import { getAuthedUserTenantId, getTenantStripeAccountId } from '@/lib/supabase-server';
 
 export async function POST(req: Request) {
   try {
@@ -15,33 +15,38 @@ export async function POST(req: Request) {
       }, { status: 500 });
     }
 
-    // Parse request body to get mode
+    // Parse request body to get mode — default live in production
     const body = await req.json().catch(() => ({}));
-    const requestedMode = body.mode || 'test';
+    const defaultMode =
+      process.env.STRIPE_MODE === 'test'
+        ? 'test'
+        : process.env.NODE_ENV === 'production'
+          ? 'live'
+          : 'test';
+    const requestedMode = body.mode === 'live' || body.mode === 'test' ? body.mode : defaultMode;
     
     const tenantId = await getAuthedUserTenantId();
     console.log('🔍 [PAYMENTS] Tenant ID:', tenantId);
     console.log('🔍 [PAYMENTS] Requested mode:', requestedMode);
 
-    // Check if tenant already has a connected account
-    const { accountId, connected } = await getTenantStripeAccountId(tenantId);
+    // Check if tenant already has a connected account in the same mode
+    const { accountId, connected, mode: storedMode } = await getTenantStripeAccountId(tenantId);
     
-    // ✅ if already connected → generate login link
-    if (connected && accountId) {
+    // ✅ if already connected in matching mode → generate login link
+    if (connected && accountId && (!storedMode || storedMode === requestedMode)) {
       console.log('🔍 [PAYMENTS] Tenant already has connected account:', accountId);
       const link = await stripe.accounts.createLoginLink(accountId);
       return NextResponse.json({ 
         url: link.url,
         accountId, 
         connected: true,
+        mode: storedMode ?? requestedMode,
         message: 'Account already connected - redirecting to Stripe dashboard' 
       });
     }
 
-    // 🚀 if not connected → generate onboarding link
-    // Use the requested mode from the frontend
+    // 🚀 if not connected (or mode mismatch) → generate OAuth onboarding link
     const isTest = requestedMode === 'test';
-    const isLive = requestedMode === 'live';
     
     // Select the correct client ID based on requested mode
     const clientId = isTest 

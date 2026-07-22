@@ -5,26 +5,27 @@ export async function GET(req: Request) {
   const tenantId = searchParams.get("tenant_id") || "unknown";
   const mode = searchParams.get("mode") || "test";
 
-  let clientId = "";
-  let redirectUri = "";
-  let baseUrl = "https://connect.stripe.com/oauth/v2/authorize";
-
-  // Get the current host to build the correct redirect URI
-  const host = req.headers.get('host') || 'myparkingchannel.app';
-  const protocol = 'https'; // Always use HTTPS for production
+  const host = req.headers.get("host") || "myparkingchannel.app";
+  const protocol = "https";
   const baseRedirectUri = `${protocol}://${host}/api/stripe/callback`;
 
-  if (mode === "live") {
-    // Live platform client
-    clientId = "ca_TBxxxSmeoiiU1clxQQUO0SzIXuYw335v"; // your LIVE client ID
-    redirectUri = baseRedirectUri;
-  } else {
-    // Test platform client (no redirect_uri for test mode)
-    clientId = "ca_TBxx6uZatvGwdVLNpsVQaXlY39p3gXTv"; // your TEST client ID
-    redirectUri = ""; // No redirect URI for test mode
+  const isLive = mode === "live";
+  const clientId = isLive
+    ? process.env.STRIPE_CLIENT_ID_LIVE
+    : process.env.STRIPE_CLIENT_ID_TEST;
+
+  if (!clientId) {
+    return NextResponse.json(
+      {
+        error: `Missing STRIPE_CLIENT_ID_${isLive ? "LIVE" : "TEST"} environment variable`,
+      },
+      { status: 500 }
+    );
   }
 
-  // Build the query string
+  // Live Connect OAuth requires an explicit redirect_uri registered in Stripe Dashboard
+  const redirectUri = isLive ? baseRedirectUri : "";
+
   const query = new URLSearchParams({
     client_id: clientId,
     response_type: "code",
@@ -32,11 +33,10 @@ export async function GET(req: Request) {
     state: `${tenantId}:${mode}`,
   });
 
-  // Include redirect_uri only for live mode (test mode doesn't need it)
   if (redirectUri) {
     query.append("redirect_uri", redirectUri);
   }
 
-  const stripeUrl = `${baseUrl}?${query.toString()}`;
+  const stripeUrl = `https://connect.stripe.com/oauth/v2/authorize?${query.toString()}`;
   return NextResponse.redirect(stripeUrl);
 }

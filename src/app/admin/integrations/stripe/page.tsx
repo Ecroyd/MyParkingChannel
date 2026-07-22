@@ -11,7 +11,9 @@ import { Label } from '@/components/ui/label';
 interface StripeConnection {
   connected: boolean;
   accountId?: string;
-  mode?: 'test' | 'live';
+  mode?: 'test' | 'live' | null;
+  platformMode?: 'test' | 'live';
+  needsReconnect?: boolean;
   error?: string;
 }
 
@@ -175,7 +177,24 @@ export default function StripeIntegrationPage() {
               <div className="flex items-center space-x-2">
                 <div className="w-3 h-3 bg-gray-400 rounded-full"></div>
                 <span className="text-gray-600">Not connected to Stripe</span>
+                {connection?.mode && (
+                  <span className={`text-xs px-2 py-1 rounded ${
+                    connection.mode === 'test'
+                      ? 'bg-yellow-100 text-yellow-800 border border-yellow-200'
+                      : 'bg-red-100 text-red-800 border border-red-200'
+                  }`}>
+                    WAS {connection.mode.toUpperCase()}
+                  </span>
+                )}
               </div>
+              {connection?.needsReconnect && (
+                <Alert>
+                  <AlertDescription className="text-amber-800">
+                    Reconnect required: platform is {connection.platformMode?.toUpperCase() || 'LIVE'}.
+                    Open Payments and Connect with Stripe in Live mode.
+                  </AlertDescription>
+                </Alert>
+              )}
               {connection?.error && (
                 <Alert>
                   <AlertDescription className="text-red-600">
