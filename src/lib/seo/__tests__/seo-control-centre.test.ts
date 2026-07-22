@@ -190,6 +190,7 @@ describe("transactional pages are noindex", () => {
       requestHost: "parkingexeterairport.co.uk",
     });
     expect(robots.index).toBe(false);
+    expect(robots.follow).toBe(true);
   });
 
   it("checkout/payment/confirmation are noindex", () => {

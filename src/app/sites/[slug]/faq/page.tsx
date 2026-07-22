@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 import { generateTenantPageMetadata, getTenantPageRenderData } from "@/lib/seo/page-render";
 import { faqItemsWithAnswers, parseContentBlocks } from "@/lib/seo/content-blocks";
 import { SiteContentBlocks } from "@/components/site/SiteContentBlocks";
+import { buildFaqPageJsonLd } from "@/lib/seo/json-ld";
 import Link from "next/link";
 
 interface PageProps {
@@ -44,6 +45,11 @@ export default async function FAQPage({ params }: PageProps) {
     path: "/faq",
     pageKey: "faq",
   });
+  const homeSeo = await getTenantPageRenderData({
+    slug: resolvedParams.slug,
+    path: "/",
+    pageKey: "home",
+  });
 
   if (!data) {
     return (
@@ -59,18 +65,34 @@ export default async function FAQPage({ params }: PageProps) {
   const title = p?.business_name ?? branding?.app_name ?? tenant.name ?? "Airport Parking";
   const h1 = seo?.page?.h1 || "Frequently asked questions";
 
-  const blocks = parseContentBlocks(seo?.page?.content_json);
-  const faqs = faqItemsWithAnswers(blocks, p?.faq);
+  const pageBlocks = parseContentBlocks(seo?.page?.content_json);
+  const homeBlocks = parseContentBlocks(homeSeo?.page?.content_json);
+  const faqs =
+    faqItemsWithAnswers(pageBlocks, p?.faq).length > 0
+      ? faqItemsWithAnswers(pageBlocks, p?.faq)
+      : faqItemsWithAnswers(homeBlocks, p?.faq);
+
+  const faqLd = faqs.length ? buildFaqPageJsonLd(faqs) : null;
+  // Drop any FAQPage scripts from generic collector if we rebuild from visible FAQs
+  const scripts = (seo?.jsonLdScripts ?? []).filter((s) => !s.includes('"FAQPage"'));
 
   return (
     <>
-      {seo?.jsonLdScripts?.map((script, i) => (
+      {scripts.map((script, i) => (
         <script
           key={i}
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: script }}
         />
       ))}
+      {faqLd ? (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(faqLd).replace(/</g, "\\u003c"),
+          }}
+        />
+      ) : null}
       <Header title={title} logoUrl={p?.logo_url} tenantSlug={resolvedParams.slug} />
       <PageShell
         title={h1}
@@ -87,7 +109,7 @@ export default async function FAQPage({ params }: PageProps) {
               <p className="text-slate-500">FAQ answers will appear here once published.</p>
             )}
             <SiteContentBlocks
-              contentJson={blocks.filter((b) => b.type !== "faq")}
+              contentJson={pageBlocks.filter((b) => b.type !== "faq")}
               profile={p}
             />
           </div>
@@ -122,29 +144,6 @@ export default async function FAQPage({ params }: PageProps) {
                 </Link>
               </div>
             </div>
-
-            {Array.isArray(p?.hours) && p.hours.length > 0 ? (
-              <div>
-                <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
-                  Opening hours
-                </h2>
-                <ul className="mt-3 space-y-1.5 text-sm text-slate-700">
-                  {p.hours.map(
-                    (
-                      hour: { day?: string; open?: string; close?: string },
-                      index: number
-                    ) => (
-                      <li key={index} className="flex justify-between gap-3">
-                        <span>{hour.day}</span>
-                        <span>
-                          {hour.open} – {hour.close}
-                        </span>
-                      </li>
-                    )
-                  )}
-                </ul>
-              </div>
-            ) : null}
           </aside>
         </div>
       </PageShell>

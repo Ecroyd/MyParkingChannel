@@ -1,5 +1,6 @@
 import { faqItemsWithAnswers, parseContentBlocks, type FaqItem } from "./content-blocks";
 import type { SitePageRow, SiteSeoSettings } from "./types";
+import { hasUsableAddress, isPlaceholderCountry } from "./public-address";
 
 export type JsonLdProfile = {
   business_name?: string | null;
@@ -47,13 +48,14 @@ function safeJsonLd(data: unknown): string {
 
 function postalAddress(profile: JsonLdProfile) {
   const a = profile.address;
-  if (!a && !profile.county && !profile.country) return undefined;
+  if (!hasUsableAddress(a)) return undefined;
   const street = a?.streetAddress || a?.street;
   const city = a?.addressLocality || a?.city;
   const region = a?.addressRegion || a?.county || profile.county || undefined;
   const postal = a?.postalCode;
-  const country = a?.addressCountry || a?.country || profile.country || "GB";
-  if (!street && !city && !postal && !region) return undefined;
+  const countryRaw = a?.addressCountry || a?.country || profile.country || null;
+  const country =
+    countryRaw && !isPlaceholderCountry(countryRaw) ? countryRaw : undefined;
   return {
     "@type": "PostalAddress",
     streetAddress: street || undefined,

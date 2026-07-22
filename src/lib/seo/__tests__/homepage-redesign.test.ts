@@ -89,7 +89,7 @@ describe("homepage model", () => {
   it("falls back without inventing tenant-specific place names", () => {
     const model = buildHomepageModel({
       page: null,
-      settings,
+      settings: { ...settings, website_name: null },
       profile: null,
     });
     expect(model.h1).toBe(FALLBACK_H1);

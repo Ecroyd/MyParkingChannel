@@ -16,7 +16,6 @@ interface BookingHeroProps {
   tagline?: string;
   eyebrow?: string | null;
   trustPoints?: string[];
-  /** Optional full-bleed photographic hero background (not used for map graphics). */
   heroImageUrl?: string | null;
   heroImageAlt?: string | null;
 }
@@ -39,16 +38,33 @@ export default function BookingHero({
     tagline ||
     "Secure parking, straightforward pricing and an easy arrival experience.";
   const points = (trustPoints || []).slice(0, 3);
-  // Map-style assets belong beside How it works — only use photographic URLs as bleed bg
   const looksLikeMap =
     Boolean(heroImageUrl) &&
     /map|direction|location/i.test(`${heroImageUrl} ${heroImageAlt || ""}`);
   const showBleedBackground = Boolean(heroImageUrl) && !looksLikeMap;
 
+  // Banner booking UI must still expose exactly one visible SEO H1.
   if (style === "banner") {
     return (
       <section id="parking" className="w-full border-b border-slate-200 bg-white">
+        <div className="mx-auto max-w-[1240px] px-4 pb-2 pt-10 sm:px-6 lg:px-8">
+          {eyebrow ? (
+            <p
+              className="mb-3 text-xs font-semibold uppercase tracking-[0.16em]"
+              style={{ color: "var(--tenant-secondary, #0284c7)" }}
+            >
+              {eyebrow}
+            </p>
+          ) : null}
+          <h1 className="max-w-3xl text-[2.125rem] font-semibold leading-[1.12] tracking-tight text-slate-900 sm:text-[2.5rem] md:text-[2.75rem]">
+            {h1}
+          </h1>
+          <p className="mt-4 max-w-2xl text-base leading-relaxed text-slate-600 sm:text-lg">
+            {subtitle}
+          </p>
+        </div>
         <BookingBannerHero slug={slug} tenantId={tenantId} />
+        <span className="sr-only">{businessName}</span>
       </section>
     );
   }

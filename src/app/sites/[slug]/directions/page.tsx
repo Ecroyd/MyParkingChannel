@@ -1,10 +1,15 @@
 import { getSiteContext } from "@/lib/site";
 import { Header, Footer, PageShell } from "../_components/SiteChrome";
-import LocationMap from "@/components/maps/LocationMap";
 import type { Metadata } from "next";
 import { generateTenantPageMetadata, getTenantPageRenderData } from "@/lib/seo/page-render";
 import { SiteContentBlocks } from "@/components/site/SiteContentBlocks";
 import { parseContentBlocks } from "@/lib/seo/content-blocks";
+import {
+  formatAddressLines,
+  formatAddressSingleLine,
+  mapsQueryFromProfile,
+} from "@/lib/seo/public-address";
+import Link from "next/link";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -54,33 +59,75 @@ export default async function DirectionsPage({ params }: PageProps) {
   }
 
   const { tenant, profile, branding } = data;
-  const p = profile;
-  const title = p?.business_name ?? branding?.app_name ?? tenant.name ?? "Airport Parking";
+  const p = profile as Record<string, unknown> | null;
+  const title =
+    (p?.business_name as string) ?? branding?.app_name ?? tenant.name ?? "Airport Parking";
   const h1 = seo?.page?.h1 || "Directions";
 
-  const address = p?.address || {
-    street: branding?.contact_address,
-    city: branding?.contact_city,
-    postalCode: branding?.contact_postcode,
-    country: p?.country || branding?.contact_country || undefined,
-  };
+  const addressLines = formatAddressLines({
+    address: p?.address as never,
+    county: p?.county as string | null,
+    country: p?.country as string | null,
+    branding,
+  });
+  const fullAddress = formatAddressSingleLine({
+    address: p?.address as never,
+    county: p?.county as string | null,
+    country: p?.country as string | null,
+    branding,
+  });
 
-  const fullAddress = [
-    address?.street || address?.streetAddress,
-    address?.city || address?.addressLocality,
-    p?.county || address?.county,
-    address?.postalCode,
-    address?.country || address?.addressCountry || p?.country,
-  ]
-    .filter(Boolean)
-    .join(", ");
+  const latitude = (p?.latitude as string | number | null) ?? null;
+  const longitude = (p?.longitude as string | number | null) ?? null;
+  const what3words = typeof p?.what3words === "string" ? p.what3words.trim() : "";
+  const phone = ((p?.phone as string) || branding?.contact_phone || "").trim();
+  const email = ((p?.email as string) || branding?.contact_email || "").trim();
+  const airports = Array.isArray(p?.airports) ? (p!.airports as string[]) : [];
 
-  const latitude = p?.latitude ?? p?.geo?.lat ?? null;
-  const longitude = p?.longitude ?? p?.geo?.lng ?? null;
-
-  const directionsBlock = parseContentBlocks(seo?.page?.content_json).find(
+  const blocks = parseContentBlocks(seo?.page?.content_json);
+  const directionsBlock = blocks.find((b) => b.type === "directions");
+  const homeSeo = await getTenantPageRenderData({
+    slug: resolvedParams.slug,
+    path: "/",
+    pageKey: "home",
+  });
+  const homeDirections = parseContentBlocks(homeSeo?.page?.content_json).find(
     (b) => b.type === "directions"
   );
+
+  const directionsBody =
+    (directionsBlock && "body" in directionsBlock ? directionsBlock.body : null) ||
+    (homeDirections && "body" in homeDirections ? homeDirections.body : null) ||
+    null;
+  const directionsHeading =
+    (directionsBlock && "heading" in directionsBlock ? directionsBlock.heading : null) ||
+    "Arrival directions";
+
+  const mapImageUrl =
+    (directionsBlock && "imageUrl" in directionsBlock
+      ? (directionsBlock as { imageUrl?: string }).imageUrl
+      : null) ||
+    (homeDirections && "imageUrl" in homeDirections
+      ? (homeDirections as { imageUrl?: string }).imageUrl
+      : null) ||
+    null;
+  const mapImageAlt =
+    (directionsBlock && "imageAlt" in directionsBlock
+      ? (directionsBlock as { imageAlt?: string }).imageAlt
+      : null) ||
+    (homeDirections && "imageAlt" in homeDirections
+      ? (homeDirections as { imageAlt?: string }).imageAlt
+      : null) ||
+    "Map showing car park location";
+
+  const mapsQ = mapsQueryFromProfile({
+    latitude,
+    longitude,
+    addressLine: fullAddress,
+  });
+
+  // Terminal transfer: only show if explicitly present in approved directions body.
+  // Do not invent shuttle / walking-time claims.
 
   return (
     <>
@@ -91,7 +138,7 @@ export default async function DirectionsPage({ params }: PageProps) {
           dangerouslySetInnerHTML={{ __html: script }}
         />
       ))}
-      <Header title={title} logoUrl={p?.logo_url} tenantSlug={resolvedParams.slug} />
+      <Header title={title} logoUrl={(p?.logo_url as string) || null} tenantSlug={resolvedParams.slug} />
       <PageShell
         title={h1}
         subtitle={
@@ -105,120 +152,158 @@ export default async function DirectionsPage({ params }: PageProps) {
               <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
                 Address
               </h2>
-              {fullAddress ? (
+              {addressLines.length ? (
                 <div className="mt-3 space-y-3">
-                  <p className="text-base text-slate-800">{fullAddress}</p>
-                  {p?.what3words ? (
+                  <p className="text-base leading-relaxed text-slate-800">
+                    {addressLines.join(", ")}
+                  </p>
+                  {what3words ? (
                     <p className="text-sm text-slate-500">
                       What3Words:{" "}
                       <a
-                        href={`https://what3words.com/${String(p.what3words).replace(/^\/\/\//, "")}`}
+                        href={`https://what3words.com/${what3words.replace(/^\/\/\//, "")}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="tenant-link font-mono"
                       >
-                        {p.what3words}
+                        {what3words}
                       </a>
                     </p>
                   ) : null}
-                  <a
-                    href={`https://maps.google.com/maps?q=${encodeURIComponent(
-                      latitude && longitude ? `${latitude},${longitude}` : fullAddress
-                    )}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="tenant-link inline-block text-sm"
-                  >
-                    Open in Google Maps
-                  </a>
+                  {airports[0] ? (
+                    <p className="text-sm text-slate-600">
+                      Airport served:{" "}
+                      <span className="font-medium text-slate-900">{airports[0]}</span>
+                    </p>
+                  ) : null}
+                  {mapsQ ? (
+                    <a
+                      href={`https://maps.google.com/maps?q=${encodeURIComponent(mapsQ)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="tenant-link inline-block text-sm font-medium"
+                    >
+                      Open in Google Maps
+                    </a>
+                  ) : null}
                 </div>
               ) : (
-                <p className="mt-3 text-slate-500">Address information coming soon.</p>
+                <p className="mt-3 text-slate-500">
+                  Full address details will appear here once published.
+                  {what3words || mapsQ ? " Use What3Words or the map link below in the meantime." : null}
+                </p>
               )}
+              {!addressLines.length && what3words ? (
+                <p className="mt-3 text-sm text-slate-600">
+                  What3Words:{" "}
+                  <a
+                    href={`https://what3words.com/${what3words.replace(/^\/\/\//, "")}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="tenant-link font-mono"
+                  >
+                    {what3words}
+                  </a>
+                </p>
+              ) : null}
+              {!addressLines.length && mapsQ ? (
+                <a
+                  href={`https://maps.google.com/maps?q=${encodeURIComponent(mapsQ)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="tenant-link mt-3 inline-block text-sm font-medium"
+                >
+                  Open in Google Maps
+                </a>
+              ) : null}
             </section>
 
-            {directionsBlock?.body ? (
+            {directionsBody ? (
               <section>
                 <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
-                  {directionsBlock.heading || "Driving directions"}
+                  {directionsHeading}
                 </h2>
                 <div className="mt-3 whitespace-pre-wrap text-base leading-relaxed text-slate-700">
-                  {directionsBlock.body}
+                  {directionsBody}
                 </div>
               </section>
             ) : null}
 
-            {Array.isArray(p?.hours) && p.hours.length > 0 ? (
-              <section>
-                <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
-                  Opening hours
-                </h2>
-                <ul className="mt-3 space-y-1.5 text-sm text-slate-800">
-                  {p.hours.map(
-                    (
-                      hour: { day?: string; open?: string; close?: string },
-                      index: number
-                    ) => (
-                      <li key={index} className="flex max-w-xs justify-between gap-4">
-                        <span>{hour.day}</span>
-                        <span>
-                          {hour.open} – {hour.close}
-                        </span>
-                      </li>
-                    )
-                  )}
-                </ul>
-              </section>
-            ) : null}
-
-            {(p?.phone || p?.email || branding?.contact_phone || branding?.contact_email) && (
+            {(phone || email) && (
               <section>
                 <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
                   Need help?
                 </h2>
                 <div className="mt-3 space-y-2 text-sm">
-                  {(p?.phone || branding?.contact_phone) && (
+                  {phone ? (
                     <p>
-                      <a
-                        href={`tel:${p?.phone || branding?.contact_phone}`}
-                        className="tenant-link"
-                      >
-                        {p?.phone || branding?.contact_phone}
+                      <a href={`tel:${phone}`} className="tenant-link">
+                        {phone}
                       </a>
                     </p>
-                  )}
-                  {(p?.email || branding?.contact_email) && (
+                  ) : null}
+                  {email ? (
                     <p>
-                      <a
-                        href={`mailto:${p?.email || branding?.contact_email}`}
-                        className="tenant-link"
-                      >
-                        {p?.email || branding?.contact_email}
+                      <a href={`mailto:${email}`} className="tenant-link">
+                        {email}
                       </a>
                     </p>
-                  )}
+                  ) : null}
+                  <Link href="/contact" className="tenant-link inline-block">
+                    Contact page
+                  </Link>
                 </div>
               </section>
             )}
           </div>
 
-          <div className="tenant-panel overflow-hidden p-2">
-            <LocationMap
-              className="h-80 w-full rounded-lg"
-              lat={latitude}
-              lng={longitude}
-              zoom={15}
-              title={p?.business_name || "Parking Location"}
-              address={fullAddress}
-            />
+          <div>
+            {mapImageUrl ? (
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={mapImageUrl}
+                  alt={mapImageAlt || "Location map"}
+                  width={900}
+                  height={700}
+                  className="aspect-[4/3] w-full object-cover"
+                />
+              </div>
+            ) : mapsQ ? (
+              <div
+                className="flex min-h-[280px] flex-col justify-between rounded-xl p-8 text-white"
+                style={{
+                  background:
+                    "linear-gradient(145deg, color-mix(in srgb, var(--tenant-primary, #1e40af) 92%, #0f172a), #0f172a 70%)",
+                }}
+              >
+                <div>
+                  <p className="text-2xl font-semibold tracking-tight">Find us on the map</p>
+                  <p className="mt-3 text-[15px] leading-relaxed text-white/80">
+                    Open Google Maps for the pin and turn-by-turn directions.
+                  </p>
+                </div>
+                <a
+                  href={`https://maps.google.com/maps?q=${encodeURIComponent(mapsQ)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-8 inline-flex h-12 items-center justify-center rounded-lg bg-white px-5 text-[15px] font-semibold text-slate-900"
+                >
+                  Open Google Maps
+                </a>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-8 text-sm text-slate-600">
+                A location map will appear here once coordinates or a map image are published
+                for this site.
+              </div>
+            )}
           </div>
         </div>
 
         <SiteContentBlocks
-          contentJson={parseContentBlocks(seo?.page?.content_json).filter(
-            (b) => b.type !== "directions"
-          )}
-          profile={p}
+          contentJson={blocks.filter((b) => b.type !== "directions")}
+          profile={p as never}
         />
       </PageShell>
       <Footer title={title} />

@@ -3,6 +3,9 @@ import { Header, Footer, PageShell } from "../_components/SiteChrome";
 import type { Metadata } from "next";
 import { generateTenantPageMetadata, getTenantPageRenderData } from "@/lib/seo/page-render";
 import { SiteContentBlocks } from "@/components/site/SiteContentBlocks";
+import { formatAddressLines } from "@/lib/seo/public-address";
+import { buildLocalBusinessJsonLd } from "@/lib/seo/json-ld";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
@@ -48,22 +51,25 @@ export default async function ContactPage({
     "Airport Parking";
   const h1 = seo?.page?.h1 || "Contact us";
 
-  const phone = (profile?.phone as string) || ctx.branding?.contact_phone;
-  const email = (profile?.email as string) || ctx.branding?.contact_email;
-  const addressObj = (profile?.address as Record<string, string>) || {};
-  const address = [
-    addressObj.street || addressObj.streetAddress || ctx.branding?.contact_address,
-    addressObj.city || addressObj.addressLocality || ctx.branding?.contact_city,
-    (profile?.county as string) || addressObj.county,
-    addressObj.postalCode || ctx.branding?.contact_postcode,
-    (profile?.country as string) ||
-      addressObj.country ||
-      ctx.branding?.contact_country,
-  ]
-    .filter(Boolean)
-    .join(", ");
-
+  const phone = ((profile?.phone as string) || ctx.branding?.contact_phone || "").trim();
+  const email = ((profile?.email as string) || ctx.branding?.contact_email || "").trim();
+  const addressLines = formatAddressLines({
+    address: profile?.address as never,
+    county: profile?.county as string | null,
+    country: profile?.country as string | null,
+    branding: ctx.branding,
+  });
   const hours = Array.isArray(profile?.hours) ? profile!.hours : null;
+
+  const localLd =
+    seo?.pageUrl && profile
+      ? buildLocalBusinessJsonLd({
+          profile: profile as never,
+          url: seo.pageUrl,
+          schemaType: seo?.bundle.settings?.schema_business_type,
+          logo: seo?.bundle.settings?.logo_url || (profile?.logo_url as string),
+        })
+      : null;
 
   return (
     <>
@@ -74,13 +80,31 @@ export default async function ContactPage({
           dangerouslySetInnerHTML={{ __html: script }}
         />
       ))}
+      {localLd ? (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(localLd).replace(/</g, "\\u003c"),
+          }}
+        />
+      ) : null}
       <Header
         title={title}
         logoUrl={profile?.logo_url as string}
         tenantSlug={resolvedParams.slug}
       />
-      <PageShell title={h1} subtitle={seo?.page?.excerpt || "Questions about arrival or your booking? We're here to help."}>
+      <PageShell
+        title={h1}
+        subtitle={
+          seo?.page?.excerpt ||
+          "Questions about arrival or your booking? We're here to help."
+        }
+      >
         <dl className="grid gap-5 text-sm sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <dt className="text-slate-500">Business</dt>
+            <dd className="mt-1 font-medium text-slate-900">{title}</dd>
+          </div>
           {email ? (
             <div>
               <dt className="text-slate-500">Email</dt>
@@ -101,10 +125,10 @@ export default async function ContactPage({
               </dd>
             </div>
           ) : null}
-          {address ? (
+          {addressLines.length ? (
             <div className="sm:col-span-2">
               <dt className="text-slate-500">Address</dt>
-              <dd className="mt-1 text-slate-800">{address}</dd>
+              <dd className="mt-1 text-slate-800">{addressLines.join(", ")}</dd>
             </div>
           ) : null}
           {hours && hours.length > 0 ? (
@@ -112,24 +136,27 @@ export default async function ContactPage({
               <dt className="text-slate-500">Opening hours</dt>
               <dd className="mt-2 space-y-1 text-slate-800">
                 {hours.map(
-                  (h: { day?: string; open?: string; close?: string }, i: number) => (
-                    <div key={i} className="flex max-w-sm justify-between gap-4">
-                      <span>{h.day}</span>
-                      <span>
-                        {h.open} – {h.close}
-                      </span>
-                    </div>
-                  )
+                  (h: { day?: string; open?: string; close?: string }, i: number) =>
+                    h.day && h.open && h.close ? (
+                      <div key={i} className="flex max-w-sm justify-between gap-4">
+                        <span>{h.day}</span>
+                        <span>
+                          {h.open} – {h.close}
+                        </span>
+                      </div>
+                    ) : null
                 )}
               </dd>
             </div>
-          ) : ctx.branding?.business_hours ? (
-            <div className="sm:col-span-2">
-              <dt className="text-slate-500">Business hours</dt>
-              <dd className="mt-1 text-slate-800">{ctx.branding.business_hours}</dd>
-            </div>
           ) : null}
         </dl>
+
+        <div className="mt-8">
+          <Link href="/directions" className="tenant-link text-sm font-medium">
+            Get directions
+          </Link>
+        </div>
+
         <SiteContentBlocks
           contentJson={seo?.page?.content_json}
           profile={profile as never}

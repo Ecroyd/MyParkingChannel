@@ -172,8 +172,9 @@ export function Footer({
   ];
   const helpLinks = [
     { href: "/contact", label: "Contact" },
-    { href: "/contact", label: "Terms" },
-    { href: "/contact", label: "Privacy" },
+    { href: "/faq", label: "FAQ" },
+    { href: "/terms", label: "Terms" },
+    { href: "/privacy", label: "Privacy" },
   ];
 
   const hasContact =
@@ -272,10 +273,10 @@ export function Footer({
             © {year} {title}
           </p>
           <div className="flex flex-wrap gap-5">
-            <Link href="/contact" className="hover:text-slate-300">
+            <Link href="/terms" className="hover:text-slate-300">
               Terms
             </Link>
-            <Link href="/contact" className="hover:text-slate-300">
+            <Link href="/privacy" className="hover:text-slate-300">
               Privacy
             </Link>
             <button type="button" className="hover:text-slate-300" aria-label="Cookie settings">

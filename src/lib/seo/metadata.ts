@@ -92,13 +92,6 @@ export function buildTenantPageMetadata(args: {
     profile: args.profile,
   });
 
-  const robots = resolveRobots({
-    page: args.page,
-    settings: args.settings,
-    requestHost: args.requestHost,
-    hasBookingQuery: hasIndexableBookingQuery(args.searchParams),
-  });
-
   const canonical = resolveCanonicalUrl({
     domains: args.domains,
     pagePath: args.page?.canonical_path || args.pagePath,
@@ -106,6 +99,14 @@ export function buildTenantPageMetadata(args: {
     canonicalOverride: args.settings?.canonical_domain_override,
     sitePrimaryDomain: args.sitePrimaryDomain,
     requestHost: args.requestHost,
+  });
+
+  const robots = resolveRobots({
+    page: args.page,
+    settings: args.settings,
+    requestHost: args.requestHost,
+    canonicalHost: canonical.host,
+    hasBookingQuery: hasIndexableBookingQuery(args.searchParams),
   });
 
   const ogTitle = args.page?.og_title?.trim() || title;

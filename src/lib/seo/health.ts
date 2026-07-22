@@ -10,6 +10,7 @@ import type {
   TenantDomainRow,
 } from "./types";
 import type { DomainCandidate } from "./canonical";
+import { hasUsableAddress } from "./public-address";
 
 export type HealthInput = {
   settings: SiteSeoSettings | null;
@@ -29,15 +30,7 @@ export type HealthInput = {
 };
 
 function hasAddress(profile: HealthInput["profile"]): boolean {
-  if (!profile?.address) return false;
-  const a = profile.address;
-  return Boolean(
-    a.street ||
-      a.streetAddress ||
-      a.city ||
-      a.addressLocality ||
-      a.postalCode
-  );
+  return hasUsableAddress(profile?.address);
 }
 
 export function runSeoHealthChecks(input: HealthInput): HealthCheck[] {
@@ -111,6 +104,56 @@ export function runSeoHealthChecks(input: HealthInput): HealthCheck[] {
       detail: "No public phone or email is set on the business profile.",
       fixHint: "Add contact details in Local Business.",
     });
+  } else if (!input.profile?.phone?.trim()) {
+    checks.push({
+      id: "missing_telephone",
+      severity: "recommended",
+      title: "Missing telephone",
+      detail: "No public telephone is set on the business profile.",
+      fixHint: "Add a public telephone in Local Business.",
+    });
+  }
+
+  const termsPage = input.pages.find((p) => p.page_key === "terms" || p.path === "/terms");
+  const privacyPage = input.pages.find((p) => p.page_key === "privacy" || p.path === "/privacy");
+  if (!termsPage || termsPage.status !== "published") {
+    checks.push({
+      id: "missing_terms_page",
+      severity: "recommended",
+      title: "Missing Terms page",
+      detail: "No published Terms page was found for footer legal links.",
+      fixHint: "Publish a Terms page under Pages (path /terms).",
+    });
+  }
+  if (!privacyPage || privacyPage.status !== "published") {
+    checks.push({
+      id: "missing_privacy_page",
+      severity: "recommended",
+      title: "Missing Privacy page",
+      detail: "No published Privacy page was found for footer legal links.",
+      fixHint: "Publish a Privacy page under Pages (path /privacy).",
+    });
+  }
+
+  if (
+    input.settings?.indexing_mode === "live_indexable" &&
+    input.settings.allow_indexing !== false &&
+    input.settings.migration_target_domain
+  ) {
+    const primaryHost = resolvePrimaryCanonicalHost(input.domains as DomainCandidate[], {
+      canonicalOverride: input.settings.canonical_domain_override,
+      sitePrimaryDomain: input.sitePrimaryDomain,
+    });
+    const migration = normalizeHostname(input.settings.migration_target_domain);
+    if (primaryHost && migration && primaryHost !== migration) {
+      checks.push({
+        id: "preview_domain_allowing_indexing",
+        severity: "critical",
+        title: "Testing domain may be indexable during migration",
+        detail: `Primary canonical host is ${primaryHost} while migration target is ${migration}. Consider staging_noindex or canonical_to_existing until cutover.`,
+        fixHint: "Set indexing mode to staging_noindex or canonical_to_existing in Site Defaults.",
+      });
+    }
   }
 
   const pathSet = new Map<string, string[]>();

@@ -12,6 +12,7 @@ import {
   faqItemsWithAnswers,
 } from "@/lib/seo/content-blocks";
 import type { SitePageRow, SiteSeoSettings } from "@/lib/seo/types";
+import { hasUsableAddress as addressIsUsable } from "@/lib/seo/public-address";
 
 export type PresentationJson = {
   footerDescription?: string;
@@ -57,10 +58,16 @@ const DEFAULT_SECTIONS = {
   finalCta: true,
 };
 
-/** Neutral fallbacks — never tenant-specific names/places. */
+/** Neutral fallbacks — never tenant-specific places. Prefer business-name fallback below. */
 export const FALLBACK_H1 = "Airport parking made simple";
 export const FALLBACK_SUBTITLE =
   "Secure parking, straightforward pricing and an easy arrival experience.";
+
+export function fallbackH1WithBusinessName(businessName?: string | null): string {
+  const name = businessName?.trim();
+  if (name) return `Secure Airport Parking with ${name}`;
+  return FALLBACK_H1;
+}
 export const FALLBACK_TRUST_POINTS = [
   "Secure onsite parking",
   "Straightforward arrivals",
@@ -146,11 +153,16 @@ export function buildHomepageModel(args: {
     (featureItems.length ? featureItems.slice(0, 4).map((f) => f.title) : null) ||
     FALLBACK_TRUST_POINTS;
 
+  const businessName =
+    (typeof args.profile?.business_name === "string" && args.profile.business_name.trim()) ||
+    args.settings?.website_name?.trim() ||
+    null;
+
   const h1 =
     args.page?.h1?.trim() ||
     hero?.title?.trim() ||
     args.tenantHeroTitle?.trim() ||
-    FALLBACK_H1;
+    fallbackH1WithBusinessName(businessName);
 
   const subtitle =
     args.page?.excerpt?.trim() ||
@@ -213,13 +225,5 @@ export function buildHomepageModel(args: {
 }
 
 export function hasUsableAddress(address: unknown): boolean {
-  if (!address || typeof address !== "object") return false;
-  const a = address as Record<string, unknown>;
-  const street = String(a.street || a.streetAddress || "").trim();
-  const city = String(a.city || a.addressLocality || "").trim();
-  const postal = String(a.postalCode || "").trim();
-  // Reject incomplete placeholders like country-only "UK"
-  if (!street && !city && !postal) return false;
-  if (!street && !city && postal.length <= 3) return false;
-  return Boolean(street || city || postal);
+  return addressIsUsable(address);
 }
