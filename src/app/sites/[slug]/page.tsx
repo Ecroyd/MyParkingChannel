@@ -199,6 +199,14 @@ export default async function TenantHome({
         <HowItWorksSection
           heading={home.howItWorks.heading}
           steps={home.howItWorks.steps ?? []}
+          mapImageUrl={
+            home.locationBlock?.imageUrl || home.heroImageUrl || null
+          }
+          mapImageAlt={
+            home.locationBlock?.imageAlt ||
+            home.heroImageAlt ||
+            "Map showing car park location"
+          }
         />
       ) : null}
 
@@ -221,8 +229,6 @@ export default async function TenantHome({
           what3words={p?.what3words as string | null}
           latitude={(p?.latitude as string | number | null) ?? null}
           longitude={(p?.longitude as string | number | null) ?? null}
-          imageUrl={home.locationBlock?.imageUrl || home.heroImageUrl}
-          imageAlt={home.locationBlock?.imageAlt || home.heroImageAlt}
         />
       ) : null}
 

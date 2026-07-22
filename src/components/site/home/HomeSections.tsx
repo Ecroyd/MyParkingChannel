@@ -68,65 +68,146 @@ export function HowItWorksSection({
   heading,
   intro,
   steps,
+  mapImageUrl,
+  mapImageAlt,
 }: {
   heading?: string;
   intro?: string;
   steps: ListItem[];
+  mapImageUrl?: string | null;
+  mapImageAlt?: string | null;
 }) {
   if (!steps.length) return null;
+
+  const stepsList = (
+    <ol className="relative mt-8 space-y-7">
+      {steps.slice(0, 3).map((step, i) => (
+        <li key={step.title + i} className="relative flex gap-4">
+          <span
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-base font-semibold"
+            style={{
+              backgroundColor: "var(--tenant-action, #1e40af)",
+              color: "var(--tenant-action-fg, #fff)",
+            }}
+          >
+            {i + 1}
+          </span>
+          <div className="min-w-0 pt-1">
+            <h3 className="text-lg font-semibold text-slate-900 sm:text-xl">{step.title}</h3>
+            {step.body ? (
+              <p className="mt-1.5 text-[15px] leading-relaxed text-slate-600 sm:text-base">
+                {step.body}
+              </p>
+            ) : null}
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+
   return (
     <section id="how-it-works" className={`bg-slate-50 ${SECTION_Y}`}>
       <div className={SHELL}>
-        <div className="mx-auto max-w-2xl text-center">
-          <p
-            className="text-xs font-semibold uppercase tracking-[0.16em]"
-            style={{ color: "var(--tenant-primary, #1e40af)" }}
-          >
-            Simple process
-          </p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900 sm:text-[2.125rem]">
-            {heading || "How it works"}
-          </h2>
-          {intro ? (
-            <p className="mt-4 text-base leading-relaxed text-slate-600 sm:text-lg">
-              {intro}
-            </p>
-          ) : (
-            <p className="mt-4 text-base leading-relaxed text-slate-600 sm:text-lg">
-              Reserve online, arrive on the day, and continue to the terminal with confidence.
-            </p>
-          )}
-        </div>
-
-        <ol className="relative mt-12 grid gap-10 sm:grid-cols-3 sm:gap-8">
-          {steps.slice(0, 3).map((step, i) => (
-            <li key={step.title + i} className="relative text-center sm:text-left">
-              {i < Math.min(steps.length, 3) - 1 ? (
-                <div
-                  className="pointer-events-none absolute left-[calc(50%+2rem)] right-[-2rem] top-6 hidden h-px bg-slate-200 sm:block"
-                  aria-hidden
-                />
-              ) : null}
-              <div className="flex flex-col items-center sm:items-start">
-                <span
-                  className="relative z-[1] flex h-12 w-12 items-center justify-center rounded-full text-lg font-semibold"
+        {mapImageUrl ? (
+          <div className="grid items-start gap-10 lg:grid-cols-2 lg:gap-14 lg:items-center">
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.08)]">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={mapImageUrl}
+                alt={mapImageAlt || "Map showing car park location"}
+                width={900}
+                height={620}
+                className="aspect-[4/3] w-full object-cover object-center"
+                loading="lazy"
+              />
+            </div>
+            <div>
+              <p
+                className="text-xs font-semibold uppercase tracking-[0.16em]"
+                style={{ color: "var(--tenant-primary, #1e40af)" }}
+              >
+                Simple process
+              </p>
+              <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900 sm:text-[2.125rem]">
+                {heading || "How it works"}
+              </h2>
+              {intro ? (
+                <p className="mt-4 text-base leading-relaxed text-slate-600 sm:text-lg">
+                  {intro}
+                </p>
+              ) : (
+                <p className="mt-4 text-base leading-relaxed text-slate-600 sm:text-lg">
+                  Reserve online, arrive on the day, and continue to the terminal with confidence.
+                </p>
+              )}
+              {stepsList}
+              <div className="mt-8">
+                <Link
+                  href="/directions"
+                  className="inline-flex h-12 items-center rounded-lg px-5 text-[15px] font-semibold"
                   style={{
                     backgroundColor: "var(--tenant-action, #1e40af)",
                     color: "var(--tenant-action-fg, #fff)",
                   }}
                 >
-                  {i + 1}
-                </span>
-                <h3 className="mt-5 text-xl font-semibold text-slate-900">{step.title}</h3>
-                {step.body ? (
-                  <p className="mt-3 max-w-sm text-[15px] leading-relaxed text-slate-600 sm:text-base">
-                    {step.body}
-                  </p>
-                ) : null}
+                  Full directions
+                </Link>
               </div>
-            </li>
-          ))}
-        </ol>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="mx-auto max-w-2xl text-center">
+              <p
+                className="text-xs font-semibold uppercase tracking-[0.16em]"
+                style={{ color: "var(--tenant-primary, #1e40af)" }}
+              >
+                Simple process
+              </p>
+              <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-900 sm:text-[2.125rem]">
+                {heading || "How it works"}
+              </h2>
+              {intro ? (
+                <p className="mt-4 text-base leading-relaxed text-slate-600 sm:text-lg">
+                  {intro}
+                </p>
+              ) : (
+                <p className="mt-4 text-base leading-relaxed text-slate-600 sm:text-lg">
+                  Reserve online, arrive on the day, and continue to the terminal with confidence.
+                </p>
+              )}
+            </div>
+            <ol className="relative mt-12 grid gap-10 sm:grid-cols-3 sm:gap-8">
+              {steps.slice(0, 3).map((step, i) => (
+                <li key={step.title + i} className="relative text-center sm:text-left">
+                  {i < Math.min(steps.length, 3) - 1 ? (
+                    <div
+                      className="pointer-events-none absolute left-[calc(50%+2rem)] right-[-2rem] top-6 hidden h-px bg-slate-200 sm:block"
+                      aria-hidden
+                    />
+                  ) : null}
+                  <div className="flex flex-col items-center sm:items-start">
+                    <span
+                      className="relative z-[1] flex h-12 w-12 items-center justify-center rounded-full text-lg font-semibold"
+                      style={{
+                        backgroundColor: "var(--tenant-action, #1e40af)",
+                        color: "var(--tenant-action-fg, #fff)",
+                      }}
+                    >
+                      {i + 1}
+                    </span>
+                    <h3 className="mt-5 text-xl font-semibold text-slate-900">{step.title}</h3>
+                    {step.body ? (
+                      <p className="mt-3 max-w-sm text-[15px] leading-relaxed text-slate-600 sm:text-base">
+                        {step.body}
+                      </p>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </>
+        )}
       </div>
     </section>
   );
