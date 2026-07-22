@@ -7,8 +7,12 @@ import { Analytics } from "@vercel/analytics/next";
 export const metadata: Metadata = {
   title: 'Parking Channel',
   icons: {
-    icon: '/parking favicon.png',
-    apple: '/parking favicon.png',
+    icon: [
+      { url: '/favicon.png', type: 'image/png' },
+      { url: '/favicon-32.png', sizes: '32x32', type: 'image/png' },
+    ],
+    apple: [{ url: '/apple-icon.png', sizes: '180x180', type: 'image/png' }],
+    shortcut: '/favicon.png',
   },
 };
 

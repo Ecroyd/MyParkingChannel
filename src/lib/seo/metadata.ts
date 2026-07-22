@@ -125,6 +125,20 @@ export function buildTenantPageMetadata(args: {
     title,
     description,
     metadataBase,
+    icons: {
+      icon: [
+        {
+          url: args.settings?.favicon_url?.trim() || "/favicon.png",
+          type: "image/png",
+        },
+      ],
+      apple: [
+        {
+          url: args.settings?.favicon_url?.trim() || "/favicon.png",
+          type: "image/png",
+        },
+      ],
+    },
     robots: {
       index: robots.index,
       follow: robots.follow,

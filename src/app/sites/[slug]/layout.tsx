@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next";
 import { Manrope } from "next/font/google";
 import { getSiteContext } from "@/lib/site";
 import { TenantIntegrations } from "@/components/site/TenantIntegrations";
+import { createServerClient } from "@/lib/supabase/server";
 
 const tenantFont = Manrope({
   subsets: ["latin"],
@@ -11,6 +12,8 @@ const tenantFont = Manrope({
 });
 
 export const dynamic = "force-dynamic";
+
+const DEFAULT_FAVICON = "/favicon.png";
 
 export async function generateMetadata({
   params,
@@ -21,16 +24,40 @@ export async function generateMetadata({
   const ctx = await getSiteContext(resolvedParams.slug);
 
   if (!ctx) {
-    return { title: "Site unavailable" };
+    return {
+      title: "Site unavailable",
+      icons: { icon: DEFAULT_FAVICON },
+    };
   }
+
+  let settingsFavicon: string | null = null;
+  if (ctx.site?.id) {
+    try {
+      const supabase = await createServerClient();
+      const { data } = await supabase
+        .from("site_seo_settings")
+        .select("favicon_url, website_name")
+        .eq("site_id", ctx.site.id)
+        .maybeSingle();
+      settingsFavicon = (data?.favicon_url as string | null) || null;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const favicon =
+    settingsFavicon?.trim() ||
+    ctx.branding?.icon_192_url?.trim() ||
+    DEFAULT_FAVICON;
 
   const title = ctx.branding?.app_name || ctx.tenant.name || "Airport Parking";
   return {
     title,
     description: "Secure airport parking. Simple booking. Close to the terminal.",
     icons: {
-      icon: ctx.branding?.icon_192_url || "/icons/car logo.png",
-      apple: ctx.branding?.icon_192_url || "/icons/car logo.png",
+      icon: [{ url: favicon, type: "image/png" }],
+      apple: [{ url: favicon, type: "image/png" }],
+      shortcut: favicon,
     },
   };
 }

@@ -57,9 +57,9 @@ async function getBrandingByHost(host?: string) {
         theme_color: branding.theme_color,
         background_color: branding.background_color,
         start_url: branding.start_url,
-        icon_192_url: branding.icon_192_url || "/parking favicon.png",
-        icon_512_url: branding.icon_512_url || "/parking favicon.png",
-        maskable_512_url: branding.maskable_512_url || "/parking favicon.png"
+        icon_192_url: branding.icon_192_url || "/favicon.png",
+        icon_512_url: branding.icon_512_url || "/favicon.png",
+        maskable_512_url: branding.maskable_512_url || "/favicon.png"
       }
     }
   }
@@ -71,9 +71,9 @@ async function getBrandingByHost(host?: string) {
     theme_color: "#0B0B0B",
     background_color: "#FFFFFF",
     start_url: "/",
-    icon_192_url: "/parking favicon.png",
-    icon_512_url: "/parking favicon.png",
-    maskable_512_url: "/parking favicon.png"
+    icon_192_url: "/favicon.png",
+    icon_512_url: "/favicon.png",
+    maskable_512_url: "/favicon.png"
   };
 }
 
