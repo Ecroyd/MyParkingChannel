@@ -11,10 +11,10 @@ import {
   Legend,
   CartesianGrid,
 } from 'recharts';
-import { createBrowserClient } from '@supabase/ssr';
 import { format, eachDayOfInterval } from 'date-fns';
 import { colorForSourceKey } from '@/lib/supplier/chartColors';
 import { getSourceLabel } from '@/lib/supplier/labels';
+import { createClient } from '@/lib/supabase/client';
 
 type Row = { day: string; channel: string; occupancy: number };
 
@@ -28,10 +28,7 @@ type Props = {
 
 type ChartRow = { day: string } & Record<string, number>;
 
-const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 export default function DailyOccupancyStacked({ tenantId, start, end, tz = 'UTC', vehicle = null }: Props) {
   const [rows, setRows] = React.useState<Row[]>([]);

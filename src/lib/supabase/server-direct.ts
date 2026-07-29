@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { telemetryClientOptions } from "./queryTelemetry";
 
 export function createServerClientDirect(opts?: { admin?: boolean }) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -8,5 +9,8 @@ export function createServerClientDirect(opts?: { admin?: boolean }) {
     throw new Error("Supabase env missing: check NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY.");
   }
 
-  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    ...telemetryClientOptions(opts?.admin ? "server-direct-admin" : "server-direct"),
+  });
 }

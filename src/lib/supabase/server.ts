@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { createServerClient as createSSRServerClient } from '@supabase/ssr';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { telemetryClientOptions } from './queryTelemetry';
 
 export async function getServerSupabase() {
   const cookieStore = await cookies();
@@ -8,6 +9,7 @@ export async function getServerSupabase() {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      ...telemetryClientOptions('server-ssr'),
       cookies: {
         get: (name: string) => {
           return cookieStore.get(name)?.value;
@@ -40,7 +42,10 @@ export function supabaseAdmin() {
   return createSupabaseClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } }
+    {
+      auth: { persistSession: false },
+      ...telemetryClientOptions('server-admin'),
+    }
   );
 }
 

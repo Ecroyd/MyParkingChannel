@@ -27,7 +27,7 @@ type Booking = {
   end_at: string;
   money_charged?: number | null;
   money_received?: number | null;
-  notes: string | null;
+  notes?: string | null;
   flight_number: string | null;
   return_flight_number?: string | null;
   is_incomplete?: boolean;
@@ -88,6 +88,28 @@ export default function BookingDetailsModal({
     setLocalBooking(booking);
     setTab('overview');
   }, [booking?.id, open]);
+
+  // List rows omit large fields (e.g. notes). Load full booking when the modal opens
+  // so edit/overview behaviour is unchanged without widening the list select.
+  React.useEffect(() => {
+    if (!open || !booking?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/bookings/${booking.id}`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const full = await res.json();
+        if (!cancelled && full?.id) {
+          setLocalBooking(full);
+        }
+      } catch {
+        // Keep list-row data if detail fetch fails
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, booking?.id]);
 
   const displayBooking = localBooking ?? booking;
 

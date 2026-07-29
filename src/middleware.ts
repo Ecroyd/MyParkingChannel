@@ -2,6 +2,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createTelemetryFetch } from "@/lib/supabase/queryTelemetry";
 
 const PLATFORM_HOSTS = [
   "myparkingchannel.app",
@@ -21,6 +22,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
   {
     auth: { persistSession: false },
+    global: { fetch: createTelemetryFetch("middleware") },
   }
 );
 

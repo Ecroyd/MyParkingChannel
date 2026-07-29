@@ -1,16 +1,34 @@
 // src/app/admin/bookings-server/page.tsx
 export const dynamic = 'force-dynamic';
+
 import { createServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
 import BookingsServerClient from './BookingsServerClient';
+import { resolveAdminBookingListParams } from '@/lib/bookings/adminBookingListParams';
+import { fetchAdminBookingListPage } from '@/lib/bookings/adminBookingListQuery';
+import { withQueryTelemetryContext } from '@/lib/supabase/queryTelemetry';
 
-export default async function BookingsServerPage() {
+type SearchParams = Record<string, string | string[] | undefined>;
+
+function first(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+export default async function BookingsServerPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
+  const sp = await searchParams;
   const supabase = await createServerClient();
-  const adminClient = await createAdminClient();
+  const adminClient = createAdminClient();
 
-  // Get current user
-  const { data: { user }, error: userError } = await supabase.auth.getUser();
-  
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
   if (userError || !user) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -21,16 +39,12 @@ export default async function BookingsServerPage() {
     );
   }
 
-  console.log('🔍 Bookings: Checking user_tenants for user:', user.id)
-
-  // Get user's tenants
   const { data: userTenants, error: userTenantsError } = await adminClient
     .from('user_tenants')
     .select('tenant_id, role, is_default')
     .eq('user_id', user.id);
 
   if (userTenantsError) {
-    console.log('❌ Bookings: Error fetching user tenants:', userTenantsError)
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -40,13 +54,9 @@ export default async function BookingsServerPage() {
     );
   }
 
-  console.log('📊 Bookings: User tenants found:', userTenants?.length || 0, userTenants)
-
-  // Find the default tenant or use the first one
-  const userTenant = userTenants?.find(ut => ut.is_default) || userTenants?.[0];
+  const userTenant = userTenants?.find((ut) => ut.is_default) || userTenants?.[0];
 
   if (!userTenant?.tenant_id) {
-    console.log('ℹ️ Bookings: No tenant found for user')
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -56,9 +66,6 @@ export default async function BookingsServerPage() {
     );
   }
 
-  console.log('✅ Bookings: Using tenant:', userTenant.tenant_id)
-
-  // Get tenant details
   const { data: tenant, error: tenantError } = await adminClient
     .from('tenants')
     .select('id, name, slug, timezone, default_capacity')
@@ -66,7 +73,6 @@ export default async function BookingsServerPage() {
     .single();
 
   if (tenantError || !tenant) {
-    console.log('❌ Bookings: Error fetching tenant details:', tenantError)
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -76,45 +82,32 @@ export default async function BookingsServerPage() {
     );
   }
 
-  console.log('📊 Bookings: Tenant details found:', tenant)
+  const params = resolveAdminBookingListParams({
+    tenantId: tenant.id,
+    page: first(sp.page),
+    pageSize: first(sp.pageSize),
+    search: first(sp.search),
+    dateFrom: first(sp.dateFrom),
+    dateTo: first(sp.dateTo),
+    status: first(sp.status),
+    source: first(sp.source),
+    sort: first(sp.sort),
+    datesCleared: first(sp.datesCleared),
+    timezone: tenant.timezone || 'Europe/London',
+  });
 
-  // Get bookings using admin client to bypass RLS
-  console.log('🔍 Bookings: Fetching bookings for tenant:', tenant.id)
-  
-  let bookings: any[] = [];
-  
+  let initialList;
   try {
-    const { data: bookingsData, error: bookingsError } = await adminClient
-      .from('bookings')
-      .select('*')
-      .eq('tenant_id', tenant.id)
-      .order('created_at', { ascending: false })
-      .limit(1000);
-
-    if (bookingsError) {
-      console.log('❌ Bookings: Error fetching bookings:', bookingsError)
-      console.log('❌ Bookings: Error details:', JSON.stringify(bookingsError, null, 2))
-      return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <div className="text-center">
-            <p className="text-gray-600">Error loading bookings: {bookingsError.message}</p>
-            <p className="text-sm text-gray-500 mt-2">Check console for details</p>
-          </div>
-        </div>
-      );
-    }
-
-    bookings = bookingsData || [];
-    console.log('📊 Bookings: Bookings found:', bookings.length)
-    if (bookings.length > 0) {
-      console.log('📊 Bookings: Sample booking:', bookings[0])
-    }
+    initialList = await withQueryTelemetryContext(
+      { route: '/admin/bookings-server', queryName: 'admin.bookings.list.ssr' },
+      () => fetchAdminBookingListPage(adminClient, params, 'admin.bookings.list.ssr')
+    );
   } catch (error) {
-    console.log('❌ Bookings: Exception during query:', error)
+    const message = error instanceof Error ? error.message : 'Unknown error';
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <p className="text-gray-600">Exception loading bookings: {error instanceof Error ? error.message : 'Unknown error'}</p>
+          <p className="text-gray-600">Error loading bookings: {message}</p>
         </div>
       </div>
     );
@@ -124,7 +117,8 @@ export default async function BookingsServerPage() {
     <BookingsServerClient
       user={user}
       tenant={tenant}
-      bookings={bookings}
+      initialList={initialList}
+      initialParams={params}
     />
   );
 }

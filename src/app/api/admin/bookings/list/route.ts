@@ -1,67 +1,85 @@
-// GET /api/admin/bookings/list - Get all bookings for a tenant
-// Authenticated via user session (admin/owner role required)
+// GET /api/admin/bookings/list — paginated admin booking list (max 100 rows)
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { createServerClient } from '@/lib/supabase/server';
+import { resolveAdminBookingListParams } from '@/lib/bookings/adminBookingListParams';
+import { fetchAdminBookingListPage } from '@/lib/bookings/adminBookingListQuery';
+import { withQueryTelemetryContext } from '@/lib/supabase/queryTelemetry';
 
 export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const tenantId = searchParams.get('tenantId');
+  return withQueryTelemetryContext(
+    { route: '/api/admin/bookings/list', queryName: 'admin.bookings.list.api' },
+    async () => {
+      try {
+        const { searchParams } = new URL(req.url);
+        const tenantId = searchParams.get('tenantId');
 
-    if (!tenantId) {
-      return NextResponse.json({ error: 'tenantId is required' }, { status: 400 });
+        if (!tenantId) {
+          return NextResponse.json({ error: 'tenantId is required' }, { status: 400 });
+        }
+
+        const supabase = await createServerClient();
+        const adminClient = createAdminClient();
+
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+        if (userError || !user) {
+          return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+        }
+
+        const { data: userTenant } = await adminClient
+          .from('user_tenants')
+          .select('tenant_id, role')
+          .eq('user_id', user.id)
+          .eq('tenant_id', tenantId)
+          .maybeSingle();
+
+        if (!userTenant || (userTenant.role !== 'admin' && userTenant.role !== 'owner')) {
+          return NextResponse.json(
+            { error: 'Access denied. Admin role required.' },
+            { status: 403 }
+          );
+        }
+
+        const { data: tenant } = await adminClient
+          .from('tenants')
+          .select('timezone')
+          .eq('id', tenantId)
+          .maybeSingle();
+
+        const params = resolveAdminBookingListParams({
+          tenantId,
+          page: searchParams.get('page'),
+          pageSize: searchParams.get('pageSize'),
+          search: searchParams.get('search'),
+          dateFrom: searchParams.get('dateFrom'),
+          dateTo: searchParams.get('dateTo'),
+          status: searchParams.get('status'),
+          source: searchParams.get('source'),
+          sort: searchParams.get('sort'),
+          sortField: searchParams.get('sortField'),
+          sortDirection: searchParams.get('sortDirection'),
+          includeCancelled: searchParams.get('includeCancelled'),
+          includeFinished: searchParams.get('includeFinished'),
+          datesCleared: searchParams.get('datesCleared'),
+          timezone: tenant?.timezone || 'Europe/London',
+        });
+
+        const result = await fetchAdminBookingListPage(
+          adminClient,
+          params,
+          'admin.bookings.list.api'
+        );
+
+        return NextResponse.json(result);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Internal server error';
+        console.error('[Bookings List] Error:', error);
+        return NextResponse.json({ error: message }, { status: 500 });
+      }
     }
-
-    const supabase = await createServerClient();
-    const adminClient = createAdminClient();
-
-    // Get current user
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
-
-    // Verify user has admin access to this tenant
-    const { data: userTenant } = await adminClient
-      .from('user_tenants')
-      .select('tenant_id, role')
-      .eq('user_id', user.id)
-      .eq('tenant_id', tenantId)
-      .maybeSingle();
-
-    if (!userTenant || (userTenant.role !== 'admin' && userTenant.role !== 'owner')) {
-      return NextResponse.json(
-        { error: 'Access denied. Admin role required.' },
-        { status: 403 }
-      );
-    }
-
-    // Fetch all bookings for the tenant
-    // Order by created_at descending to show most recently created bookings first
-    // This ensures new bookings appear at the top
-    const { data: bookings, error } = await adminClient
-      .from('bookings')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .order('created_at', { ascending: false })
-      .limit(1000);
-
-    if (error) {
-      console.error('[Bookings List] Error:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch bookings' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ bookings: bookings || [] });
-  } catch (error: any) {
-    console.error('[Bookings List] Error:', error);
-    return NextResponse.json(
-      { error: error.message || 'Internal server error' },
-      { status: 500 }
-    );
-  }
+  );
 }

@@ -1,5 +1,6 @@
 // server-only admin client (service role) — DO NOT import in client components
 import { createClient } from '@supabase/supabase-js'
+import { telemetryClientOptions } from './queryTelemetry'
 
 export function createAdminClient() {
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -8,7 +9,10 @@ export function createAdminClient() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false, autoRefreshToken: false } }
+    {
+      auth: { persistSession: false, autoRefreshToken: false },
+      ...telemetryClientOptions('admin'),
+    }
   )
 }
 

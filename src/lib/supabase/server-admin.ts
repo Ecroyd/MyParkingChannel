@@ -1,5 +1,6 @@
 // src/lib/supabase/server-admin.ts
 import { createClient } from '@supabase/supabase-js';
+import { createTelemetryFetch } from './queryTelemetry';
 
 /**
  * Creates a secure Supabase admin client using service role
@@ -23,7 +24,8 @@ export function createAdminClient() {
       headers: { 
         'X-Client-Info': 'pc-admin',
         'X-Service-Role': 'true'
-      } 
+      },
+      fetch: createTelemetryFetch('server-admin'),
     },
   });
 }
