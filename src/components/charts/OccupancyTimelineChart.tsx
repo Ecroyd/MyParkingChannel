@@ -180,6 +180,10 @@ export default function OccupancyTimelineChart({
   const [yScaleMode, setYScaleMode] = useState<OccupancyScaleMode>('full');
   const previousPointsRef = useRef<OccupancyPoint[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+  // Held in a ref so an unstable parent callback cannot re-create fetchSeries,
+  // which would re-trigger the fetch effect on every parent render.
+  const onCurrentOccupancyRef = useRef(onCurrentOccupancy);
+  onCurrentOccupancyRef.current = onCurrentOccupancy;
 
   useEffect(() => {
     setYScaleMode(readStoredOccupancyScaleMode());
@@ -211,8 +215,8 @@ export default function OccupancyTimelineChart({
       previousPointsRef.current = json.points ?? [];
       setTimezone(json.timezone || tenantTimezone);
       setDataQuality(json.dataQuality ?? null);
-      if (json.currentOccupancy && onCurrentOccupancy) {
-        onCurrentOccupancy(json.currentOccupancy.occupiedCount);
+      if (json.currentOccupancy) {
+        onCurrentOccupancyRef.current?.(json.currentOccupancy.occupiedCount);
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
@@ -221,21 +225,25 @@ export default function OccupancyTimelineChart({
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [from, to, tenantId, tenantTimezone, onCurrentOccupancy]);
+  }, [from, to, tenantId, tenantTimezone]);
 
   useEffect(() => {
     void fetchSeries();
     return () => abortRef.current?.abort();
   }, [fetchSeries, refreshKey]);
 
-  // Poll every 30 minutes instead of on every focus event
+  const fetchSeriesRef = useRef(fetchSeries);
+  fetchSeriesRef.current = fetchSeries;
+
+  // Poll every 30 minutes, and only while the tab is visible.
   useEffect(() => {
     const intervalId = setInterval(() => {
-      void fetchSeries();
-    }, 30 * 60 * 1000); // 30 minutes
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      void fetchSeriesRef.current();
+    }, 30 * 60 * 1000);
 
     return () => clearInterval(intervalId);
-  }, [fetchSeries]);
+  }, []);
 
   const daySpan = useMemo(() => {
     const start = new Date(`${from}T00:00:00Z`).getTime();

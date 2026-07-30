@@ -2,168 +2,155 @@
 // PUT /api/admin/anpr/config - Update ANPR config for tenant
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createAdminClient } from '@/lib/supabase/server';
-import { createServerClient } from '@/lib/supabase/server';
+import { resolveAuthorizedAnprAdmin } from '@/lib/anpr/adminAnprAuth';
+import { ADMIN_ANPR_CONFIG_SELECT } from '@/lib/anpr/adminAnprEventsSelect';
+import { withQueryTelemetryContext } from '@/lib/supabase/queryTelemetry';
 
 export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const tenantId = searchParams.get('tenantId');
-
-    if (!tenantId) {
-      return NextResponse.json({ error: 'tenantId is required' }, { status: 400 });
-    }
-
-    const supabase = await createServerClient();
-    const adminClient = createAdminClient();
-
-    // Get current user
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
-
-    // Verify user has access to this tenant
-    const { data: userTenant } = await adminClient
-      .from('user_tenants')
-      .select('tenant_id, role')
-      .eq('user_id', user.id)
-      .eq('tenant_id', tenantId)
-      .maybeSingle();
-
-    if (!userTenant) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
-    }
-
-    // Fetch ANPR config (or return defaults if not set)
-    const { data: config, error: configError } = await adminClient
-      .from('tenant_anpr_config')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .maybeSingle();
-
-    if (configError && configError.code !== 'PGRST116') { // PGRST116 = not found
-      console.error('Error fetching ANPR config:', configError);
-      return NextResponse.json(
-        { error: 'Failed to fetch ANPR config' },
-        { status: 500 }
-      );
-    }
-
-    // Return config or defaults, merging defaults for missing fields
-    const defaultConfig = {
-      tenant_id: tenantId,
-      enabled: false,
-      dedupe_seconds: 60,
-      offline_after_minutes: 15,
-      camera_direction_map: {},
-      arrival_grace_minutes: 240,
-      departure_grace_minutes: 480,
-      whitelist_lookahead_days: 7,
-      whitelist_keep_after_end_hours: 24,
-      videofit_api_url: null,
-      videofit_username: null,
-      videofit_password: null,
-      csv_token_last_rotated_at: null,
-      videofit_mode: 'relay' as 'relay' | 'direct',
-      videofit_ingest_enabled: false,
-    };
-
-    // Merge defaults with existing config to ensure new fields are present
-    const mergedConfig = config ? { ...defaultConfig, ...config } : defaultConfig;
-
-    // Fetch Videofit secrets from tenant_secrets using encrypted key-value pattern
-    const { data: videofitSecrets } = await adminClient
-      .from('tenant_secrets')
-      .select('key, value_ciphertext')
-      .eq('tenant_id', tenantId)
-      .eq('scope', 'anpr')
-      .in('key', [
-        'videofit_base_url',
-        'videofit_site_client_license',
-        'videofit_loc_pc_no',
-        'videofit_default_group',
-      ]);
-
-    // Decrypt helper
-    const decryptSecret = (encryptedValue: string): string => {
-      return Buffer.from(encryptedValue, 'base64').toString();
-    };
-
-    const getSecret = (key: string): string | null => {
-      const secret = videofitSecrets?.find((s) => s.key === key);
-      if (!secret?.value_ciphertext) return null;
+  return withQueryTelemetryContext(
+    { route: '/api/admin/anpr/config', queryName: 'admin.anpr.config' },
+    async () => {
       try {
-        return decryptSecret(secret.value_ciphertext);
-      } catch {
-        return null;
+        const preferred = new URL(req.url).searchParams.get('tenantId');
+        const auth = await resolveAuthorizedAnprAdmin(preferred);
+        if (!auth.ok) {
+          return NextResponse.json({ error: auth.error }, { status: auth.status });
+        }
+
+        const { tenantId, adminClient } = auth.ctx;
+
+        const { data: config, error: configError } = await adminClient
+          .from('tenant_anpr_config')
+          .select(ADMIN_ANPR_CONFIG_SELECT)
+          .eq('tenant_id', tenantId)
+          .maybeSingle();
+
+        if (configError && configError.code !== 'PGRST116') {
+          console.error('Error fetching ANPR config:', configError);
+          return NextResponse.json(
+            { error: 'Failed to fetch ANPR config' },
+            { status: 500 }
+          );
+        }
+
+        const defaultConfig = {
+          tenant_id: tenantId,
+          enabled: false,
+          ingest_method: null as string | null,
+          dedupe_seconds: 60,
+          offline_after_minutes: 15,
+          camera_direction_map: {} as Record<string, string>,
+          arrival_grace_minutes: 240,
+          departure_grace_minutes: 480,
+          whitelist_lookahead_days: 7,
+          whitelist_keep_after_end_hours: 24,
+          default_group: null as string | null,
+          csv_enabled: false,
+          videofit_api_url: null as string | null,
+          videofit_username: null as string | null,
+          csv_token_last_rotated_at: null as string | null,
+          videofit_mode: 'relay' as 'relay' | 'direct',
+          videofit_ingest_enabled: false,
+        };
+
+        const mergedConfig = config
+          ? { ...defaultConfig, ...(config as unknown as Record<string, unknown>) }
+          : defaultConfig;
+
+        const { data: videofitSecrets } = await adminClient
+          .from('tenant_secrets')
+          .select('key, value_ciphertext')
+          .eq('tenant_id', tenantId)
+          .eq('scope', 'anpr')
+          .in('key', [
+            'videofit_base_url',
+            'videofit_site_client_license',
+            'videofit_loc_pc_no',
+            'videofit_default_group',
+            'videofit_mode',
+            'videofit_password',
+            'relay_token',
+            'ANPR_RELAY_TOKEN',
+          ]);
+
+        const decryptSecret = (encryptedValue: string): string => {
+          return Buffer.from(encryptedValue, 'base64').toString();
+        };
+
+        const getSecret = (key: string): string | null => {
+          const secret = videofitSecrets?.find((s) => s.key === key);
+          if (!secret?.value_ciphertext) return null;
+          try {
+            return decryptSecret(secret.value_ciphertext);
+          } catch {
+            return null;
+          }
+        };
+
+        const hasSecret = (key: string): boolean =>
+          Boolean(videofitSecrets?.find((s) => s.key === key)?.value_ciphertext);
+
+        // Check legacy password column existence without returning it
+        const { data: passwordProbe } = await adminClient
+          .from('tenant_anpr_config')
+          .select('videofit_password')
+          .eq('tenant_id', tenantId)
+          .maybeSingle();
+
+        const videofitMode = getSecret('videofit_mode') || 'relay';
+        const mode = (videofitMode === 'direct' ? 'direct' : 'relay') as 'relay' | 'direct';
+        const hasPassword =
+          hasSecret('videofit_password') || Boolean(passwordProbe?.videofit_password);
+        const hasRelayToken = hasSecret('relay_token') || hasSecret('ANPR_RELAY_TOKEN');
+
+        const responseConfig = {
+          ...mergedConfig,
+          // Never expose password / token material to the browser
+          videofit_password: undefined,
+          has_videofit_password: hasPassword,
+          has_relay_token: hasRelayToken,
+          has_credentials: hasPassword || Boolean(mergedConfig.videofit_username),
+          videofit_mode: mode,
+          videofit_base_url: getSecret('videofit_base_url') || null,
+          videofit_site_client_license: getSecret('videofit_site_client_license')
+            ? parseInt(getSecret('videofit_site_client_license')!, 10)
+            : null,
+          videofit_loc_pc_no: getSecret('videofit_loc_pc_no')
+            ? parseInt(getSecret('videofit_loc_pc_no')!, 10)
+            : 0,
+          videofit_default_group: getSecret('videofit_default_group')
+            ? parseInt(getSecret('videofit_default_group')!, 10)
+            : 4,
+        };
+
+        return NextResponse.json({ config: responseConfig, tenantId });
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Internal server error';
+        console.error('ANPR config GET error:', error);
+        return NextResponse.json({ error: message }, { status: 500 });
       }
-    };
-
-    // Get videofit_mode from secrets (default to 'relay')
-    const videofitMode = getSecret('videofit_mode') || 'relay';
-    const mode = (videofitMode === 'direct' ? 'direct' : 'relay') as 'relay' | 'direct';
-
-    // Add Videofit config to response
-    const responseConfig = {
-      ...mergedConfig,
-      videofit_mode: mode,
-      videofit_base_url: getSecret('videofit_base_url') || null,
-      videofit_site_client_license: getSecret('videofit_site_client_license')
-        ? parseInt(getSecret('videofit_site_client_license')!, 10)
-        : null,
-      videofit_loc_pc_no: getSecret('videofit_loc_pc_no')
-        ? parseInt(getSecret('videofit_loc_pc_no')!, 10)
-        : 0,
-      videofit_default_group: getSecret('videofit_default_group')
-        ? parseInt(getSecret('videofit_default_group')!, 10)
-        : 4,
-    };
-
-    return NextResponse.json({ config: responseConfig });
-  } catch (error: any) {
-    console.error('ANPR config GET error:', error);
-    return NextResponse.json(
-      { error: error.message || 'Internal server error' },
-      { status: 500 }
-    );
-  }
+    }
+  );
 }
 
 export async function PUT(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const tenantId = searchParams.get('tenantId');
-
-    if (!tenantId) {
-      return NextResponse.json({ error: 'tenantId is required' }, { status: 400 });
+    const preferred = new URL(req.url).searchParams.get('tenantId');
+    const auth = await resolveAuthorizedAnprAdmin(preferred);
+    if (!auth.ok) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
     }
-
-    const supabase = await createServerClient();
-    const adminClient = createAdminClient();
-
-    // Get current user
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
-
-    // Verify user has admin access to this tenant
-    const { data: userTenant } = await adminClient
-      .from('user_tenants')
-      .select('tenant_id, role')
-      .eq('user_id', user.id)
-      .eq('tenant_id', tenantId)
-      .maybeSingle();
-
-    if (!userTenant || (userTenant.role !== 'admin' && userTenant.role !== 'owner')) {
+    if (auth.ctx.role !== 'admin' && auth.ctx.role !== 'owner') {
       return NextResponse.json({ error: 'Access denied. Admin role required.' }, { status: 403 });
     }
+
+    const { tenantId, adminClient } = auth.ctx;
 
     // Parse request body
     const body = await req.json();
     const {
       enabled,
+      ingest_method,
       dedupe_seconds,
       offline_after_minutes,
       camera_direction_map,
@@ -171,8 +158,12 @@ export async function PUT(req: NextRequest) {
       departure_grace_minutes,
       whitelist_lookahead_days,
       whitelist_keep_after_end_hours,
+      default_group,
       videofit_mode,
       videofit_base_url,
+      videofit_api_url,
+      videofit_username,
+      videofit_password,
       videofit_site_client_license,
       videofit_loc_pc_no,
       videofit_default_group,
@@ -277,6 +268,10 @@ export async function PUT(req: NextRequest) {
     };
 
     if (enabled !== undefined) updateData.enabled = enabled;
+    if (ingest_method !== undefined) updateData.ingest_method = ingest_method;
+    if (default_group !== undefined) updateData.default_group = default_group;
+    if (videofit_api_url !== undefined) updateData.videofit_api_url = videofit_api_url;
+    if (videofit_username !== undefined) updateData.videofit_username = videofit_username;
     if (dedupe_seconds !== undefined) updateData.dedupe_seconds = dedupe_seconds;
     if (offline_after_minutes !== undefined) updateData.offline_after_minutes = offline_after_minutes;
     if (camera_direction_map !== undefined) updateData.camera_direction_map = camera_direction_map;
@@ -285,6 +280,11 @@ export async function PUT(req: NextRequest) {
     if (whitelist_lookahead_days !== undefined) updateData.whitelist_lookahead_days = whitelist_lookahead_days;
     if (whitelist_keep_after_end_hours !== undefined) updateData.whitelist_keep_after_end_hours = whitelist_keep_after_end_hours;
     if (body.videofit_ingest_enabled !== undefined) updateData.videofit_ingest_enabled = body.videofit_ingest_enabled;
+    // Never persist plaintext password on the config row — use tenant_secrets instead.
+    // Clearing legacy column on save when a new password is provided.
+    if (typeof videofit_password === 'string' && videofit_password.length > 0) {
+      updateData.videofit_password = null;
+    }
 
     // Save Videofit secrets to tenant_secrets using encrypted key-value pattern
     // (like APH SFTP credentials and ANPR relay token)
@@ -307,6 +307,15 @@ export async function PUT(req: NextRequest) {
         scope: 'anpr',
         key: 'videofit_base_url',
         value: videofit_base_url || '',
+        updated_at: now,
+      });
+    }
+    if (typeof videofit_password === 'string' && videofit_password.length > 0) {
+      videofitSecrets.push({
+        tenant_id: tenantId,
+        scope: 'anpr',
+        key: 'videofit_password',
+        value: videofit_password,
         updated_at: now,
       });
     }
@@ -380,7 +389,7 @@ export async function PUT(req: NextRequest) {
       }, {
         onConflict: 'tenant_id',
       })
-      .select()
+      .select(ADMIN_ANPR_CONFIG_SELECT)
       .single();
 
     if (configError) {
@@ -403,6 +412,7 @@ export async function PUT(req: NextRequest) {
         'videofit_site_client_license',
         'videofit_loc_pc_no',
         'videofit_default_group',
+        'videofit_password',
       ]);
 
     // Decrypt helper
@@ -424,9 +434,12 @@ export async function PUT(req: NextRequest) {
     const videofitMode = getSecret('videofit_mode') || 'relay';
     const mode = (videofitMode === 'direct' ? 'direct' : 'relay') as 'relay' | 'direct';
 
-    // Merge Videofit config into response
     const responseConfig = {
-      ...config,
+      ...(config as unknown as Record<string, unknown>),
+      videofit_password: undefined,
+      has_videofit_password: Boolean(
+        fetchedVideofitSecrets?.find((s) => s.key === 'videofit_password')?.value_ciphertext
+      ),
       videofit_mode: mode,
       videofit_base_url: getSecret('videofit_base_url') || null,
       videofit_site_client_license: getSecret('videofit_site_client_license')
@@ -440,12 +453,10 @@ export async function PUT(req: NextRequest) {
         : 4,
     };
 
-    return NextResponse.json({ config: responseConfig });
-  } catch (error: any) {
+    return NextResponse.json({ config: responseConfig, tenantId });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Internal server error';
     console.error('ANPR config PUT error:', error);
-    return NextResponse.json(
-      { error: error.message || 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

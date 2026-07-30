@@ -124,6 +124,10 @@ export default function TodayServerClient({
     setOccupancyRefreshKey((k) => k + 1);
   }, []);
 
+  const handleCurrentOccupancy = useCallback((count: number) => {
+    setKpis((prev) => (prev.checkedIn === count ? prev : { ...prev, checkedIn: count }));
+  }, []);
+
   function compensateBulkToolbarScroll(delta: number) {
     if (delta === 0) return;
     const main = document.querySelector('main.overflow-y-auto');
@@ -710,9 +714,7 @@ export default function TodayServerClient({
           to={currentDateRange.to}
           tenantTimezone={tenantTz}
           refreshKey={occupancyRefreshKey}
-          onCurrentOccupancy={(count) => {
-            setKpis((prev) => ({ ...prev, checkedIn: count }));
-          }}
+          onCurrentOccupancy={handleCurrentOccupancy}
         />
 
         {queryError && (

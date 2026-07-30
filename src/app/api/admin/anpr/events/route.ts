@@ -1,74 +1,76 @@
-// GET /api/admin/anpr/events - List ANPR events for a tenant
-// Authenticated via user session (admin/owner role required)
+// GET /api/admin/anpr/events — bounded ANPR event list (no select('*'))
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createAdminClient } from '@/lib/supabase/server';
-import { createServerClient } from '@/lib/supabase/server';
+import { resolveAuthorizedAnprAdmin } from '@/lib/anpr/adminAnprAuth';
+import {
+  enforceAnprPageSize,
+  resolveAnprEventTimeBounds,
+} from '@/lib/anpr/adminAnprEventsParams';
+import {
+  ADMIN_ANPR_EVENTS_LIST_SELECT,
+  assertAnprListSelectSafe,
+} from '@/lib/anpr/adminAnprEventsSelect';
+import { withQueryTelemetryContext } from '@/lib/supabase/queryTelemetry';
 
 export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const tenantId = searchParams.get('tenantId');
-    const status = searchParams.get('status');
+  return withQueryTelemetryContext(
+    { route: '/api/admin/anpr/events', queryName: 'admin.anpr.events' },
+    async () => {
+      try {
+        const preferred = new URL(req.url).searchParams.get('tenantId');
+        const auth = await resolveAuthorizedAnprAdmin(preferred);
+        if (!auth.ok) {
+          return NextResponse.json({ error: auth.error }, { status: auth.status });
+        }
 
-    if (!tenantId) {
-      return NextResponse.json({ error: 'tenantId is required' }, { status: 400 });
+        const { tenantId, adminClient, role } = auth.ctx;
+        if (role !== 'admin' && role !== 'owner') {
+          return NextResponse.json(
+            { error: 'Access denied. Admin role required.' },
+            { status: 403 }
+          );
+        }
+
+        const { searchParams } = new URL(req.url);
+        const status = searchParams.get('status');
+        const limit = enforceAnprPageSize(searchParams.get('limit') ?? 50);
+        const { fromIso, toIso } = resolveAnprEventTimeBounds({
+          from: searchParams.get('from'),
+          to: searchParams.get('to'),
+        });
+
+        assertAnprListSelectSafe(ADMIN_ANPR_EVENTS_LIST_SELECT);
+
+        let query = adminClient
+          .from('anpr_events')
+          .select(ADMIN_ANPR_EVENTS_LIST_SELECT)
+          .eq('tenant_id', tenantId)
+          .gte('event_at', fromIso)
+          .order('event_at', { ascending: false })
+          .limit(limit);
+
+        if (toIso) query = query.lte('event_at', toIso);
+        if (status) query = query.eq('status', status);
+
+        const { data: events, error } = await query;
+
+        if (error) {
+          console.error('[ANPR Events] Fetch error:', error);
+          return NextResponse.json({ error: 'Failed to fetch events' }, { status: 500 });
+        }
+
+        return NextResponse.json({
+          events: events || [],
+          pageSize: limit,
+          from: fromIso,
+          to: toIso,
+          tenantId,
+        });
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Internal server error';
+        console.error('[ANPR Events] Error:', error);
+        return NextResponse.json({ error: message }, { status: 500 });
+      }
     }
-
-    const supabase = await createServerClient();
-    const adminClient = createAdminClient();
-
-    // Get current user
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
-
-    // Verify user has admin access to this tenant
-    const { data: userTenant } = await adminClient
-      .from('user_tenants')
-      .select('tenant_id, role')
-      .eq('user_id', user.id)
-      .eq('tenant_id', tenantId)
-      .maybeSingle();
-
-    if (!userTenant || (userTenant.role !== 'admin' && userTenant.role !== 'owner')) {
-      return NextResponse.json(
-        { error: 'Access denied. Admin role required.' },
-        { status: 403 }
-      );
-    }
-
-    // Build query
-    let query = adminClient
-      .from('anpr_events')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .order('event_at', { ascending: false })
-      .limit(100);
-
-    if (status) {
-      query = query.eq('status', status);
-    }
-
-    const { data: events, error } = await query;
-
-    if (error) {
-      console.error('[ANPR Events] Fetch error:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch events' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ events: events || [] });
-  } catch (error: any) {
-    console.error('[ANPR Events] Error:', error);
-    return NextResponse.json(
-      { error: error.message || 'Internal server error' },
-      { status: 500 }
-    );
-  }
+  );
 }
-
-

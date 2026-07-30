@@ -551,10 +551,20 @@ export function enumerateLocalDateKeysFromWindow(
 const BOOKING_SELECT =
   'id, reference, start_at, end_at, status, gate_status, ops_status, anpr_status, ops_hidden, ops_hidden_reason, external_status, arrived_at, departed_at, checked_in_at, checked_out_at';
 
+/**
+ * Loads occupancy inputs for a window.
+ *
+ * The movement ledger (events) and historical snapshots are not read by default:
+ * the chart derives Actual from booking state, and only the most recent snapshot
+ * is needed for `baselineAt`. Opt in with `includeEvents` / `includeAllSnapshots`
+ * for ledger tooling, otherwise these unbounded reads dominate egress.
+ */
 export async function loadOccupancyInputs(opts: {
   tenantId: string;
   from: string;
   to: string;
+  includeEvents?: boolean;
+  includeAllSnapshots?: boolean;
 }): Promise<{
   bookings: OccupancyBookingRow[];
   events: OccupancyEventRow[];
@@ -563,6 +573,13 @@ export async function loadOccupancyInputs(opts: {
   timezone: string;
 }> {
   const supabase = createAdminClient();
+
+  const snapshotsQuery = supabase
+    .from('tenant_occupancy_snapshots')
+    .select('tenant_id, snapshot_at, occupied_count, source, data_quality, metadata')
+    .eq('tenant_id', opts.tenantId)
+    .lte('snapshot_at', opts.to)
+    .order('snapshot_at', { ascending: false });
 
   const [bookingsRes, onSiteRes, eventsRes, snapshotsRes, settingsRes, tenantRes] = await Promise.all([
     supabase
@@ -579,18 +596,16 @@ export async function loadOccupancyInputs(opts: {
       .or(
         'gate_status.in.(arrived,arrived_key_taken),anpr_status.eq.on_site,status.eq.checked_in'
       ),
-    supabase
-      .from('booking_occupancy_events')
-      .select('id, tenant_id, booking_id, event_at, event_kind, delta, voided_at, operation_id')
-      .eq('tenant_id', opts.tenantId)
-      .lte('event_at', opts.to)
-      .order('event_at', { ascending: true }),
-    supabase
-      .from('tenant_occupancy_snapshots')
-      .select('tenant_id, snapshot_at, occupied_count, source, data_quality, metadata')
-      .eq('tenant_id', opts.tenantId)
-      .lte('snapshot_at', opts.to)
-      .order('snapshot_at', { ascending: false }),
+    opts.includeEvents
+      ? supabase
+          .from('booking_occupancy_events')
+          .select('id, tenant_id, booking_id, event_at, event_kind, delta, voided_at, operation_id')
+          .eq('tenant_id', opts.tenantId)
+          .gte('event_at', opts.from)
+          .lte('event_at', opts.to)
+          .order('event_at', { ascending: true })
+      : Promise.resolve({ data: [], error: null }),
+    opts.includeAllSnapshots ? snapshotsQuery : snapshotsQuery.limit(1),
     supabase
       .from('tenant_settings')
       .select('occupancy_events_reliable_from')
@@ -649,30 +664,44 @@ export async function computeOccupancyTimeseries(opts: {
   });
 }
 
+/**
+ * Current physical occupancy.
+ *
+ * Only the on-site candidate set is required: the resolver counts authoritative
+ * on-site bookings and never reads the movement ledger or snapshots. Loading a
+ * 90-day booking window here was pure waste.
+ */
 export async function getCurrentOccupancy(tenantId: string): Promise<CurrentOccupancyResult> {
   const supabase = createAdminClient();
   const now = new Date();
-  const windowStart = new Date(now.getTime() - 90 * 86_400_000).toISOString();
-  const inputs = await loadOccupancyInputs({
-    tenantId,
-    from: windowStart,
-    to: new Date(now.getTime() + 86_400_000).toISOString(),
-  });
 
   // Same candidate set as Currently Parked (take_key intentionally excluded via resolver)
-  const { data: onSiteCandidates } = await supabase
-    .from('bookings')
-    .select(BOOKING_SELECT)
-    .eq('tenant_id', tenantId)
-    .or(
-      'gate_status.in.(arrived,arrived_key_taken),anpr_status.eq.on_site,status.eq.checked_in'
-    );
+  const [onSiteRes, settingsRes] = await Promise.all([
+    supabase
+      .from('bookings')
+      .select(BOOKING_SELECT)
+      .eq('tenant_id', tenantId)
+      .or(
+        'gate_status.in.(arrived,arrived_key_taken),anpr_status.eq.on_site,status.eq.checked_in'
+      ),
+    supabase
+      .from('tenant_settings')
+      .select('occupancy_events_reliable_from')
+      .eq('tenant_id', tenantId)
+      .maybeSingle(),
+  ]);
+
+  if (onSiteRes.error) {
+    console.error('[getCurrentOccupancy] on-site query failed:', onSiteRes.error.message);
+  }
 
   return resolveCurrentOccupancyPure({
-    bookings: (onSiteCandidates as OccupancyBookingRow[]) ?? inputs.bookings,
-    snapshots: inputs.snapshots,
-    events: inputs.events,
-    reliableFrom: inputs.reliableFrom,
+    bookings: (onSiteRes.data as OccupancyBookingRow[] | null) ?? [],
+    snapshots: [],
+    events: [],
+    reliableFrom: settingsRes.error
+      ? null
+      : settingsRes.data?.occupancy_events_reliable_from ?? null,
     now,
   });
 }

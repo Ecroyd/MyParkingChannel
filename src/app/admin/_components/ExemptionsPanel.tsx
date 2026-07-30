@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,8 @@ import { cn } from "@/lib/utils";
 import { Loader2, RefreshCw, AlertTriangle, Clock, Shield, Camera, CheckSquare, ChevronDown, ChevronUp, X, ArrowUpDown } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { toMoney } from "@/lib/money";
+
+const EXEMPTIONS_POLL_INTERVAL_MS = 60_000;
 
 type Exemption = {
   tenant_id: string;
@@ -64,9 +66,13 @@ export default function ExemptionsPanel() {
   const [selectedBooking, setSelectedBooking] = useState<any>(null);
   const [selectedExemption, setSelectedExemption] = useState<Exemption | null>(null);
   const [loadingBooking, setLoadingBooking] = useState(false);
+  const inFlightRef = useRef(false);
+  const lastLoadedAtRef = useRef(0);
 
   async function load() {
     if (!tenantId) return;
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setLoading(true);
     try {
       const res = await fetch(`/api/exemptions?tenantId=${tenantId}&limit=200`, {
@@ -99,16 +105,38 @@ export default function ExemptionsPanel() {
         variant: "destructive",
       });
     } finally {
+      inFlightRef.current = false;
+      lastLoadedAtRef.current = Date.now();
       setLoading(false);
     }
   }
 
+  const loadRef = useRef(load);
+  loadRef.current = load;
+
   useEffect(() => {
-    if (tenantId) {
-      load();
-      const t = setInterval(load, 15000); // poll every 15 seconds
-      return () => clearInterval(t);
-    }
+    if (!tenantId) return;
+
+    void loadRef.current();
+
+    // Poll once a minute, and only while the tab is visible.
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      void loadRef.current();
+    }, EXEMPTIONS_POLL_INTERVAL_MS);
+
+    // Catch up once on return to the tab if the data has gone stale.
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - lastLoadedAtRef.current < EXEMPTIONS_POLL_INTERVAL_MS) return;
+      void loadRef.current();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [tenantId]);
 
   const filtered = useMemo(() => {

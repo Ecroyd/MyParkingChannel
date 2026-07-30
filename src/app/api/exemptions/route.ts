@@ -46,12 +46,27 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: liveError.message }, { status: 500 });
     }
 
-    // Fetch already resolved exemptions to filter them out
-    const { data: resolvedData } = await adminClient
+    // Fetch already resolved exemptions to filter them out. A resolved row can only
+    // match a live breach, so anything detected before the oldest live breach point
+    // is irrelevant — bounding on that keeps this read from growing without limit.
+    const oldestBreachPoint = (liveData || []).reduce<string | null>((oldest, item) => {
+      if (!item.breach_point) return oldest;
+      return oldest === null || item.breach_point < oldest ? item.breach_point : oldest;
+    }, null);
+
+    let resolvedQuery = adminClient
       .from("exemptions")
       .select("tenant_id, exemption_type, vehicle_reg, booking_id, source_event_id, detected_at")
       .eq("tenant_id", tenantId)
       .not("resolved_at", "is", null);
+
+    if (oldestBreachPoint) {
+      // Allow a minute of slack: matching is done at minute precision.
+      const floor = new Date(new Date(oldestBreachPoint).getTime() - 60_000).toISOString();
+      resolvedQuery = resolvedQuery.gte("detected_at", floor);
+    }
+
+    const { data: resolvedData } = await resolvedQuery;
 
     // Create a set of resolved exemption keys for quick lookup
     // Use detected_at from exemptions table, which should match breach_point from view

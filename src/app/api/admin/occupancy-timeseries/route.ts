@@ -62,15 +62,16 @@ export async function GET(req: NextRequest) {
     // Actual = vehicles parked according to app booking state (same rules as
     // Currently Parked). The DB baseline/ledger RPC is intentionally not used
     // for Actual here, so the line does not depend on a manual baseline.
-    const result = await computeOccupancyTimeseries({
-      tenantId,
-      fromDate,
-      toDate,
-      timezone,
-      intervalMinutes: OCCUPANCY_INTERVAL_MINUTES,
-    });
-
-    const current = await getCurrentOccupancy(tenantId);
+    const [result, current] = await Promise.all([
+      computeOccupancyTimeseries({
+        tenantId,
+        fromDate,
+        toDate,
+        timezone,
+        intervalMinutes: OCCUPANCY_INTERVAL_MINUTES,
+      }),
+      getCurrentOccupancy(tenantId),
+    ]);
 
     return NextResponse.json({
       intervalMinutes: OCCUPANCY_INTERVAL_MINUTES,

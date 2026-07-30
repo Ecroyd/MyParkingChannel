@@ -43,28 +43,23 @@ export default function DailyOccupancyStacked({ tenantId, start, end, tz = 'UTC'
       setLoading(true);
       setError(null);
       try {
-        // Fetch bookings - let RLS handle tenant isolation automatically
-        const { data: allBookings, error: bookingsError } = await supabase
+        // Overlap is filtered server-side: fetching the whole table and narrowing in
+        // the browser downloaded every booking in the tenant's history on each load.
+        const startDate = new Date(start);
+        const endDate = new Date(end);
+        const { data: bookingRows, error: bookingsError } = await supabase
           .from('bookings')
           .select('start_at, end_at, source, external_source')
+          .lte('start_at', endDate.toISOString())
+          .gte('end_at', startDate.toISOString())
           .order('start_at', { ascending: true });
 
         if (bookingsError) {
           console.error("🔴 Supabase bookings fetch error:", bookingsError);
           throw new Error(`Database error: ${bookingsError.message}`);
-        } else {
-          console.log("✅ Supabase bookings fetch result:", allBookings?.length || 0, "bookings");
         }
 
-        // Filter bookings that overlap with our date range
-        const startDate = new Date(start);
-        const endDate = new Date(end);
-        const bookings = allBookings?.filter(booking => {
-          const bookingStart = new Date(booking.start_at);
-          const bookingEnd = new Date(booking.end_at);
-          // Check if booking overlaps with our date range
-          return bookingStart <= endDate && bookingEnd >= startDate;
-        }) || [];
+        const bookings = bookingRows ?? [];
 
         if (cancelled) return;
 
