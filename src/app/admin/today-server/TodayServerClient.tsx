@@ -120,6 +120,8 @@ export default function TodayServerClient({
   const [queryError, setQueryError] = useState(initialQueryError);
   const [occupancyRefreshKey, setOccupancyRefreshKey] = useState(0);
   const loadedRangeRef = useRef(`${initialDateRange.from}:${initialDateRange.to}`);
+  /** Ignores out-of-order /api/admin/today responses when the user changes range quickly. */
+  const fetchSeqRef = useRef(0);
   const bulkToolbarRef = useRef<HTMLDivElement>(null);
   const tenantTz = tenant.timezone || 'Europe/London';
 
@@ -385,38 +387,61 @@ export default function TodayServerClient({
     void updateBookingStatusRef.current(bookingId, action);
   }, []);
 
-  const fetchDataForDateRange = useCallback(async (from: string, to: string) => {
-    const rangeKey = `${from}:${to}`;
-    if (loadedRangeRef.current === rangeKey) return;
+  const fetchDataForDateRange = useCallback(
+    async (from: string, to: string, opts?: { force?: boolean }) => {
+      const rangeKey = `${from}:${to}`;
+      // Skip only for duplicate background refreshes of the same range (e.g. realtime
+      // coalescing). Date-range changes always pass force:true so returning to Today
+      // never keeps the previous range's rows.
+      if (!opts?.force && loadedRangeRef.current === rangeKey) return;
 
-    setLoading(true);
-
-    try {
-      const response = await fetch(`/api/admin/today?from=${from}&to=${to}`);
-      const data = (await parseJsonFromResponse(response)) as {
-        kpis?: KPIs;
-        arrivals?: Booking[];
-        departures?: Booking[];
-        currentlyParked?: Booking[];
-        queryError?: string;
-      };
-      if (!response.ok) {
-        throw new Error('Failed to fetch data');
+      const seq = ++fetchSeqRef.current;
+      loadedRangeRef.current = rangeKey;
+      setLoading(true);
+      if (opts?.force) {
+        setArrivals([]);
+        setDepartures([]);
+        setCurrentlyParked([]);
       }
 
-      const defaultKpis: KPIs = { arrivals: 0, departures: 0, checkedIn: 0, capacityLeft: 0, totalRevenue: null };
-      setKpis(data.kpis ?? defaultKpis);
-      setArrivals(data.arrivals ?? []);
-      setDepartures(data.departures ?? []);
-      setCurrentlyParked((data.currentlyParked ?? []).filter(isCurrentlyParked));
-      setQueryError(data.queryError);
-      loadedRangeRef.current = rangeKey;
-    } catch (error) {
-      console.error('Error fetching data:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      try {
+        const response = await fetch(`/api/admin/today?from=${from}&to=${to}`);
+        const data = (await parseJsonFromResponse(response)) as {
+          kpis?: KPIs;
+          arrivals?: Booking[];
+          departures?: Booking[];
+          currentlyParked?: Booking[];
+          queryError?: string;
+        };
+        if (!response.ok) {
+          throw new Error('Failed to fetch data');
+        }
+        if (seq !== fetchSeqRef.current) return;
+
+        const defaultKpis: KPIs = {
+          arrivals: 0,
+          departures: 0,
+          checkedIn: 0,
+          capacityLeft: 0,
+          totalRevenue: null,
+        };
+        setKpis(data.kpis ?? defaultKpis);
+        setArrivals(data.arrivals ?? []);
+        setDepartures(data.departures ?? []);
+        setCurrentlyParked((data.currentlyParked ?? []).filter(isCurrentlyParked));
+        setQueryError(data.queryError);
+      } catch (error) {
+        if (seq === fetchSeqRef.current) {
+          console.error('Error fetching data:', error);
+        }
+      } finally {
+        if (seq === fetchSeqRef.current) {
+          setLoading(false);
+        }
+      }
+    },
+    []
+  );
 
   // Tenant-scoped realtime: keep parked/arrival/departure KPIs in sync across devices.
   useEffect(() => {
@@ -444,10 +469,13 @@ export default function TodayServerClient({
     };
   }, [tenant.id, currentDateRange.from, currentDateRange.to, fetchDataForDateRange, bumpOccupancyRefresh]);
 
-  const handleDateRangeChange = useCallback((dateRange: { from: string; to: string }) => {
-    setCurrentDateRange(dateRange);
-    void fetchDataForDateRange(dateRange.from, dateRange.to);
-  }, [fetchDataForDateRange]);
+  const handleDateRangeChange = useCallback(
+    (dateRange: { from: string; to: string }) => {
+      setCurrentDateRange(dateRange);
+      void fetchDataForDateRange(dateRange.from, dateRange.to, { force: true });
+    },
+    [fetchDataForDateRange]
+  );
 
   const sortBookings = (bookings: Booking[], sortOrder: 'closest' | 'most_recent', dateField: 'start_at' | 'end_at') => {
     const sorted = [...bookings];
