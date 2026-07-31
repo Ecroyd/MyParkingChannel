@@ -3,6 +3,8 @@ import { createServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
 import { getTenantDateRange } from '@/lib/timezone';
 import { calculateCapacityByDate, calculateCapacityForDate } from '@/lib/capacity/rolling';
+import { canViewMoney, normalizeRole } from '@/lib/auth/permissions';
+import { redactBookingMoneyList } from '@/lib/money';
 import DashboardClient from './DashboardClient';
 
 // Process chart data from bookings
@@ -210,9 +212,13 @@ export default async function DashboardServerPage() {
   }
   const demandCurveCapacityByDate = await calculateCapacityByDate(tenant.id, demandCurveDates);
 
+  const showMoney = canViewMoney(normalizeRole(userTenant.role));
+
   // Calculate revenue data
   const revenueData = {
-    todayRevenue: bookings.reduce((sum, booking) => sum + (booking.money_received || 0), 0),
+    todayRevenue: showMoney
+      ? bookings.reduce((sum, booking) => sum + (booking.money_received || 0), 0)
+      : null,
     totalBookings: bookings.length
   };
 
@@ -220,8 +226,8 @@ export default async function DashboardServerPage() {
     <DashboardClient
       user={user}
       tenant={tenant}
-      bookings={bookings}
-      recentBookings={recentBookings}
+      bookings={showMoney ? bookings : redactBookingMoneyList(bookings)}
+      recentBookings={showMoney ? recentBookings : redactBookingMoneyList(recentBookings)}
       totalBookingsCount={totalBookingsCount}
       capacityData={capacityData}
       revenueData={revenueData}

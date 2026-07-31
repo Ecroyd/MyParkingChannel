@@ -128,6 +128,22 @@ describe('Holiday Extras EXTZ10 Parser', () => {
     expect(booking.end_at).toBe('2026-03-30T13:30:00');
   });
 
+  it('should realign blank columns after price (EXTZ10300726 / LBWSRP)', () => {
+    // Real supplier row: blank after price + blank plate slot before TBA vehicle details.
+    // Dates are YYMMDD (270625 = 25 Jun 2027), not a display bug.
+    const lbwsrp =
+      '06\t1\tLBWSRP\tJONES          \t270625\tMRS \tK\t 2\t0330\t270710\tEXTPIM\tHA\t0000105.32\t\tN\t1400\t    \tTBA       \t 4\tTBA\tTBA\t-\t07772776664\t\t55\t11';
+    const result = parseHolidayExtrasExtz10Text(lbwsrp);
+    expect(result.bookings).toHaveLength(1);
+    const booking = result.bookings[0];
+    expect(booking.booking_reference).toBe('LBWSRP');
+    // Hotel night 25 Jun 2027 → arrival 26 Jun 2027 03:30
+    expect(booking.start_at).toBe('2027-06-26T03:30:00');
+    expect(booking.end_at).toBe('2027-07-10T14:00:00');
+    expect(booking.vehicle_registration).toBe('TBA');
+    expect(booking.customer_phone).toBe('07772776664');
+  });
+
   it('should include EXTZ10 metadata in notes', () => {
     const result = parseHolidayExtrasExtz10Text(sampleRow);
     const booking = result.bookings[0];

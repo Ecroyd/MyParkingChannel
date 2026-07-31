@@ -3,6 +3,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveAuthorizedAnprAdmin } from '@/lib/anpr/adminAnprAuth';
+import { canManageSettings } from '@/lib/auth/permissions';
 import { ADMIN_ANPR_CONFIG_SELECT } from '@/lib/anpr/adminAnprEventsSelect';
 import { withQueryTelemetryContext } from '@/lib/supabase/queryTelemetry';
 
@@ -140,7 +141,8 @@ export async function PUT(req: NextRequest) {
     if (!auth.ok) {
       return NextResponse.json({ error: auth.error }, { status: auth.status });
     }
-    if (auth.ctx.role !== 'admin' && auth.ctx.role !== 'owner') {
+    // Reading gate state is open to operations, but changing configuration is not.
+    if (!canManageSettings(auth.ctx.role)) {
       return NextResponse.json({ error: 'Access denied. Admin role required.' }, { status: 403 });
     }
 

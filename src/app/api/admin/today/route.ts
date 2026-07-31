@@ -2,6 +2,8 @@ import { createAdminClient } from '@/lib/supabase/server-admin';
 import { createServerClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { loadTodayPageData } from '@/lib/today/loadTodayData';
+import { canViewMoney, normalizeRole } from '@/lib/auth/permissions';
+import { redactBookingMoneyList } from '@/lib/money';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,12 +59,14 @@ export async function GET(request: NextRequest) {
       tenant,
     });
 
+    const showMoney = canViewMoney(normalizeRole(defaultTenant.role));
+
     return NextResponse.json({
       tenant: data.tenant,
-      kpis: data.kpis,
-      arrivals: data.arrivals,
-      departures: data.departures,
-      currentlyParked: data.currentlyParked,
+      kpis: showMoney ? data.kpis : { ...data.kpis, totalRevenue: null },
+      arrivals: showMoney ? data.arrivals : redactBookingMoneyList(data.arrivals ?? []),
+      departures: showMoney ? data.departures : redactBookingMoneyList(data.departures ?? []),
+      currentlyParked: showMoney ? data.currentlyParked : redactBookingMoneyList(data.currentlyParked ?? []),
       rangeFrom: data.rangeFrom,
       rangeTo: data.rangeTo,
       queryError: data.queryError,

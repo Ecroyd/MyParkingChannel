@@ -12,6 +12,7 @@ import ExemptionsPanel from '../_components/ExemptionsPanel';
 import { BookingHighlightIcon } from '@/components/bookings/BookingHighlightIcon';
 import { Button } from '@/components/ui/button';
 import { useRouter } from 'next/navigation';
+import { useCanViewMoney } from '@/lib/auth/money-visibility';
 
 interface DashboardClientProps {
   user: any;
@@ -24,7 +25,7 @@ interface DashboardClientProps {
     capacityRemaining: number;
   };
   revenueData: {
-    todayRevenue: number;
+    todayRevenue: number | null;
     totalBookings: number;
   };
   chartData: Array<{
@@ -52,6 +53,7 @@ export default function DashboardClient({
   demandCurveCapacityByDate
 }: DashboardClientProps) {
   const router = useRouter();
+  const canViewMoney = useCanViewMoney();
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const [newBookingOpen, setNewBookingOpen] = useState(false);
   const { isOpen, currentDateRange, openModal, closeModal, handleDateRangeChange } = useDateRangeModal();
@@ -107,19 +109,21 @@ export default function DashboardClient({
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center">
-            <div className="flex-shrink-0">
-              <div className="w-8 h-8 bg-green-500 rounded-md flex items-center justify-center">
-                <span className="text-white text-sm font-medium">💰</span>
+        {canViewMoney && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <div className="w-8 h-8 bg-green-500 rounded-md flex items-center justify-center">
+                  <span className="text-white text-sm font-medium">💰</span>
+                </div>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">Today&apos;s Revenue</p>
+                <p className="text-2xl font-semibold text-gray-900">£{(revenueData.todayRevenue ?? 0).toFixed(2)}</p>
               </div>
             </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Today&apos;s Revenue</p>
-              <p className="text-2xl font-semibold text-gray-900">£{revenueData.todayRevenue.toFixed(2)}</p>
-            </div>
           </div>
-        </div>
+        )}
 
         <div className="bg-white rounded-lg shadow p-6">
           <div className="flex items-center">
@@ -294,7 +298,9 @@ export default function DashboardClient({
                   <p className="text-sm font-mono font-semibold text-gray-900">{booking.plate}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-medium text-gray-900">£{booking.money_charged || 0}</p>
+                  {canViewMoney && (
+                    <p className="text-sm font-medium text-gray-900">£{booking.money_charged || 0}</p>
+                  )}
                   <p className="text-xs text-gray-500">
                     {new Date(booking.start_at).toLocaleString('en-GB', { 
                       timeZone: 'UTC',

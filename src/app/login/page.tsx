@@ -27,70 +27,47 @@ function LoginForm() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('🔐 [LOGIN] Starting login process...');
     setLoading(true);
     setError('');
 
     try {
       const input = emailOrUsername.trim();
-      console.log('🔐 [LOGIN] Input:', input);
-      
+
       // If input doesn't contain @, treat it as username and convert to valid email format
       const loginEmail = input.includes('@') ? input : `${input}@users.myparkingchannel.app`;
-      console.log('🔐 [LOGIN] Using email:', loginEmail);
 
-      console.log('🔐 [LOGIN] Attempting signInWithPassword...');
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { error } = await supabase.auth.signInWithPassword({
         email: loginEmail,
         password,
       });
 
       if (error) {
-        console.error('❌ [LOGIN] Error:', error);
-        console.error('❌ [LOGIN] Error message:', error.message);
-        console.error('❌ [LOGIN] Error status:', error.status);
         setError(error.message || 'Login failed');
         setLoading(false);
         return;
       }
-
-      console.log('✅ [LOGIN] SignInWithPassword succeeded');
-      console.log('✅ [LOGIN] User data:', data?.user);
-      console.log('✅ [LOGIN] Session data:', data?.session);
 
       // Wait a bit for session to be set
       await new Promise(resolve => setTimeout(resolve, 100));
 
       const {
         data: { session },
-        error: sessionError
       } = await supabase.auth.getSession();
 
-      if (sessionError) {
-        console.error('❌ [LOGIN] Session error:', sessionError);
-      }
-
-      console.log('🔐 [LOGIN] Retrieved session:', session);
-
       if (session) {
-        console.log('✅ [LOGIN] Session is set, redirecting');
         // Wait a moment for cookies to be set, then use window.location for full page reload
         // This ensures cookies are available to the server on the next request
         await new Promise(resolve => setTimeout(resolve, 200));
-        
+
         // Check for redirect param - respect invite flow
         const redirectParam = searchParams.get('redirect');
         const redirectTo = redirectParam || '/admin';
-        console.log('🔐 [LOGIN] Redirecting to:', redirectTo);
         window.location.href = redirectTo;
       } else {
-        console.error('❌ [LOGIN] No session after login');
         setError('Login failed to set session. Please try again.');
         setLoading(false);
       }
     } catch (err: any) {
-      console.error('❌ [LOGIN] Unexpected error:', err);
-      console.error('❌ [LOGIN] Error stack:', err.stack);
       setError(err.message || 'An unexpected error occurred');
       setLoading(false);
     }

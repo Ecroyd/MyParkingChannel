@@ -163,6 +163,40 @@ export function splitExtLine(line: string): string[] {
 }
 
 /**
+ * Some EXTZ10 rows insert a blank column after the price, shifting return time
+ * into the plate slot (e.g. plate becomes "1400"). Drop that blank so indices
+ * match the standard layout: price, N/Y flag, return HHMM, reg, …
+ *
+ * A second blank can appear where the registration would be when the supplier
+ * sends TBA vehicle details; collapse that so phone/make land on the right columns.
+ */
+export function normalizeExtz10Fields(fields: string[]): string[] {
+  let f = fields.map((c) => trim(c));
+
+  if (
+    f.length >= 16 &&
+    !f[13] &&
+    /^[NY]$/i.test(f[14] ?? "") &&
+    /^\d{3,4}$/.test(f[15] ?? "")
+  ) {
+    f = [...f.slice(0, 13), ...f.slice(14)];
+  }
+
+  // Empty reg column before TBA/real reg + numeric days-parked
+  if (
+    f.length >= 18 &&
+    !f[15] &&
+    !!f[16] &&
+    !/^\d{1,3}$/.test(f[16]) &&
+    /^\d{1,3}$/.test(f[17] ?? "")
+  ) {
+    f = [...f.slice(0, 15), ...f.slice(16)];
+  }
+
+  return f;
+}
+
+/**
  * Column offset for standard EXT1 layout:
  * offset 0 → col0=N, col1=EXT1, col2=ref
  * offset -1 → col0=EXT1, col1=ref
@@ -281,8 +315,14 @@ export function parseHolidayExtrasExtz10Text(text: string): HolidayExtrasParseRe
   const bookings: CanonicalBooking[] = [];
 
   for (const line of lines) {
-    const f = splitExtLine(line);
-    if (f[0] !== "06" || f.length < 23) {
+    const rawSplit = splitExtLine(line);
+    if (rawSplit[0] !== "06" || rawSplit.length < 23) {
+      stats.skipped_unknown_format++;
+      continue;
+    }
+
+    const f = normalizeExtz10Fields(rawSplit);
+    if (f.length < 21) {
       stats.skipped_unknown_format++;
       continue;
     }

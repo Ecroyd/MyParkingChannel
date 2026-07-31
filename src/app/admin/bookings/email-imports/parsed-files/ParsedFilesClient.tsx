@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { RefreshCw, CheckCircle2, AlertTriangle, FileText, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useCanViewMoney } from '@/lib/auth/money-visibility';
 import {
   Dialog,
   DialogContent,
@@ -103,6 +104,7 @@ type ViewFileMeta = {
 };
 
 export default function ParsedFilesClient({ tenantId }: { tenantId: string }) {
+  const canViewMoney = useCanViewMoney();
   const [files, setFiles] = useState<ParsedFile[]>([]);
   const [bookings, setBookings] = useState<BookingWithSource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -306,16 +308,18 @@ export default function ParsedFilesClient({ tenantId }: { tenantId: string }) {
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Revenue</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              £{bookings.reduce((sum, b) => sum + (b.money_charged || 0), 0).toFixed(2)}
-            </div>
-          </CardContent>
-        </Card>
+        {canViewMoney && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Total Revenue</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                £{bookings.reduce((sum, b) => sum + (b.money_charged || 0), 0).toFixed(2)}
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Files View */}

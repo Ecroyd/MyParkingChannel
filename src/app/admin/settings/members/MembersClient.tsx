@@ -14,11 +14,18 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { inviteMember, updateMemberRole, removeMember, cancelInvitation, resendInvitation } from './actions';
-import { X, Mail, User, Shield, Crown, Loader2, Copy, Check } from 'lucide-react';
+import { X, Mail, User, Shield, Crown, Loader2, Copy, Check, ClipboardList } from 'lucide-react';
+import {
+  ASSIGNABLE_ROLES,
+  ROLE_DESCRIPTIONS,
+  ROLE_LABELS,
+  type AssignableRole,
+  type UserRole,
+} from '@/lib/auth/permissions';
 
 interface Member {
   user_id: string;
-  role: 'owner' | 'admin' | 'user';
+  role: UserRole;
   is_default: boolean;
   created_at: string;
   users: {
@@ -30,7 +37,7 @@ interface Member {
 interface Invitation {
   id: string;
   email: string; // This field now stores username
-  role: 'owner' | 'admin' | 'user';
+  role: UserRole;
   created_at: string;
   expires_at: string;
 }
@@ -39,7 +46,7 @@ interface MembersClientProps {
   members: Member[];
   invitations: Invitation[];
   currentUserId: string;
-  currentUserRole: 'owner' | 'admin' | 'user';
+  currentUserRole: UserRole;
   isOnlyOwner: boolean;
 }
 
@@ -51,7 +58,7 @@ export default function MembersClient({
   isOnlyOwner,
 }: MembersClientProps) {
   const [inviteUsername, setInviteUsername] = useState('');
-  const [inviteRole, setInviteRole] = useState<'admin' | 'user'>('user');
+  const [inviteRole, setInviteRole] = useState<AssignableRole>('user');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
@@ -94,7 +101,7 @@ export default function MembersClient({
     }
   };
 
-  const handleUpdateRole = async (userId: string, newRole: 'owner' | 'admin' | 'user') => {
+  const handleUpdateRole = async (userId: string, newRole: UserRole) => {
     setLoading(true);
     setMessage(null);
 
@@ -167,21 +174,15 @@ export default function MembersClient({
         return <Crown className="h-4 w-4 text-yellow-600" />;
       case 'admin':
         return <Shield className="h-4 w-4 text-blue-600" />;
+      case 'ops':
+        return <ClipboardList className="h-4 w-4 text-emerald-600" />;
       default:
         return <User className="h-4 w-4 text-gray-600" />;
     }
   };
 
-  const getRoleLabel = (role: string) => {
-    switch (role) {
-      case 'owner':
-        return 'Owner';
-      case 'admin':
-        return 'Admin';
-      default:
-        return 'User';
-    }
-  };
+  const getRoleLabel = (role: string) =>
+    ROLE_LABELS[role as UserRole] ?? ROLE_LABELS.user;
 
   return (
     <div className="space-y-6">
@@ -241,16 +242,19 @@ export default function MembersClient({
                     {canEdit && (
                       <Select
                         value={member.role}
-                        onValueChange={(value) => handleUpdateRole(member.user_id, value as 'owner' | 'admin' | 'user')}
+                        onValueChange={(value) => handleUpdateRole(member.user_id, value as UserRole)}
                         disabled={loading}
                       >
-                        <SelectTrigger className="w-32">
+                        <SelectTrigger className="w-36">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="owner">Owner</SelectItem>
-                          <SelectItem value="admin">Admin</SelectItem>
-                          <SelectItem value="user">User</SelectItem>
+                          <SelectItem value="owner">{ROLE_LABELS.owner}</SelectItem>
+                          {ASSIGNABLE_ROLES.map((role) => (
+                            <SelectItem key={role} value={role}>
+                              {ROLE_LABELS[role]}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     )}
@@ -296,17 +300,21 @@ export default function MembersClient({
               </div>
               <div>
                 <Label htmlFor="role">Role</Label>
-                <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as 'admin' | 'user')} disabled={loading}>
+                <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as AssignableRole)} disabled={loading}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="user">User</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
+                    {ASSIGNABLE_ROLES.map((role) => (
+                      <SelectItem key={role} value={role}>
+                        {ROLE_LABELS[role]}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
             </div>
+            <p className="text-xs text-gray-500">{ROLE_DESCRIPTIONS[inviteRole]}</p>
             <Button type="submit" disabled={loading}>
               {loading ? (
                 <>
@@ -416,6 +424,7 @@ export default function MembersClient({
       ✓ Owner invites a new user email → invitation row created, email sent
       ✓ Invitee signs up via Supabase auth → after clicking link and logging in, user_tenants row created with the right role
       ✓ user role → can access /admin/bookings etc., cannot see Analytics, financials, Stripe/API keys, members, or settings
+      ✓ ops role → same reach as user plus ANPR / gate control; no settings and no money amounts anywhere
       ✓ admin role → can see/edit bookings, analytics, settings, members, cannot transfer or delete tenant, cannot remove the sole owner
       ✓ UI hides tabs appropriately for each role
       ✓ If the only owner tries to downgrade themselves → blocked with a friendly error

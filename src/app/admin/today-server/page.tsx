@@ -2,6 +2,8 @@ import { createAdminClient } from '@/lib/supabase/server-admin';
 import { createServerClient } from '@/lib/supabase/server';
 import TodayServerClient from './TodayServerClient';
 import { loadTodayPageDataForTenantToday } from '@/lib/today/loadTodayData';
+import { canViewMoney, normalizeRole } from '@/lib/auth/permissions';
+import { redactBookingMoneyList } from '@/lib/money';
 
 export default async function TodayServerPage() {
   const supabase = await createServerClient();
@@ -42,13 +44,15 @@ export default async function TodayServerPage() {
       console.error('Today page query errors:', data.queryError);
     }
 
+    const showMoney = canViewMoney(normalizeRole(defaultTenant.role));
+
     return (
       <TodayServerClient
         tenant={tenant}
-        kpis={data.kpis}
-        arrivals={data.arrivals}
-        departures={data.departures}
-        currentlyParked={data.currentlyParked}
+        kpis={showMoney ? data.kpis : { ...data.kpis, totalRevenue: null }}
+        arrivals={showMoney ? data.arrivals : redactBookingMoneyList(data.arrivals ?? [])}
+        departures={showMoney ? data.departures : redactBookingMoneyList(data.departures ?? [])}
+        currentlyParked={showMoney ? data.currentlyParked : redactBookingMoneyList(data.currentlyParked ?? [])}
         initialDateRange={{ from: data.rangeFrom, to: data.rangeTo }}
         queryError={data.queryError}
       />

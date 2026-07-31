@@ -7,6 +7,8 @@ import BookingsServerClient from './BookingsServerClient';
 import { resolveAdminBookingListParams } from '@/lib/bookings/adminBookingListParams';
 import { fetchAdminBookingListPage } from '@/lib/bookings/adminBookingListQuery';
 import { withQueryTelemetryContext } from '@/lib/supabase/queryTelemetry';
+import { canViewMoney, normalizeRole } from '@/lib/auth/permissions';
+import { redactBookingMoneyList } from '@/lib/money';
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -113,11 +115,17 @@ export default async function BookingsServerPage({
     );
   }
 
+  const showMoney = canViewMoney(normalizeRole(userTenant.role));
+
   return (
     <BookingsServerClient
       user={user}
       tenant={tenant}
-      initialList={initialList}
+      initialList={
+        showMoney
+          ? initialList
+          : { ...initialList, rows: redactBookingMoneyList(initialList.rows) }
+      }
       initialParams={params}
     />
   );

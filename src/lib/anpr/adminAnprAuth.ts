@@ -1,9 +1,10 @@
 import { createAdminClient, createServerClient } from '@/lib/supabase/server';
+import { normalizeRole, roleAtLeast, type UserRole } from '@/lib/auth/permissions';
 
 export type AuthorizedAnprAdmin = {
   userId: string;
   tenantId: string;
-  role: string;
+  role: UserRole;
   adminClient: ReturnType<typeof createAdminClient>;
 };
 
@@ -57,12 +58,19 @@ export async function resolveAuthorizedAnprAdmin(
     return { ok: false, status: 403, error: 'Access denied' };
   }
 
+  // Gate control is an operations responsibility, so 'ops' qualifies, but the
+  // lowest 'user' role does not — this matches the ANPR nav entry's minRole.
+  const role = normalizeRole(chosen.role);
+  if (!roleAtLeast(role, 'ops')) {
+    return { ok: false, status: 403, error: 'Access denied' };
+  }
+
   return {
     ok: true,
     ctx: {
       userId: user.id,
       tenantId: chosen.tenant_id,
-      role: chosen.role,
+      role,
       adminClient,
     },
   };

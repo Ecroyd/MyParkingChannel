@@ -11,6 +11,8 @@ import { IngestCanaryHealthBanner, type IngestCanaryHealthResult } from './admin
 import Sidebar from '@/components/admin/Sidebar';
 import MobileSidebar from '@/components/admin/MobileSidebar';
 import InstallPWAButton from '@/components/InstallPWAButton';
+import { MoneyVisibilityProvider } from '@/lib/auth/money-visibility';
+import { canViewMoney } from '@/lib/auth/permissions';
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -141,6 +143,7 @@ export default function AdminShellClient({
   };
 
   return (
+    <MoneyVisibilityProvider canViewMoney={canViewMoney(userRole)}>
     <div className="flex h-screen bg-[#f9fafb] text-gray-900">
       <Sidebar features={isPlatformAdmin ? ['platform_admin'] : []} userRole={userRole} />
 
@@ -240,5 +243,6 @@ export default function AdminShellClient({
 
       <InstallPWAButton />
     </div>
+    </MoneyVisibilityProvider>
   );
 }

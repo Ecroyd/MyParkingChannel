@@ -464,7 +464,7 @@ export default function AnalyticsDashboard({ tenantId }: { tenantId: string }) {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-green-700 mb-4">
-            Export financial data for accounting. Summary format includes extensions and total revenue; detailed CSV includes customer, plate, and can be downloaded per channel/agent.
+            Export financial data for accounting. Times are in the car park local timezone; channel is a single column. Summary includes extensions; detailed CSV includes customer, plate, and stay days, and can be downloaded per channel.
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <Button 

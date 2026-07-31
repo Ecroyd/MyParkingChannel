@@ -3,16 +3,28 @@
 import { calculateStayDays } from "./stayLength";
 
 describe("calculateStayDays", () => {
-  test("exact 10 days", () => {
+  test("inclusive calendar days: 10 Dec → 20 Dec = 11 days", () => {
     const start = new Date("2025-12-10T11:50:00Z");
     const end = new Date("2025-12-20T11:50:00Z");
-    expect(calculateStayDays(start, end)).toBe(10);
+    expect(calculateStayDays(start, end)).toBe(11);
   });
 
-  test("10 days + 1 minute (should ceil to 11 days)", () => {
+  test("later return time on the same leave date does not add a day", () => {
     const start = new Date("2025-12-10T11:50:00Z");
     const end = new Date("2025-12-20T11:51:00Z");
     expect(calculateStayDays(start, end)).toBe(11);
+  });
+
+  test("Jun 1 → Jun 8 is 8 inclusive days", () => {
+    const start = new Date("2026-06-01T03:00:00Z");
+    const end = new Date("2026-06-08T13:00:00Z");
+    expect(calculateStayDays(start, end, "Europe/London")).toBe(8);
+  });
+
+  test("week away Mon→Mon is 8 inclusive days even if return is later", () => {
+    const start = new Date("2026-03-02T10:00:00Z"); // Mon
+    const end = new Date("2026-03-09T18:00:00Z"); // next Mon, later
+    expect(calculateStayDays(start, end)).toBe(8);
   });
 
   test("identical timestamps (should return 1 day minimum)", () => {
@@ -27,22 +39,29 @@ describe("calculateStayDays", () => {
     expect(calculateStayDays(start, end)).toBe(1);
   });
 
-  test("less than 1 day (should ceil to 1 day)", () => {
+  test("same calendar day (should return 1 day)", () => {
     const start = new Date("2025-12-10T11:50:00Z");
-    const end = new Date("2025-12-10T12:00:00Z"); // 10 minutes later
+    const end = new Date("2025-12-10T12:00:00Z");
     expect(calculateStayDays(start, end)).toBe(1);
   });
 
-  test("exactly 1 day", () => {
+  test("next calendar day is 2 inclusive days", () => {
     const start = new Date("2025-12-10T11:50:00Z");
     const end = new Date("2025-12-11T11:50:00Z");
-    expect(calculateStayDays(start, end)).toBe(1);
+    expect(calculateStayDays(start, end)).toBe(2);
   });
 
-  test("1 day + 1 second (should ceil to 2 days)", () => {
+  test("next calendar day with later time is still 2 days", () => {
     const start = new Date("2025-12-10T11:50:00Z");
     const end = new Date("2025-12-11T11:50:01Z");
     expect(calculateStayDays(start, end)).toBe(2);
   });
-});
 
+  test("uses tenant timezone around midnight (London)", () => {
+    // 23:30 UTC on 10 Dec = 23:30 London (GMT) → 10 Dec
+    // 00:30 UTC on 11 Dec = 00:30 London → 11 Dec → 2 inclusive days
+    const start = new Date("2025-12-10T23:30:00Z");
+    const end = new Date("2025-12-11T00:30:00Z");
+    expect(calculateStayDays(start, end, "Europe/London")).toBe(2);
+  });
+});

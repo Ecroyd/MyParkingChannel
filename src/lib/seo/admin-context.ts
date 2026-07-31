@@ -1,4 +1,5 @@
 import { getCurrentTenantContext } from "@/lib/auth/current-tenant-context";
+import { canManageSettings } from "@/lib/auth/permissions";
 import { createAdminClient } from "@/lib/supabase/server-admin";
 import { ensureSiteSeoSettings, ensureSystemPages } from "./load-site-seo";
 
@@ -26,8 +27,7 @@ export async function requireSeoAdminContext(): Promise<
     return { ok: false, status: 401, error: "Not authenticated or no tenant membership" };
   }
 
-  const adminRoles = new Set(["owner", "admin", "manager"]);
-  if (!adminRoles.has(String(current.role))) {
+  if (!canManageSettings(current.role)) {
     return { ok: false, status: 403, error: "Insufficient role for SEO administration" };
   }
 

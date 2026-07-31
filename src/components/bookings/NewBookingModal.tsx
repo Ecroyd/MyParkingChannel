@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { toMoney } from '@/lib/money';
+import { useCanViewMoney } from '@/lib/auth/money-visibility';
 import { redirectToCheckout } from '@/lib/utils/redirect';
 
 type Booking = {
@@ -38,6 +39,8 @@ export default function NewBookingModal({
   onClose,
   onBookingCreated,
 }: NewBookingModalProps) {
+  const canViewMoney = useCanViewMoney();
+  const availableTabs = canViewMoney ? (['create', 'payment'] as const) : (['create'] as const);
   const [tab, setTab] = React.useState<'create' | 'payment'>('create');
   const [loading, setLoading] = React.useState(false);
   const [createdBooking, setCreatedBooking] = React.useState<Booking | null>(null);
@@ -45,9 +48,14 @@ export default function NewBookingModal({
 
   const handleBookingCreated = (booking: Booking) => {
     setCreatedBooking(booking);
-    setTab('payment');
     if (onBookingCreated) {
       onBookingCreated(booking);
+    }
+    // Without money access there is no payment step, so the booking is complete.
+    if (canViewMoney) {
+      setTab('payment');
+    } else {
+      handleClose();
     }
   };
 
@@ -76,7 +84,7 @@ export default function NewBookingModal({
 
         <div className="px-4 pt-2 sticky top-[73px] bg-white border-b z-10">
           <div className="flex gap-3">
-            {['create', 'payment'].map((t) => (
+            {availableTabs.map((t) => (
               <button
                 key={t}
                 onClick={() => {
@@ -117,7 +125,7 @@ export default function NewBookingModal({
             />
           )}
 
-          {tab === 'payment' && createdBooking && (
+          {tab === 'payment' && createdBooking && canViewMoney && (
             <PaymentForm
               booking={createdBooking}
               onPaymentSuccess={() => {
@@ -146,6 +154,7 @@ function CreateForm({
   loading: boolean;
   setLoading: (loading: boolean) => void;
 }) {
+  const canViewMoney = useCanViewMoney();
   const [form, setForm] = React.useState({
     reference: '',
     customer_name: '',
@@ -331,30 +340,32 @@ function CreateForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Amount Charged (£)</label>
-          <input
-            type="number"
-            step="0.01"
-            className="w-full border rounded p-2"
-            value={form.money_charged}
-            onChange={(e) => setForm((prev) => ({ ...prev, money_charged: e.target.value }))}
-            placeholder="0.00"
-          />
+      {canViewMoney && (
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Amount Charged (£)</label>
+            <input
+              type="number"
+              step="0.01"
+              className="w-full border rounded p-2"
+              value={form.money_charged}
+              onChange={(e) => setForm((prev) => ({ ...prev, money_charged: e.target.value }))}
+              placeholder="0.00"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Amount Received (£)</label>
+            <input
+              type="number"
+              step="0.01"
+              className="w-full border rounded p-2"
+              value={form.money_received}
+              onChange={(e) => setForm((prev) => ({ ...prev, money_received: e.target.value }))}
+              placeholder="0.00"
+            />
+          </div>
         </div>
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Amount Received (£)</label>
-          <input
-            type="number"
-            step="0.01"
-            className="w-full border rounded p-2"
-            value={form.money_received}
-            onChange={(e) => setForm((prev) => ({ ...prev, money_received: e.target.value }))}
-            placeholder="0.00"
-          />
-        </div>
-      </div>
+      )}
 
       <div>
         <label className="block text-xs text-gray-500 mb-1">Notes</label>

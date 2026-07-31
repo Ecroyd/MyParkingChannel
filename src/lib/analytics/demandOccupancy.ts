@@ -214,23 +214,39 @@ export async function loadDemandBookingsForWindow(opts: {
   const supabase = createAdminClient();
   const { windowStart, windowEnd } = queryWindowForTenantDays(opts.from, opts.to, timezone);
 
-  let query = supabase
-    .from('bookings')
-    .select(DEMAND_BOOKING_SELECT)
-    .eq('tenant_id', opts.tenantId)
-    .lt('start_at', windowEnd)
-    .gt('end_at', windowStart);
+  // PostgREST/Supabase silently caps a single response (often 1000 rows). Paginate
+  // so longer forecast windows (e.g. next 90 days into autumn) are not truncated.
+  const pageSize = 1000;
+  const all: DemandBookingRow[] = [];
+  let fromIdx = 0;
 
-  if (opts.excludeBookingReference) {
-    query = query.neq('reference', opts.excludeBookingReference);
+  for (;;) {
+    let query = supabase
+      .from('bookings')
+      .select(DEMAND_BOOKING_SELECT)
+      .eq('tenant_id', opts.tenantId)
+      .lt('start_at', windowEnd)
+      .gt('end_at', windowStart)
+      .order('start_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(fromIdx, fromIdx + pageSize - 1);
+
+    if (opts.excludeBookingReference) {
+      query = query.neq('reference', opts.excludeBookingReference);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      throw error;
+    }
+
+    const page = (data ?? []) as DemandBookingRow[];
+    all.push(...page);
+    if (page.length < pageSize) break;
+    fromIdx += pageSize;
   }
 
-  const { data, error } = await query;
-  if (error) {
-    throw error;
-  }
-
-  return (data ?? []) as DemandBookingRow[];
+  return all;
 }
 
 export async function computeDemandMetricsForWindow(opts: {

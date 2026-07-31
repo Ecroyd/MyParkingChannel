@@ -6,6 +6,8 @@ import { createServerClient } from '@/lib/supabase/server';
 import { resolveAdminBookingListParams } from '@/lib/bookings/adminBookingListParams';
 import { fetchAdminBookingListPage } from '@/lib/bookings/adminBookingListQuery';
 import { withQueryTelemetryContext } from '@/lib/supabase/queryTelemetry';
+import { canViewMoney, normalizeRole } from '@/lib/auth/permissions';
+import { redactBookingMoneyList } from '@/lib/money';
 
 export async function GET(req: NextRequest) {
   return withQueryTelemetryContext(
@@ -37,12 +39,17 @@ export async function GET(req: NextRequest) {
           .eq('tenant_id', tenantId)
           .maybeSingle();
 
-        if (!userTenant || (userTenant.role !== 'admin' && userTenant.role !== 'owner')) {
+        if (!userTenant) {
           return NextResponse.json(
-            { error: 'Access denied. Admin role required.' },
+            { error: 'Access denied. You are not a member of this tenant.' },
             { status: 403 }
           );
         }
+
+        // Every member may list bookings; amounts are stripped below for roles
+        // that fail canViewFinancials. Restricting the whole endpoint to admins
+        // would break pagination and search for operations staff.
+        const showMoney = canViewMoney(normalizeRole(userTenant.role));
 
         const { data: tenant } = await adminClient
           .from('tenants')
@@ -74,7 +81,9 @@ export async function GET(req: NextRequest) {
           'admin.bookings.list.api'
         );
 
-        return NextResponse.json(result);
+        return NextResponse.json(
+          showMoney ? result : { ...result, rows: redactBookingMoneyList(result.rows) }
+        );
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Internal server error';
         console.error('[Bookings List] Error:', error);

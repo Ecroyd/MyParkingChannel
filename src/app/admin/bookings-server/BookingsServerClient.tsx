@@ -21,6 +21,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
+import { useCanViewMoney } from '@/lib/auth/money-visibility';
 import NewBookingModal from '@/components/bookings/NewBookingModal';
 import { BookingHighlightIcon } from '@/components/bookings/BookingHighlightIcon';
 import { DynamicPricingBadge } from '@/components/bookings/DynamicPricingBadge';
@@ -100,6 +101,7 @@ export default function BookingsServerClient({
 }: BookingsServerClientProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const canViewMoney = useCanViewMoney();
   const timezone = tenant.timezone || 'Europe/London';
 
   const [rows, setRows] = useState<BookingAdminListRow[]>(initialList.rows);
@@ -598,12 +600,17 @@ export default function BookingsServerClient({
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                 <Input
                   id="search"
-                  placeholder="Search bookings..."
+                  placeholder="Reference, name, plate…"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10"
                 />
               </div>
+              {(dateFrom || dateTo) && searchTerm.trim() ? (
+                <p className="text-xs text-muted-foreground">
+                  Search ignores the date filter so far-ahead bookings still appear.
+                </p>
+              ) : null}
             </div>
 
             <div className="space-y-2">
@@ -842,10 +849,12 @@ export default function BookingsServerClient({
                             <span className="font-medium">Period:</span>{' '}
                             {formatDate(booking.start_at)} - {formatDate(booking.end_at)}
                           </div>
-                          <div>
-                            <span className="font-medium">Amount:</span> £
-                            {booking.money_charged || 0}
-                          </div>
+                          {canViewMoney && (
+                            <div>
+                              <span className="font-medium">Amount:</span> £
+                              {booking.money_charged || 0}
+                            </div>
+                          )}
                         </div>
                         <div className="mt-2 flex flex-wrap gap-4 text-sm text-gray-600">
                           <div className="flex flex-col">

@@ -24,7 +24,9 @@ function applyListFilters(
 ): any {
   let q = query.eq('tenant_id', params.tenantId);
 
-  if (params.dateFrom || params.dateTo) {
+  // Reference / plate / name search must find bookings outside the operational
+  // date window (e.g. a stay next year). Date bounds still apply when browsing.
+  if ((params.dateFrom || params.dateTo) && !params.search) {
     const fromKey = params.dateFrom ?? '1970-01-01';
     const toKey = params.dateTo ?? '2999-12-31';
     const { rangeStart, rangeEnd } = tenantDateRangeUtcBounds(fromKey, toKey);

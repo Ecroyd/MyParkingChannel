@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSupabase } from '@/lib/supabase/server';
+import { requireFinancialsAccess } from '@/lib/auth/requireFinancials';
 import { stringify } from "csv-stringify/sync";
+import { createAdminClient } from '@/lib/supabase/server-admin';
+import { DEFAULT_TENANT_TIMEZONE } from '@/lib/datetime/parse';
+import {
+  exportChannel,
+  exportDateRangeUtcBounds,
+  exportStayDays,
+  formatExportDateTime,
+  money2,
+} from '@/lib/analytics/accountingExportFormat';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -12,9 +22,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Missing required parameters" }, { status: 400 });
   }
 
+  const guard = await requireFinancialsAccess(tenantId);
+  if (!guard.ok) return guard.response;
+
   const supabase = await getServerSupabase();
+  const adminClient = createAdminClient();
 
   try {
+    const { data: tenantRow } = await adminClient
+      .from('tenants')
+      .select('timezone')
+      .eq('id', tenantId)
+      .maybeSingle();
+    const timezone = tenantRow?.timezone || DEFAULT_TENANT_TIMEZONE;
+    const { fromUtc, toUtcExclusive } = exportDateRangeUtcBounds(start, end, timezone);
+
     // Get all bookings with their extensions for the date range
     const { data: bookings, error: bookingsError } = await supabase
       .from("bookings")
@@ -26,12 +48,13 @@ export async function GET(req: NextRequest) {
         money_charged,
         money_received,
         source,
+        external_source,
         status,
         created_at
       `)
       .eq("tenant_id", tenantId)
-      .gte("start_at", start)
-      .lt("start_at", end)
+      .gte("start_at", fromUtc)
+      .lt("start_at", toUtcExclusive)
       .order("start_at", { ascending: true });
 
     if (bookingsError) {
@@ -73,16 +96,17 @@ export async function GET(req: NextRequest) {
     // Add header row
     csvData.push([
       "Date",
-      "Booking Reference", 
-      "Start Date",
-      "End Date",
+      "Booking Reference",
+      "Start",
+      "End",
+      "Days",
       "Channel",
       "Status",
       "Money Charged (£)",
       "Money Received (£)",
       "Extension Amount (£)",
       "Total Revenue (£)",
-      "Created Date"
+      "Created",
     ]);
 
     // Process each booking
@@ -92,44 +116,39 @@ export async function GET(req: NextRequest) {
         sum + (ext.charged_amount_cents / 100), 0
       );
 
-      // Format dates
-      const startDate = new Date(booking.start_at).toLocaleDateString('en-GB');
-      const endDate = new Date(booking.end_at).toLocaleDateString('en-GB');
-      const createdDate = new Date(booking.created_at).toLocaleDateString('en-GB');
-      const bookingDate = new Date(booking.start_at).toLocaleDateString('en-GB');
-
-      // Calculate total revenue (booking + extensions)
+      const startLocal = formatExportDateTime(booking.start_at, timezone);
+      const endLocal = formatExportDateTime(booking.end_at, timezone);
+      const createdLocal = formatExportDateTime(booking.created_at, timezone);
+      const days = exportStayDays(booking.start_at, booking.end_at, timezone);
       const totalRevenue = (booking.money_charged || 0) + totalExtensionAmount;
 
       csvData.push([
-        bookingDate,
+        startLocal.slice(0, 10), // DD/MM/YYYY
         booking.reference || "",
-        startDate,
-        endDate,
-        booking.source || "unknown",
+        startLocal,
+        endLocal,
+        String(days),
+        exportChannel(booking),
         booking.status || "",
-        (booking.money_charged || 0).toFixed(2),
-        (booking.money_received || 0).toFixed(2),
-        totalExtensionAmount.toFixed(2),
-        totalRevenue.toFixed(2),
-        createdDate
+        money2(booking.money_charged),
+        money2(booking.money_received),
+        money2(totalExtensionAmount),
+        money2(totalRevenue),
+        createdLocal,
       ]);
     });
 
-    // Generate CSV
-    const csv = stringify(csvData, { 
-      header: false, // We're adding our own header
-      delimiter: ','
-    });
+    // Generate CSV (BOM for Excel)
+    const csv = `\uFEFF${stringify(csvData, {
+      header: false,
+      delimiter: ',',
+    })}`;
 
-    // Create filename with date range
-    const startDate = new Date(start).toLocaleDateString('en-GB').replace(/\//g, '-');
-    const endDate = new Date(end).toLocaleDateString('en-GB').replace(/\//g, '-');
-    const filename = `accounting-export-${startDate}-to-${endDate}.csv`;
+    const filename = `accounting-export-${start}-to-${end}.csv`;
 
     return new NextResponse(csv, {
       headers: {
-        "Content-Type": "text/csv",
+        "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="${filename}"`,
       },
     });

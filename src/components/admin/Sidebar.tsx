@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
 import { ADMIN_NAV, NavNode } from "@/config/adminNav";
-import { roleAtLeast } from "@/lib/auth/permissions";
+import { canViewFinancials, roleAtLeast } from "@/lib/auth/permissions";
 import type { UserRole } from "@/lib/auth/permissions";
 
 type Groups = Record<string, NavNode[]>;
@@ -111,11 +111,13 @@ export default function Sidebar({ features = [] as string[], userRole }: { featu
   const pathname = usePathname();
 
   // 1) Filter items by feature flags and role requirements
+  const showFinancials = canViewFinancials(userRole);
   const allowed = (n: NavNode) => {
     // Check feature flags
     if (n.feature && !features.includes(n.feature)) return false;
     // Check role requirements
     if (n.minRole && !roleAtLeast(userRole, n.minRole)) return false;
+    if (n.requiresFinancials && !showFinancials) return false;
     return true;
   };
   const top = ADMIN_NAV.filter(allowed);

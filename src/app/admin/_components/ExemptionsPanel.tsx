@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { Loader2, RefreshCw, AlertTriangle, Clock, Shield, Camera, CheckSquare, ChevronDown, ChevronUp, X, ArrowUpDown } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { toMoney } from "@/lib/money";
+import { useCanViewMoney } from "@/lib/auth/money-visibility";
 
 const EXEMPTIONS_POLL_INTERVAL_MS = 60_000;
 
@@ -602,6 +603,10 @@ function BookingDetailsModalWithExemption({
   onClose: () => void;
   onBookingUpdated?: () => void;
 }) {
+  const canViewMoney = useCanViewMoney();
+  const availableTabs = canViewMoney
+    ? (['overview', 'edit', 'extend', 'refund'] as const)
+    : (['overview', 'edit'] as const);
   const [tab, setTab] = useState<'overview'|'edit'|'extend'|'refund'>('overview');
   const [loading, setLoading] = useState(false);
 
@@ -692,7 +697,7 @@ function BookingDetailsModalWithExemption({
 
         <div className="px-4 pt-2">
           <div className="flex gap-3 border-b">
-            {['overview','edit','extend','refund'].map(t => (
+            {availableTabs.map(t => (
               <button
                 key={t}
                 onClick={() => setTab(t as any)}
@@ -718,7 +723,9 @@ function BookingDetailsModalWithExemption({
               <Info label="Colour" value={booking.car_color || '—'} />
               <Info label="Start" value={new Date(booking.start_at).toLocaleString()} />
               <Info label="End" value={new Date(booking.end_at).toLocaleString()} />
-              <Info label="Charged" value={toMoney(Math.round((booking.money_charged ?? 0) * 100))} />
+              {canViewMoney && (
+                <Info label="Charged" value={toMoney(Math.round((booking.money_charged ?? 0) * 100))} />
+              )}
               <Info label="Flight" value={booking.flight_number || '—'} />
               <Info label="Status" value={booking.status || '—'} />
               <Info label="Checked In" value={booking.checked_in_at ? new Date(booking.checked_in_at).toLocaleString() : '—'} />
@@ -733,11 +740,11 @@ function BookingDetailsModalWithExemption({
             <EditForm booking={booking} onSaved={async () => { setTab('overview'); if (onBookingUpdated) onBookingUpdated(); }} />
           )}
 
-          {!loading && booking && tab === 'extend' && (
+          {!loading && booking && canViewMoney && tab === 'extend' && (
             <ExtendForm booking={booking} onExtended={async () => { setTab('overview'); if (onBookingUpdated) onBookingUpdated(); }} />
           )}
 
-          {!loading && booking && tab === 'refund' && (
+          {!loading && booking && canViewMoney && tab === 'refund' && (
             <RefundForm booking={booking} onRefunded={async () => { setTab('overview'); if (onBookingUpdated) onBookingUpdated(); }} />
           )}
         </div>

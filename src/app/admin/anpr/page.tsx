@@ -3,6 +3,7 @@
 import AnprAdminClient from '@/components/admin/anpr/AnprAdminClient';
 import { createServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server';
+import { normalizeRole, roleAtLeast } from '@/lib/auth/permissions';
 
 export default async function AnprPage() {
   const supabase = await createServerClient();
@@ -43,6 +44,17 @@ export default async function AnprPage() {
       <div className="p-6">
         <h1 className="text-2xl font-semibold mb-2">ANPR / Gate Control</h1>
         <p className="text-sm text-gray-600">No tenant found</p>
+      </div>
+    );
+  }
+
+  if (!roleAtLeast(normalizeRole(userTenant.role), 'ops')) {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-semibold mb-2">ANPR / Gate Control</h1>
+        <p className="text-sm text-gray-600">
+          Your role does not have access to gate control.
+        </p>
       </div>
     );
   }

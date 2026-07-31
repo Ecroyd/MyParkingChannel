@@ -46,6 +46,7 @@ function createMockSupabase(opts?: { count?: number; rows?: unknown[] }) {
   return {
     client: { from } as never,
     selectCalls,
+    builder,
   };
 }
 
@@ -122,6 +123,36 @@ describe('fetchAdminBookingListPage', () => {
     expect(result.rows).toHaveLength(1);
     expect(result.refreshedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(result.rows[0]).not.toHaveProperty('notes');
+  });
+
+  it('ignores date window when searching so far-ahead references still match', async () => {
+    const { client, builder } = createMockSupabase({ count: 1, rows: [] });
+    const params = resolveAdminBookingListParams({
+      tenantId: 't1',
+      search: 'REF-NEXT-YEAR',
+      dateFrom: '2026-07-01',
+      dateTo: '2026-12-31',
+    });
+
+    await fetchAdminBookingListPage(client, params, 'admin.bookings.list.api');
+
+    expect(builder.or).toHaveBeenCalled();
+    expect(builder.gte).not.toHaveBeenCalled();
+    expect(builder.lte).not.toHaveBeenCalled();
+  });
+
+  it('applies date window when browsing without search', async () => {
+    const { client, builder } = createMockSupabase({ count: 1, rows: [] });
+    const params = resolveAdminBookingListParams({
+      tenantId: 't1',
+      dateFrom: '2026-07-01',
+      dateTo: '2026-12-31',
+    });
+
+    await fetchAdminBookingListPage(client, params, 'admin.bookings.list.api');
+
+    expect(builder.gte).toHaveBeenCalled();
+    expect(builder.lte).toHaveBeenCalled();
   });
 });
 

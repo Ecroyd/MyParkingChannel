@@ -9,6 +9,7 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getMatrixPriceForStay, type PricingSource, findSeasonForDate } from '@/lib/pricing/matrix';
+import { calculateStayDays } from '@/lib/pricing/stayLength';
 import {
   aggregateDemandByDay,
   enumerateDateKeys,
@@ -557,11 +558,13 @@ export async function calculateProductAvailability(input: AvailabilityInput): Pr
 
   const stayFromDay = tenantDateKeyFromUtc(startAt, tenantTimezone);
   const stayToDay = tenantDateKeyFromUtc(endAt, tenantTimezone);
+  // Capacity still uses inclusive calendar dates the car may be on site
   const stayDates =
     stayFromDay && stayToDay ? enumerateDateKeys(stayFromDay, stayToDay) : generateStayDates(startAt, endAt);
-  const days = stayDates.length;
+  // Billable LOS: inclusive calendar days (arrival + departure both count)
+  const days = calculateStayDays(new Date(startAt), new Date(endAt), tenantTimezone);
 
-  if (days <= 0) {
+  if (days <= 0 || stayDates.length === 0) {
     return {
       productId,
       startAt,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSupabase } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
+import { requireFinancialsAccess } from '@/lib/auth/requireFinancials';
 
 export async function GET(req: NextRequest) {
   try {
@@ -16,25 +16,10 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const supabase = await getServerSupabase();
+    const guard = await requireFinancialsAccess(tenantId);
+    if (!guard.ok) return guard.response;
+
     const adminSupabase = await createAdminClient();
-
-    // Verify user has access to this tenant
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { data: userTenant } = await adminSupabase
-      .from('user_tenants')
-      .select('tenant_id')
-      .eq('user_id', user.id)
-      .eq('tenant_id', tenantId)
-      .single();
-
-    if (!userTenant) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
-    }
 
     // Query data directly instead of using functions with tenant access control
     console.log('🔍 Analytics Summary: Querying bookings directly for tenant:', tenantId);

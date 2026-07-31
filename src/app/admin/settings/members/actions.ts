@@ -5,7 +5,13 @@ import { redirect } from 'next/navigation';
 import { createServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
 import { getCurrentTenantContext } from '@/lib/auth/current-tenant-context';
-import { canManageMembers } from '@/lib/auth/permissions';
+import {
+  ASSIGNABLE_ROLES,
+  canManageMembers,
+  isUserRole,
+  type AssignableRole,
+  type UserRole,
+} from '@/lib/auth/permissions';
 // Email sending removed - using invite links instead
 // import { sendEmail } from '@/lib/email';
 import { randomBytes } from 'crypto';
@@ -33,14 +39,17 @@ export async function inviteMember(formData: FormData): Promise<InviteResult> {
   }
 
   const username = formData.get('username')?.toString().trim().toLowerCase();
-  const role = formData.get('role')?.toString() as 'admin' | 'user' | null;
+  const role = formData.get('role')?.toString() as AssignableRole | null;
 
   if (!username || !/^[a-zA-Z0-9_-]+$/.test(username)) {
     return { success: false, error: 'Username is required and can only contain letters, numbers, underscores, and hyphens' };
   }
 
-  if (!role || !['admin', 'user'].includes(role)) {
-    return { success: false, error: 'Role must be admin or user' };
+  if (!role || !ASSIGNABLE_ROLES.includes(role)) {
+    return {
+      success: false,
+      error: `Role must be one of: ${ASSIGNABLE_ROLES.join(', ')}`,
+    };
   }
 
   const adminClient = await createAdminClient();
@@ -104,7 +113,7 @@ export async function inviteMember(formData: FormData): Promise<InviteResult> {
 /**
  * Update a member's role
  */
-export async function updateMemberRole(userId: string, newRole: 'owner' | 'admin' | 'user'): Promise<ActionResult> {
+export async function updateMemberRole(userId: string, newRole: UserRole): Promise<ActionResult> {
   const ctx = await getCurrentTenantContext();
   if (!ctx) {
     return { success: false, error: 'Not authenticated' };
@@ -113,6 +122,10 @@ export async function updateMemberRole(userId: string, newRole: 'owner' | 'admin
   // Only owner can change roles
   if (ctx.role !== 'owner') {
     return { success: false, error: 'Only owners can change member roles' };
+  }
+
+  if (!isUserRole(newRole)) {
+    return { success: false, error: 'Unknown role' };
   }
 
   const adminClient = await createAdminClient();

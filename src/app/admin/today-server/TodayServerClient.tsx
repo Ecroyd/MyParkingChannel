@@ -10,6 +10,7 @@ import type { TodayBookingRow as TodayBooking } from '@/lib/today/bookingSelect'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
+import { useCanViewMoney } from '@/lib/auth/money-visibility';
 import {
   groupArrivalsAndDeparturesByDay,
 } from '@/lib/today/groupBookingsByDay';
@@ -68,7 +69,8 @@ interface KPIs {
   departures: number;
   checkedIn: number;
   capacityLeft: number;
-  totalRevenue: number;
+  /** null when the signed-in role may not see financials. */
+  totalRevenue: number | null;
 }
 
 interface TodayServerClientProps {
@@ -91,6 +93,7 @@ export default function TodayServerClient({
   queryError: initialQueryError,
 }: TodayServerClientProps) {
   const { toast } = useToast();
+  const canViewMoney = useCanViewMoney();
   const [, startTransition] = useTransition();
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -401,7 +404,7 @@ export default function TodayServerClient({
         throw new Error('Failed to fetch data');
       }
 
-      const defaultKpis: KPIs = { arrivals: 0, departures: 0, checkedIn: 0, capacityLeft: 0, totalRevenue: 0 };
+      const defaultKpis: KPIs = { arrivals: 0, departures: 0, checkedIn: 0, capacityLeft: 0, totalRevenue: null };
       setKpis(data.kpis ?? defaultKpis);
       setArrivals(data.arrivals ?? []);
       setDepartures(data.departures ?? []);
@@ -766,10 +769,12 @@ export default function TodayServerClient({
         </div>
 
         {/* Revenue Summary */}
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">Revenue</h3>
-          <p className="text-3xl font-bold text-green-600">£{kpis.totalRevenue.toFixed(2)}</p>
-        </div>
+        {canViewMoney && (
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Revenue</h3>
+            <p className="text-3xl font-bold text-green-600">£{(kpis.totalRevenue ?? 0).toFixed(2)}</p>
+          </div>
+        )}
 
         {/* Arrivals and Departures by Day */}
         <section className="bg-white rounded-lg border border-gray-200 overflow-hidden">

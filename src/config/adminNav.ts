@@ -9,6 +9,12 @@ export type NavNode = {
   children?: NavNode[];
   section?: string;    // explicit section title for top-level grouping
   minRole?: UserRole;  // minimum role required to see this item
+  /**
+   * Item exposes revenue, payouts or other monetary figures. Gated by
+   * canViewFinancials rather than by minRole, so the Operations role can hold
+   * admin breadth without reaching money. Must match the page's own guard.
+   */
+  requiresFinancials?: boolean;
 };
 
 /** Single source of truth for Admin navigation */
@@ -48,7 +54,7 @@ export const ADMIN_NAV: NavNode[] = [
       { key: "dynamic-pricing", label: "Dynamic Pricing", href: "/admin/settings/dynamic-pricing", minRole: "admin" },
     ],
   },
-  { key: "analytics", label: "Analytics", href: "/admin/analytics", section: "Core", minRole: "admin" },
+  { key: "analytics", label: "Analytics", href: "/admin/analytics", section: "Core", minRole: "admin", requiresFinancials: true },
 
   // ——— Sites & Integrations ———
   { key: "tenant-sites", label: "Tenant Sites", href: "/admin/tenant-sites-server", section: "Sites & Integrations", minRole: "admin" },
@@ -66,7 +72,7 @@ export const ADMIN_NAV: NavNode[] = [
   },
   { key: "partner-apis", label: "Partner APIs", href: "/admin/partner-apis", section: "Sites & Integrations", minRole: "admin" },
   { key: "devices", label: "Gate Devices", href: "/admin/devices", section: "Sites & Integrations", feature: "devices", minRole: "admin" },
-  { key: "anpr", label: "ANPR / Gate Control", href: "/admin/anpr", section: "Sites & Integrations", minRole: "admin" },
+  { key: "anpr", label: "ANPR / Gate Control", href: "/admin/anpr", section: "Sites & Integrations", minRole: "ops" },
 
       // ——— Platform Management (Admin Only) ———
       { key: "applications", label: "Applications", href: "/admin/applications", section: "Platform Management", feature: "platform_admin" },
@@ -92,7 +98,7 @@ export const ADMIN_NAV: NavNode[] = [
       { key: "setup", label: "Initial Setup", href: "/admin/setup", minRole: "admin" },
     ],
   },
-  { key: "payments", label: "Payments", href: "/admin/payments", section: "Settings", minRole: "owner" },
+  { key: "payments", label: "Payments", href: "/admin/payments", section: "Settings", minRole: "admin", requiresFinancials: true },
 ];
 
 

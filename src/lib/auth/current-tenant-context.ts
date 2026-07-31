@@ -1,7 +1,7 @@
 import { cookies, headers } from 'next/headers';
 import { createServerClient } from '@/lib/supabase/server';
 import { resolveTenantIdOrThrow } from '@/lib/tenant/resolve';
-import type { UserRole } from './permissions';
+import { normalizeRole, type UserRole } from './permissions';
 
 export type CurrentTenantContext = {
   tenantId: string;
@@ -104,7 +104,7 @@ export async function getCurrentTenantContext(): Promise<CurrentTenantContext | 
     tenantId,
     tenantSlug,
     userId: user.id,
-    role: membership.role as UserRole,
+    role: normalizeRole(membership.role),
   };
 }
 

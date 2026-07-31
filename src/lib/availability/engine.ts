@@ -140,7 +140,7 @@ export async function calculateAvailability(
     };
   }
 
-  // Use centralized stay length calculation (time-based, not calendar-based)
+  // Billable LOS: inclusive calendar days (arrival + departure both count)
   const startAtDate = new Date(startAt);
   const endAtDate = new Date(endAt);
   const days = calculateStayDays(startAtDate, endAtDate);

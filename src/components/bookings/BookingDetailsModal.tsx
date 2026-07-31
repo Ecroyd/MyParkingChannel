@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { toMoney } from '@/lib/money';
+import { useCanViewMoney } from '@/lib/auth/money-visibility';
 import { BookingHighlightIcon } from './BookingHighlightIcon';
 import { BookingHighlightCode } from '@/types/bookings';
 import {
@@ -77,6 +78,11 @@ export default function BookingDetailsModal({
   onClose: () => void;
   onBookingUpdated?: (saved?: Booking | null) => void;
 }) {
+  const canViewMoney = useCanViewMoney();
+  const availableTabs = React.useMemo(
+    () => (canViewMoney ? ['overview', 'edit', 'extend', 'refund'] as const : ['overview', 'edit'] as const),
+    [canViewMoney]
+  );
   const [tab, setTab] = React.useState<'overview'|'edit'|'extend'|'refund'>('overview');
   const [loading, setLoading] = React.useState(false);
   const [payloadOpen, setPayloadOpen] = React.useState(false);
@@ -159,7 +165,7 @@ export default function BookingDetailsModal({
 
         <div className="px-4 pt-2">
           <div className="flex gap-3 border-b">
-            {['overview','edit','extend','refund'].map(t => (
+            {availableTabs.map(t => (
               <button
                 key={t}
                 onClick={() => setTab(t as any)}
@@ -210,7 +216,9 @@ export default function BookingDetailsModal({
                       hour: '2-digit',
                       minute: '2-digit'
                     })} />
-                    <Info label="Charged" value={toMoney(Math.round((displayBooking.money_charged ?? 0) * 100))} />
+                    {canViewMoney && (
+                      <Info label="Charged" value={toMoney(Math.round((displayBooking.money_charged ?? 0) * 100))} />
+                    )}
                     <Info label="Flight" value={displayBooking.flight_number || '—'} />
                     <div className="col-span-2">
                       <Info label="Notes" value={displayBooking.notes || '—'} />
@@ -241,11 +249,11 @@ export default function BookingDetailsModal({
             />
           )}
 
-          {!loading && displayBooking && tab === 'extend' && (
+          {!loading && displayBooking && canViewMoney && tab === 'extend' && (
             <ExtendForm booking={displayBooking} onExtended={async () => { await refresh(); setTab('overview'); }} />
           )}
 
-          {!loading && displayBooking && tab === 'refund' && (
+          {!loading && displayBooking && canViewMoney && tab === 'refund' && (
             <RefundForm booking={displayBooking} onRefunded={async () => { await refresh(); setTab('overview'); }} />
           )}
         </div>
