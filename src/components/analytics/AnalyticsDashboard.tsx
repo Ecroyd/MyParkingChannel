@@ -1,684 +1,965 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import { format, subDays } from 'date-fns';
+import {
+  Download,
+  Filter,
+  Loader2,
+  Save,
+  Trash2,
+} from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  PieChart,
-  Pie,
-  Cell
-} from 'recharts';
-import { 
-  Download, 
-  TrendingUp, 
-  Users, 
-  DollarSign, 
-  Calendar,
-  BarChart3,
-  PieChart as PieChartIcon,
-  FileSpreadsheet
-} from 'lucide-react';
-import { format, subDays, startOfWeek, startOfMonth, endOfWeek, endOfMonth } from 'date-fns';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
+import { Checkbox } from '@/components/ui/checkbox';
+import DemandCurve from '@/components/charts/DemandCurve';
+import {
+  ALL_EXPORT_FIELDS,
+  ANONYMISED_EXPORT_FIELDS,
+  GROUP_BY,
+  PII_EXPORT_FIELDS,
+  type AggregateRow,
+  type DateBasis,
+  type GroupBy,
+  type ReportingKpis,
+} from '@/lib/analytics/reportingTypes';
 
-interface AnalyticsData {
-  summary: {
-    total_bookings: number;
-    total_revenue: number;
-    total_received: number;
-    average_booking_value: number;
-    occupancy_rate: number;
-    extension_count: number;
-    extension_revenue: number;
+const CHART_COLORS = ['#0f766e', '#0369a1', '#b45309', '#7c3aed', '#be123c', '#15803d'];
+
+type ChannelOption = { code: string; name: string };
+
+type FiltersState = {
+  from: string;
+  to: string;
+  dateBasis: DateBasis;
+  channel: string;
+  status: string;
+  stayMin: string;
+  stayMax: string;
+  leadMin: string;
+  leadMax: string;
+};
+
+type SavedReport = {
+  id: string;
+  name: string;
+  description: string | null;
+  report_definition: Record<string, unknown>;
+};
+
+function ymd(d: Date) {
+  return format(d, 'yyyy-MM-dd');
+}
+
+function money(n: number | null | undefined): string {
+  if (n == null) return '—';
+  return new Intl.NumberFormat('en-GB', {
+    style: 'currency',
+    currency: 'GBP',
+    maximumFractionDigits: 0,
+  }).format(n);
+}
+
+function num(n: number | null | undefined, digits = 1): string {
+  if (n == null) return '—';
+  return n.toFixed(digits);
+}
+
+function filtersFromParams(sp: URLSearchParams): FiltersState {
+  return {
+    from: sp.get('from') || ymd(subDays(new Date(), 29)),
+    to: sp.get('to') || ymd(new Date()),
+    dateBasis: (sp.get('dateBasis') as DateBasis) || 'arrival',
+    channel: sp.get('channel') || '',
+    status: sp.get('status') || '',
+    stayMin: sp.get('stayMin') || '',
+    stayMax: sp.get('stayMax') || '',
+    leadMin: sp.get('leadMin') || '',
+    leadMax: sp.get('leadMax') || '',
   };
-  revenueByChannel: Array<{
-    channel: string;
-    bookings_count: number;
-    booking_revenue: number;
-    extension_revenue: number;
-    total_revenue: number;
-  }>;
-  dailyRevenue: Array<{
-    date: string;
-    bookings_count: number;
-    booking_revenue: number;
-    extension_revenue: number;
-    total_revenue: number;
-    occupancy_rate: number;
-  }>;
 }
 
-interface DateRange {
-  label: string;
-  start: Date;
-  end: Date;
+function buildQuery(tenantId: string, f: FiltersState, extra?: Record<string, string>) {
+  const q = new URLSearchParams();
+  q.set('tenant_id', tenantId);
+  q.set('from', f.from);
+  q.set('to', f.to);
+  q.set('dateBasis', f.dateBasis);
+  if (f.channel) q.set('channel', f.channel);
+  if (f.status) q.set('status', f.status);
+  if (f.stayMin) q.set('stayMin', f.stayMin);
+  if (f.stayMax) q.set('stayMax', f.stayMax);
+  if (f.leadMin) q.set('leadMin', f.leadMin);
+  if (f.leadMax) q.set('leadMax', f.leadMax);
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) q.set(k, v);
+  }
+  return q;
 }
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'];
+function KpiTile({
+  title,
+  value,
+  hint,
+  muted,
+}: {
+  title: string;
+  value: string;
+  hint?: string;
+  muted?: boolean;
+}) {
+  return (
+    <Card className="border-slate-200 bg-white shadow-sm">
+      <CardHeader className="pb-1 pt-4 px-4">
+        <CardTitle className="text-xs font-medium text-slate-500">{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="px-4 pb-4">
+        <div className={`text-2xl font-semibold tabular-nums ${muted ? 'text-slate-400' : 'text-slate-900'}`}>
+          {value}
+        </div>
+        {hint ? <p className="mt-1 text-[11px] text-slate-400">{hint}</p> : null}
+      </CardContent>
+    </Card>
+  );
+}
 
-export default function AnalyticsDashboard({ tenantId }: { tenantId: string }) {
-  const [data, setData] = useState<AnalyticsData | null>(null);
+export default function AnalyticsDashboard({
+  tenantId,
+  timezone = 'Europe/London',
+}: {
+  tenantId: string;
+  timezone?: string;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [pending, startTransition] = useTransition();
+
+  const [filters, setFilters] = useState<FiltersState>(() =>
+    filtersFromParams(new URLSearchParams(searchParams.toString()))
+  );
+  const [channels, setChannels] = useState<ChannelOption[]>([]);
+  const [kpis, setKpis] = useState<ReportingKpis | null>(null);
+  const [prevKpis, setPrevKpis] = useState<ReportingKpis | null>(null);
+  const [daySeries, setDaySeries] = useState<AggregateRow[]>([]);
+  const [staySeries, setStaySeries] = useState<AggregateRow[]>([]);
+  const [leadSeries, setLeadSeries] = useState<AggregateRow[]>([]);
+  const [weekdayArrival, setWeekdayArrival] = useState<AggregateRow[]>([]);
+  const [weekdayDeparture, setWeekdayDeparture] = useState<AggregateRow[]>([]);
+  const [monthSeries, setMonthSeries] = useState<AggregateRow[]>([]);
+  const [statusSeries, setStatusSeries] = useState<AggregateRow[]>([]);
+  const [channelRows, setChannelRows] = useState<AggregateRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dateRange, setDateRange] = useState<DateRange>({
-    label: 'Last 30 Days',
-    start: subDays(new Date(), 29), // Include today, so 29 days ago to today
-    end: new Date()
-  });
-  const [activeTab, setActiveTab] = useState<'overview' | 'revenue' | 'daily'>('overview');
-  const [showCustomRange, setShowCustomRange] = useState(false);
-  const [customStart, setCustomStart] = useState<Date>(subDays(new Date(), 30));
-  const [customEnd, setCustomEnd] = useState<Date>(new Date());
-  const [exportAgents, setExportAgents] = useState<string[]>([]);
-  const [exportAgentsLoading, setExportAgentsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const predefinedRanges: DateRange[] = [
-    {
-      label: 'Today',
-      start: new Date(),
-      end: new Date()
-    },
-    {
-      label: 'Recent (Last 3 Days)',
-      start: subDays(new Date(), 2), // Include today, so 2 days ago to today
-      end: new Date()
-    },
-    {
-      label: 'This Week',
-      start: startOfWeek(new Date(), { weekStartsOn: 1 }), // Monday start
-      end: endOfWeek(new Date(), { weekStartsOn: 1 })
-    },
-    {
-      label: 'Last 7 Days',
-      start: subDays(new Date(), 6), // Include today, so 6 days ago to today
-      end: new Date()
-    },
-    {
-      label: 'This Month',
-      start: startOfMonth(new Date()),
-      end: endOfMonth(new Date())
-    },
-    {
-      label: 'Last 30 Days',
-      start: subDays(new Date(), 29), // Include today, so 29 days ago to today
-      end: new Date()
-    }
-  ];
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportPreset, setExportPreset] = useState<'standard' | 'finance' | 'anonymised' | 'custom'>(
+    'standard'
+  );
+  const [customFields, setCustomFields] = useState<string[]>([...ANONYMISED_EXPORT_FIELDS]);
+  const [exporting, setExporting] = useState(false);
 
-  const fetchAnalytics = async (start: Date, end: Date, isRetry = false) => {
-    setLoading(true);
-    try {
-      const startStr = format(start, 'yyyy-MM-dd');
-      const endStr = format(end, 'yyyy-MM-dd');
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [builderGroupBy, setBuilderGroupBy] = useState<GroupBy>('channel');
+  const [builderRows, setBuilderRows] = useState<AggregateRow[]>([]);
+  const [builderLoading, setBuilderLoading] = useState(false);
+  const [savedReports, setSavedReports] = useState<SavedReport[]>([]);
+  const [saveName, setSaveName] = useState('');
 
-      const [summaryRes, revenueRes, dailyRes] = await Promise.all([
-        fetch(`/api/analytics/summary?tenantId=${tenantId}&start=${startStr}&end=${endStr}`),
-        fetch(`/api/analytics/revenue?tenantId=${tenantId}&start=${startStr}&end=${endStr}`),
-        fetch(`/api/analytics/daily-revenue?tenantId=${tenantId}&start=${startStr}&end=${endStr}`)
-      ]);
-
-      const [summaryData, revenueData, dailyData] = await Promise.all([
-        summaryRes.json(),
-        revenueRes.json(),
-        dailyRes.json()
-      ]);
-
-      // console.log('Analytics API Response:', { summary: summaryData, revenue: revenueData, daily: dailyData });
-
-      const revenueByChannel = revenueRes.ok ? (revenueData.data || []) : [];
-      const dailyRevenue = dailyRes.ok ? (dailyData.data || []) : [];
-
-      // Handle cases where functions don't exist yet or return empty data
-      let summary = summaryRes.ok ? (summaryData.data || {}) : {};
-      
-      // If summary is empty, calculate from the other data
-      if (!summary || Object.keys(summary).length === 0) {
-        const totalBookings = revenueByChannel.reduce((sum: number, item: any) => sum + item.bookings_count, 0);
-        const totalRevenue = revenueByChannel.reduce((sum: number, item: any) => sum + item.total_revenue, 0);
-        const totalReceived = revenueByChannel.reduce((sum: number, item: any) => sum + item.booking_revenue, 0); // Assuming money_received = booking_revenue for now
-        const averageBookingValue = totalBookings > 0 ? totalRevenue / totalBookings : 0;
-        
-        summary = {
-          total_bookings: totalBookings,
-          total_revenue: totalRevenue,
-          total_received: totalReceived,
-          average_booking_value: averageBookingValue,
-          occupancy_rate: 0, // Will be calculated properly when summary function works
-          extension_count: 0,
-          extension_revenue: 0
-        };
-      }
-
-      // If this is "Today" and there's no data, and we haven't retried yet, try "Recent (Last 3 Days)" instead
-      const isToday = dateRange.label === 'Today';
-      const hasNoData = summary.total_bookings === 0 && revenueByChannel.length === 0;
-      
-      if (isToday && hasNoData && !isRetry) {
-        console.log('No data for today, trying recent 3 days instead');
-        const recentRange = predefinedRanges.find(r => r.label === 'Recent (Last 3 Days)');
-        if (recentRange) {
-          setDateRange(recentRange);
-          return; // This will trigger a new fetch with the recent range
-        }
-      }
-
-      const finalData = {
-        summary,
-        revenueByChannel,
-        dailyRevenue
-      };
-
-      // console.log('Final Analytics Data:', finalData);
-      setData(finalData);
-    } catch (error) {
-      console.error('Failed to fetch analytics:', error);
-      // Set fallback data
-      setData({
-        summary: {
-          total_bookings: 0,
-          total_revenue: 0,
-          total_received: 0,
-          average_booking_value: 0,
-          occupancy_rate: 0,
-          extension_count: 0,
-          extension_revenue: 0
-        },
-        revenueByChannel: [],
-        dailyRevenue: []
+  const syncUrl = useCallback(
+    (next: FiltersState) => {
+      const q = new URLSearchParams();
+      q.set('from', next.from);
+      q.set('to', next.to);
+      q.set('dateBasis', next.dateBasis);
+      if (next.channel) q.set('channel', next.channel);
+      if (next.status) q.set('status', next.status);
+      if (next.stayMin) q.set('stayMin', next.stayMin);
+      if (next.stayMax) q.set('stayMax', next.stayMax);
+      if (next.leadMin) q.set('leadMin', next.leadMin);
+      if (next.leadMax) q.set('leadMax', next.leadMax);
+      startTransition(() => {
+        router.replace(`${pathname}?${q.toString()}`, { scroll: false });
       });
-    } finally {
-      setLoading(false);
-    }
+    },
+    [pathname, router]
+  );
+
+  const updateFilter = <K extends keyof FiltersState>(key: K, value: FiltersState[K]) => {
+    setFilters((prev) => {
+      const next = { ...prev, [key]: value };
+      syncUrl(next);
+      return next;
+    });
+  };
+
+  const setChannelFilter = (channel: string) => {
+    setFilters((prev) => {
+      const next = { ...prev, channel: prev.channel === channel ? '' : channel };
+      syncUrl(next);
+      return next;
+    });
   };
 
   useEffect(() => {
-    if (tenantId) {
-      fetchAnalytics(dateRange.start, dateRange.end);
-    }
-  }, [tenantId, dateRange]);
+    fetch(`/api/analytics/reporting/channels?tenant_id=${tenantId}&list=1`)
+      .then((r) => r.json())
+      .then((d) => setChannels(d.channels ?? []))
+      .catch(() => setChannels([]));
+  }, [tenantId]);
 
-  // Fetch agents for detailed accounting export (admin API)
   useEffect(() => {
     let cancelled = false;
-    setExportAgentsLoading(true);
-    const startStr = format(dateRange.start, 'yyyy-MM-dd');
-    const endStr = format(dateRange.end, 'yyyy-MM-dd');
-    fetch(`/api/admin/accounting-export?from=${encodeURIComponent(startStr)}&to=${encodeURIComponent(endStr)}&list=1`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (!cancelled && Array.isArray(data?.agents)) setExportAgents(data.agents);
-        else if (!cancelled) setExportAgents([]);
-      })
-      .catch(() => { if (!cancelled) setExportAgents([]); })
-      .finally(() => { if (!cancelled) setExportAgentsLoading(false); });
-    return () => { cancelled = true; };
-  }, [dateRange]);
+    const t = setTimeout(async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const base = buildQuery(tenantId, filters);
+        const [kpiRes, dayRes, stayRes, leadRes, waRes, wdRes, monthRes, statusRes, chRes] =
+          await Promise.all([
+            fetch(`/api/analytics/reporting/kpis?${base}&compare=1`),
+            fetch(`/api/analytics/reporting/series?${base}&groupBy=day`),
+            fetch(`/api/analytics/reporting/series?${base}&groupBy=stay_bucket`),
+            fetch(`/api/analytics/reporting/series?${base}&groupBy=lead_bucket`),
+            fetch(`/api/analytics/reporting/series?${base}&groupBy=weekday_arrival`),
+            fetch(`/api/analytics/reporting/series?${base}&groupBy=weekday_departure`),
+            fetch(`/api/analytics/reporting/series?${base}&groupBy=month`),
+            fetch(`/api/analytics/reporting/series?${base}&groupBy=status`),
+            fetch(`/api/analytics/reporting/channels?${base}`),
+          ]);
 
-  const handleDateRangeChange = (range: DateRange) => {
-    setDateRange(range);
-    setShowCustomRange(false);
-  };
+        if (cancelled) return;
 
-  const handleCustomRangeApply = () => {
-    // Validate date range
-    if (customStart > customEnd) {
-      alert('Start date must be before end date');
-      return;
-    }
-    
-    // Don't allow future dates
-    const today = new Date();
-    if (customEnd > today) {
-      alert('End date cannot be in the future');
-      return;
-    }
-    
-    const customRange: DateRange = {
-      label: `${format(customStart, 'MMM dd')} - ${format(customEnd, 'MMM dd, yyyy')}`,
-      start: customStart,
-      end: customEnd
+        const kpiJson = await kpiRes.json();
+        if (!kpiRes.ok) throw new Error(kpiJson.error || 'KPI load failed');
+
+        setKpis(kpiJson.current);
+        setPrevKpis(kpiJson.previous);
+        setDaySeries((await dayRes.json()).rows ?? []);
+        setStaySeries((await stayRes.json()).rows ?? []);
+        setLeadSeries((await leadRes.json()).rows ?? []);
+        setWeekdayArrival((await waRes.json()).rows ?? []);
+        setWeekdayDeparture((await wdRes.json()).rows ?? []);
+        setMonthSeries((await monthRes.json()).rows ?? []);
+        setStatusSeries((await statusRes.json()).rows ?? []);
+        setChannelRows((await chRes.json()).rows ?? []);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load analytics');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
     };
-    setDateRange(customRange);
-    setShowCustomRange(false);
-  };
+  }, [tenantId, filters]);
 
-  const handleExportCSV = async (type: 'revenue' | 'daily' | 'accounting') => {
-    const startStr = format(dateRange.start, 'yyyy-MM-dd');
-    const endStr = format(dateRange.end, 'yyyy-MM-dd');
-    
-    let endpoint;
-    if (type === 'revenue') {
-      endpoint = 'revenue';
-    } else if (type === 'daily') {
-      endpoint = 'daily-revenue';
-    } else if (type === 'accounting') {
-      endpoint = 'export/accounting';
+  const loadSavedReports = useCallback(async () => {
+    const res = await fetch(`/api/analytics/reporting/saved-reports?tenant_id=${tenantId}`);
+    const data = await res.json();
+    setSavedReports(data.reports ?? []);
+  }, [tenantId]);
+
+  useEffect(() => {
+    if (builderOpen) void loadSavedReports();
+  }, [builderOpen, loadSavedReports]);
+
+  const runBuilder = async () => {
+    setBuilderLoading(true);
+    try {
+      const q = buildQuery(tenantId, filters, { groupBy: builderGroupBy });
+      const res = await fetch(`/api/analytics/reporting/series?${q}`);
+      const data = await res.json();
+      setBuilderRows(data.rows ?? []);
+    } finally {
+      setBuilderLoading(false);
     }
-    
-    const url = `/api/analytics/${endpoint}?tenantId=${tenantId}&start=${startStr}&end=${endStr}${type !== 'accounting' ? '&format=csv' : ''}`;
-    window.open(url, '_blank');
   };
 
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => (
-            <Card key={i}>
-              <CardContent className="p-6">
-                <div className="animate-pulse">
-                  <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-                  <div className="h-8 bg-gray-200 rounded w-1/2"></div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </div>
-    );
-  }
+  const saveReport = async () => {
+    if (!saveName.trim()) return;
+    await fetch('/api/analytics/reporting/saved-reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tenant_id: tenantId,
+        name: saveName.trim(),
+        report_definition: {
+          filters,
+          groupBy: builderGroupBy,
+        },
+      }),
+    });
+    setSaveName('');
+    await loadSavedReports();
+  };
 
-  if (!data) {
-    return (
-      <Card>
-        <CardContent className="p-6">
-          <div className="text-center text-gray-500">
-            No analytics data available for the selected period.
-          </div>
-        </CardContent>
-      </Card>
+  const deleteReport = async (id: string) => {
+    await fetch(
+      `/api/analytics/reporting/saved-reports?tenant_id=${tenantId}&id=${id}`,
+      { method: 'DELETE' }
     );
-  }
+    await loadSavedReports();
+  };
 
-  // Check if we have real data or just fallback zeros
-  const hasRealData = data.summary.total_bookings > 0 || data.revenueByChannel.length > 0 || data.dailyRevenue.length > 0;
-  
-  // console.log('Has Real Data Check:', { total_bookings: data.summary.total_bookings, hasRealData });
+  const applySaved = (report: SavedReport) => {
+    const def = report.report_definition || {};
+    const f = def.filters as FiltersState | undefined;
+    if (f?.from && f?.to) {
+      setFilters(f);
+      syncUrl(f);
+    }
+    if (typeof def.groupBy === 'string' && GROUP_BY.includes(def.groupBy as GroupBy)) {
+      setBuilderGroupBy(def.groupBy as GroupBy);
+    }
+  };
+
+  const doExport = async () => {
+    setExporting(true);
+    try {
+      const res = await fetch('/api/analytics/reporting/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          ...filters,
+          stayMin: filters.stayMin || undefined,
+          stayMax: filters.stayMax || undefined,
+          leadMin: filters.leadMin || undefined,
+          leadMax: filters.leadMax || undefined,
+          preset: exportPreset,
+          fields: exportPreset === 'custom' ? customFields : undefined,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Export failed');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download =
+        res.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1] ||
+        'reporting.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+      setExportOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const financeHint =
+    kpis && kpis.financeConfirmedCount === 0
+      ? 'Unconfirmed — no commission snapshots in range'
+      : kpis
+        ? `${kpis.financeConfirmedCount} confirmed booking(s)`
+        : undefined;
+
+  const dayChart = useMemo(
+    () =>
+      daySeries.map((r) => ({
+        date: r.groupKey,
+        bookings: r.bookings,
+        revenue: r.grossRevenue,
+      })),
+    [daySeries]
+  );
+
+  const toggleCustomField = (field: string, checked: boolean) => {
+    setCustomFields((prev) =>
+      checked ? [...new Set([...prev, field])] : prev.filter((f) => f !== field)
+    );
+  };
 
   return (
     <div className="space-y-6">
-      {/* Setup Message */}
-      {!hasRealData && (
-        <Card className="border-orange-200 bg-orange-50">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="text-orange-600">⚠️</div>
-              <div>
-                <p className="font-medium text-orange-800">
-                  {dateRange.label === 'Today' ? 'No Data for Today' : 'Analytics Functions Not Set Up'}
-                </p>
-                <p className="text-sm text-orange-700">
-                  {dateRange.label === 'Today' 
-                    ? 'There are no bookings for today. Try selecting "Recent (Last 3 Days)" or another date range to see your data.'
-                    : 'Run the SQL functions in your Supabase SQL editor to enable analytics. See setup-analytics-functions.sql for the setup script.'
-                  }
-                </p>
-              </div>
+      {/* Filters */}
+      <Card className="border-slate-200 bg-white shadow-sm">
+        <CardContent className="grid gap-3 p-4 md:grid-cols-4 lg:grid-cols-8">
+          <div className="space-y-1">
+            <Label className="text-xs text-slate-500">From</Label>
+            <Input
+              type="date"
+              value={filters.from}
+              onChange={(e) => updateFilter('from', e.target.value)}
+              className="h-9"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-slate-500">To</Label>
+            <Input
+              type="date"
+              value={filters.to}
+              onChange={(e) => updateFilter('to', e.target.value)}
+              className="h-9"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-slate-500">Date basis</Label>
+            <select
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+              value={filters.dateBasis}
+              onChange={(e) => updateFilter('dateBasis', e.target.value as DateBasis)}
+            >
+              <option value="arrival">Arrival</option>
+              <option value="departure">Departure</option>
+              <option value="booking">Booking created</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-slate-500">Channel</Label>
+            <select
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+              value={filters.channel}
+              onChange={(e) => updateFilter('channel', e.target.value)}
+            >
+              <option value="">All channels</option>
+              {channels.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.name || c.code}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-slate-500">Status</Label>
+            <Input
+              placeholder="e.g. confirmed"
+              value={filters.status}
+              onChange={(e) => updateFilter('status', e.target.value)}
+              className="h-9"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-slate-500">Stay days</Label>
+            <div className="flex gap-1">
+              <Input
+                placeholder="min"
+                value={filters.stayMin}
+                onChange={(e) => updateFilter('stayMin', e.target.value)}
+                className="h-9"
+              />
+              <Input
+                placeholder="max"
+                value={filters.stayMax}
+                onChange={(e) => updateFilter('stayMax', e.target.value)}
+                className="h-9"
+              />
             </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Date Range Selector */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Calendar className="h-5 w-5" />
-            Date Range
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-2">
-            {predefinedRanges.map((range) => (
-              <Button
-                key={range.label}
-                variant={dateRange.label === range.label ? "default" : "outline"}
-                size="sm"
-                onClick={() => handleDateRangeChange(range)}
-              >
-                {range.label}
-              </Button>
-            ))}
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-slate-500">Lead days</Label>
+            <div className="flex gap-1">
+              <Input
+                placeholder="min"
+                value={filters.leadMin}
+                onChange={(e) => updateFilter('leadMin', e.target.value)}
+                className="h-9"
+              />
+              <Input
+                placeholder="max"
+                value={filters.leadMax}
+                onChange={(e) => updateFilter('leadMax', e.target.value)}
+                className="h-9"
+              />
+            </div>
+          </div>
+          <div className="flex items-end gap-2">
             <Button
-              variant={showCustomRange ? "default" : "outline"}
-              size="sm"
-              onClick={() => setShowCustomRange(!showCustomRange)}
-            >
-              Custom Range
-            </Button>
-          </div>
-          
-          {showCustomRange && (
-            <div className="mt-4 p-4 border rounded-lg bg-gray-50">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Start Date
-                  </label>
-                  <input
-                    type="date"
-                    value={format(customStart, 'yyyy-MM-dd')}
-                    onChange={(e) => setCustomStart(new Date(e.target.value))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    End Date
-                  </label>
-                  <input
-                    type="date"
-                    value={format(customEnd, 'yyyy-MM-dd')}
-                    onChange={(e) => setCustomEnd(new Date(e.target.value))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-              <div className="mt-3 flex gap-2">
-                <Button onClick={handleCustomRangeApply} size="sm">
-                  Apply Range
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => setShowCustomRange(false)}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          )}
-          
-          <div className="mt-2 text-sm text-gray-600">
-            {format(dateRange.start, 'MMM dd, yyyy')} - {format(dateRange.end, 'MMM dd, yyyy')}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total Bookings</p>
-                <p className="text-2xl font-bold">{data.summary.total_bookings || 0}</p>
-              </div>
-              <Users className="h-8 w-8 text-blue-600" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total Revenue</p>
-                <p className="text-2xl font-bold">£{(data.summary.total_revenue || 0).toFixed(2)}</p>
-              </div>
-              <span className="h-8 w-8 text-green-600 text-2xl font-bold">£</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Avg Booking Value</p>
-                <p className="text-2xl font-bold">£{(data.summary.average_booking_value || 0).toFixed(2)}</p>
-              </div>
-              <span className="h-8 w-8 text-purple-600 text-2xl font-bold">£</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Occupancy Rate</p>
-                <p className="text-2xl font-bold">{(data.summary.occupancy_rate || 0).toFixed(1)}%</p>
-              </div>
-              <BarChart3 className="h-8 w-8 text-orange-600" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Accounting Export Section */}
-      <Card className="border-green-200 bg-green-50">
-        <CardHeader>
-          <CardTitle className="text-green-800 flex items-center">
-            <FileSpreadsheet className="h-5 w-5 mr-2" />
-            Accounting Export
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-green-700 mb-4">
-            Export financial data for accounting. Times are in the car park local timezone; channel is a single column. Summary includes extensions; detailed CSV includes customer, plate, and stay days, and can be downloaded per channel.
-          </p>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button 
-              onClick={() => handleExportCSV('accounting')} 
-              className="bg-green-600 hover:bg-green-700 text-white"
-            >
-              <Download className="h-4 w-4 mr-2" />
-              Summary CSV (with extensions)
-            </Button>
-            <Button 
+              type="button"
               variant="outline"
-              onClick={() => {
-                const startStr = format(dateRange.start, 'yyyy-MM-dd');
-                const endStr = format(dateRange.end, 'yyyy-MM-dd');
-                window.open(`/api/admin/accounting-export?from=${encodeURIComponent(startStr)}&to=${encodeURIComponent(endStr)}`, '_blank');
-              }}
-              disabled={exportAgentsLoading}
+              size="sm"
+              className="h-9"
+              onClick={() => setBuilderOpen(true)}
             >
-              <Download className="h-4 w-4 mr-2" />
-              Detailed CSV (All)
+              <Filter className="mr-1 h-3.5 w-3.5" />
+              Builder
             </Button>
-            {exportAgents.length > 0 && (
-              <>
-                <span className="text-sm text-green-700">Per channel:</span>
-                {exportAgents.map((agentKey) => (
-                  <Button
-                    key={agentKey}
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const startStr = format(dateRange.start, 'yyyy-MM-dd');
-                      const endStr = format(dateRange.end, 'yyyy-MM-dd');
-                      window.open(`/api/admin/accounting-export?from=${encodeURIComponent(startStr)}&to=${encodeURIComponent(endStr)}&agent=${encodeURIComponent(agentKey)}`, '_blank');
-                    }}
-                    disabled={exportAgentsLoading}
-                  >
-                    <Download className="h-4 w-4 mr-1" />
-                    {agentKey}
-                  </Button>
-                ))}
-              </>
-            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9"
+              onClick={() => setExportOpen(true)}
+            >
+              <Download className="mr-1 h-3.5 w-3.5" />
+              Export
+            </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Tabs */}
-      <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg">
-        <Button
-          variant={activeTab === 'overview' ? 'default' : 'ghost'}
-          onClick={() => setActiveTab('overview')}
-          className="flex-1"
-        >
-          <PieChartIcon className="h-4 w-4 mr-2" />
-          Overview
-        </Button>
-        <Button
-          variant={activeTab === 'revenue' ? 'default' : 'ghost'}
-          onClick={() => setActiveTab('revenue')}
-          className="flex-1"
-        >
-          <BarChart3 className="h-4 w-4 mr-2" />
-          Revenue by Channel
-        </Button>
-        <Button
-          variant={activeTab === 'daily' ? 'default' : 'ghost'}
-          onClick={() => setActiveTab('daily')}
-          className="flex-1"
-        >
-          <TrendingUp className="h-4 w-4 mr-2" />
-          Daily Trends
-        </Button>
-      </div>
+      {error ? (
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </p>
+      ) : null}
 
-      {/* Charts */}
-      {activeTab === 'overview' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Revenue by Channel</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie
-                    data={data.revenueByChannel}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={(entry: any) => `${entry.channel}: £${entry.total_revenue.toFixed(2)}`}
-                    outerRadius={80}
-                    fill="#8884d8"
-                    dataKey="total_revenue"
-                  >
-                    {data.revenueByChannel.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value) => [`£${Number(value).toFixed(2)}`, 'Revenue']} />
-                </PieChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Extension Revenue</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Extensions</span>
-                  <Badge variant="secondary">{data.summary.extension_count || 0}</Badge>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Extension Revenue</span>
-                  <span className="font-semibold">£{(data.summary.extension_revenue || 0).toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Total Received</span>
-                  <span className="font-semibold">£{(data.summary.total_received || 0).toFixed(2)}</span>
-                </div>
-                <div className="pt-2 border-t">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-gray-600">Payment Gap</span>
-                    <span className="font-semibold text-orange-600">
-                      £{((data.summary.total_revenue || 0) - (data.summary.total_received || 0)).toFixed(2)}
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Difference between charged and received (fees, pending payments)
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+      {(loading || pending) && (
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Updating…
         </div>
       )}
 
-      {activeTab === 'revenue' && (
-        <Card>
-          <CardHeader>
-            <div className="flex justify-between items-center">
-              <CardTitle>Revenue by Channel</CardTitle>
-              <Button onClick={() => handleExportCSV('revenue')} variant="outline" size="sm">
-                <Download className="h-4 w-4 mr-2" />
-                Export CSV
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={400}>
-              <BarChart data={data.revenueByChannel}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="channel" />
-                <YAxis />
-                <Tooltip formatter={(value) => [`£${Number(value).toFixed(2)}`, 'Revenue']} />
-                <Bar dataKey="total_revenue" fill="#8884d8" />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      )}
+      {/* KPIs */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+        <KpiTile title="Bookings" value={kpis ? String(kpis.bookings) : '—'} />
+        <KpiTile title="Gross revenue" value={money(kpis?.grossRevenue)} />
+        <KpiTile
+          title="Commission"
+          value={money(kpis?.commission)}
+          muted={kpis?.commission == null}
+          hint={financeHint}
+        />
+        <KpiTile
+          title="Net revenue"
+          value={money(kpis?.netRevenue)}
+          muted={kpis?.netRevenue == null}
+          hint={financeHint}
+        />
+        <KpiTile title="Avg stay (days)" value={num(kpis?.avgStayDays)} />
+        <KpiTile title="Avg lead (days)" value={num(kpis?.avgLeadDays)} />
+        <KpiTile title="Avg booking value" value={money(kpis?.avgBookingValue)} />
+        <KpiTile
+          title="Occupancy avg"
+          value={kpis?.occupancyAvg != null ? `${kpis.occupancyAvg}%` : '—'}
+          hint={
+            kpis?.occupancyPeak != null ? `Peak ${kpis.occupancyPeak}%` : `TZ ${timezone}`
+          }
+        />
+      </div>
 
-      {activeTab === 'daily' && (
-        <Card>
-          <CardHeader>
-            <div className="flex justify-between items-center">
-              <CardTitle>Daily Revenue Trends</CardTitle>
-              <Button onClick={() => handleExportCSV('daily')} variant="outline" size="sm">
-                <Download className="h-4 w-4 mr-2" />
-                Export CSV
-              </Button>
-            </div>
+      {prevKpis ? (
+        <p className="text-xs text-slate-400">
+          Previous period: {prevKpis.bookings} bookings · {money(prevKpis.grossRevenue)} gross
+        </p>
+      ) : null}
+
+      {/* Trends */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-700">
+              Bookings &amp; revenue over time
+            </CardTitle>
           </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={400}>
-              <LineChart data={data.dailyRevenue}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="date" 
-                  tickFormatter={(value) => format(new Date(value), 'MMM dd')}
-                />
-                <YAxis />
-                <Tooltip 
-                  labelFormatter={(value) => format(new Date(value), 'MMM dd, yyyy')}
-                  formatter={(value) => [`£${Number(value).toFixed(2)}`, 'Revenue']}
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="total_revenue" 
-                  stroke="#8884d8" 
+          <CardContent className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={dayChart}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                <YAxis yAxisId="left" tick={{ fontSize: 10 }} />
+                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10 }} />
+                <Tooltip />
+                <Legend />
+                <Line
+                  yAxisId="left"
+                  type="monotone"
+                  dataKey="bookings"
+                  stroke="#0f766e"
                   strokeWidth={2}
-                  name="Total Revenue"
+                  dot={false}
+                  name="Bookings"
                 />
-                <Line 
-                  type="monotone" 
-                  dataKey="booking_revenue" 
-                  stroke="#82ca9d" 
+                <Line
+                  yAxisId="right"
+                  type="monotone"
+                  dataKey="revenue"
+                  stroke="#0369a1"
                   strokeWidth={2}
-                  name="Booking Revenue"
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="extension_revenue" 
-                  stroke="#ffc658" 
-                  strokeWidth={2}
-                  name="Extension Revenue"
+                  dot={false}
+                  name="Gross £"
                 />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
-      )}
+
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-700">Status breakdown</CardTitle>
+          </CardHeader>
+          <CardContent className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={statusSeries}
+                  dataKey="bookings"
+                  nameKey="groupKey"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={80}
+                  label={(props) => {
+                    const name = String(props.name ?? '');
+                    const pct = typeof props.percent === 'number' ? props.percent : 0;
+                    return `${name} ${(pct * 100).toFixed(0)}%`;
+                  }}
+                >
+                  {statusSeries.map((_, i) => (
+                    <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Channel table */}
+      <Card className="border-slate-200 bg-white shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium text-slate-700">
+            Channel performance
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-xs text-slate-500">
+                <th className="py-2 pr-3">Channel</th>
+                <th className="py-2 pr-3">Bookings</th>
+                <th className="py-2 pr-3">% of bookings</th>
+                <th className="py-2 pr-3">Gross</th>
+                <th className="py-2 pr-3">Commission</th>
+                <th className="py-2 pr-3">Net</th>
+                <th className="py-2 pr-3">Avg value</th>
+                <th className="py-2">Cancel %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {channelRows.map((r) => (
+                <tr
+                  key={r.groupKey}
+                  className="cursor-pointer border-b border-slate-100 hover:bg-slate-50"
+                  onClick={() => setChannelFilter(r.groupKey)}
+                >
+                  <td className="py-2 pr-3 font-medium text-teal-800">{r.groupKey}</td>
+                  <td className="py-2 pr-3 tabular-nums">{r.bookings}</td>
+                  <td className="py-2 pr-3 tabular-nums">{num(r.pctOfBookings, 1)}%</td>
+                  <td className="py-2 pr-3 tabular-nums">{money(r.grossRevenue)}</td>
+                  <td className="py-2 pr-3 tabular-nums text-slate-500">
+                    {money(r.commissionAmount)}
+                  </td>
+                  <td className="py-2 pr-3 tabular-nums text-slate-500">
+                    {money(r.netRevenue)}
+                  </td>
+                  <td className="py-2 pr-3 tabular-nums">{money(r.avgBookingValue)}</td>
+                  <td className="py-2 tabular-nums">{num(r.cancellationRate, 1)}%</td>
+                </tr>
+              ))}
+              {!channelRows.length && !loading ? (
+                <tr>
+                  <td colSpan={8} className="py-6 text-center text-slate-400">
+                    No channel data for this range
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+          <div className="mt-4 h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={channelRows}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="groupKey" tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 10 }} />
+                <Tooltip />
+                <Bar dataKey="bookings" fill="#0f766e" name="Bookings" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Stay / lead / weekday / seasonality */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-700">
+              Stay length distribution
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={staySeries}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="groupKey" tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 10 }} />
+                <Tooltip />
+                <Bar dataKey="bookings" fill="#0369a1" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-700">
+              Lead time distribution
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={leadSeries}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="groupKey" tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 10 }} />
+                <Tooltip />
+                <Bar dataKey="bookings" fill="#b45309" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-700">
+              Arrivals by weekday
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={weekdayArrival}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="groupKey" tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 10 }} />
+                <Tooltip />
+                <Bar dataKey="bookings" fill="#0f766e" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-700">
+              Departures by weekday
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={weekdayDeparture}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="groupKey" tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 10 }} />
+                <Tooltip />
+                <Bar dataKey="bookings" fill="#7c3aed" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="border-slate-200 bg-white shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium text-slate-700">Seasonality (by month)</CardTitle>
+        </CardHeader>
+        <CardContent className="h-56">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={monthSeries}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey="groupKey" tick={{ fontSize: 10 }} />
+              <YAxis tick={{ fontSize: 10 }} />
+              <Tooltip />
+              <Bar dataKey="bookings" fill="#0f766e" name="Bookings" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="grossRevenue" fill="#0369a1" name="Gross £" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      {/* Occupancy — reuse existing DemandCurve */}
+      <Card className="border-slate-200 bg-white shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium text-slate-700">
+            Occupancy / demand trend
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <DemandCurve tenantId={tenantId} tenantTimezone={timezone} />
+        </CardContent>
+      </Card>
+
+      {/* Report builder sheet */}
+      <Sheet open={builderOpen} onOpenChange={setBuilderOpen}>
+        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Report builder</SheetTitle>
+          </SheetHeader>
+          <div className="mt-4 space-y-4">
+            <div className="space-y-1">
+              <Label>Group by</Label>
+              <select
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                value={builderGroupBy}
+                onChange={(e) => setBuilderGroupBy(e.target.value as GroupBy)}
+              >
+                {GROUP_BY.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <Button type="button" onClick={() => void runBuilder()} disabled={builderLoading}>
+              {builderLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Run report
+            </Button>
+            <div className="max-h-64 overflow-auto rounded border">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b bg-slate-50 text-left">
+                    <th className="p-2">Group</th>
+                    <th className="p-2">Bookings</th>
+                    <th className="p-2">Gross</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {builderRows.map((r) => (
+                    <tr key={r.groupKey} className="border-b">
+                      <td className="p-2">{r.groupKey}</td>
+                      <td className="p-2 tabular-nums">{r.bookings}</td>
+                      <td className="p-2 tabular-nums">{money(r.grossRevenue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex gap-2">
+              <Input
+                placeholder="Save as…"
+                value={saveName}
+                onChange={(e) => setSaveName(e.target.value)}
+              />
+              <Button type="button" variant="outline" onClick={() => void saveReport()}>
+                <Save className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-slate-500">Saved reports</p>
+              {savedReports.map((r) => (
+                <div
+                  key={r.id}
+                  className="flex items-center justify-between rounded border px-2 py-1.5 text-sm"
+                >
+                  <button
+                    type="button"
+                    className="text-left text-teal-800 hover:underline"
+                    onClick={() => applySaved(r)}
+                  >
+                    {r.name}
+                  </button>
+                  <button
+                    type="button"
+                    className="text-slate-400 hover:text-red-600"
+                    onClick={() => void deleteReport(r.id)}
+                    aria-label={`Delete ${r.name}`}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Export modal */}
+      <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Export CSV</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            {(
+              [
+                ['standard', 'Standard'],
+                ['finance', 'Finance'],
+                ['anonymised', 'Anonymised (AI-safe)'],
+                ['custom', 'Custom'],
+              ] as const
+            ).map(([value, label]) => (
+              <label key={value} className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="preset"
+                  checked={exportPreset === value}
+                  onChange={() => setExportPreset(value)}
+                />
+                {label}
+              </label>
+            ))}
+            {exportPreset === 'anonymised' ? (
+              <p className="text-xs text-slate-500">
+                Server whitelist only — customer name, email, phone, and plate are never included.
+              </p>
+            ) : null}
+            {exportPreset === 'custom' ? (
+              <div className="max-h-48 space-y-1 overflow-y-auto rounded border p-2">
+                {ALL_EXPORT_FIELDS.map((field) => {
+                  const isPii = (PII_EXPORT_FIELDS as readonly string[]).includes(field);
+                  return (
+                    <label key={field} className="flex items-center gap-2 text-xs">
+                      <Checkbox
+                        checked={customFields.includes(field)}
+                        onCheckedChange={(v) => toggleCustomField(field, v === true)}
+                      />
+                      <span className={isPii ? 'text-amber-700' : ''}>
+                        {field}
+                        {isPii ? ' (PII — audited)' : ''}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setExportOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void doExport()} disabled={exporting}>
+              {exporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Download CSV
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

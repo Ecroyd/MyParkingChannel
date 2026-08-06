@@ -21,4 +21,14 @@ describe("normalizeBookingSourceForDb", () => {
     expect(normalizeBookingSourceForDb("cavu")).toBe("cavu");
     expect(normalizeBookingSourceForDb("direct")).toBe("direct");
   });
+
+  it("maps Looking4 variants to cavu", () => {
+    expect(normalizeBookingSourceForDb("looking4")).toBe("cavu");
+    expect(
+      normalizeBookingSourceForDb("other", { channel: "LOOKING4" })
+    ).toBe("cavu");
+    expect(
+      normalizeBookingSourceForDb(null, { parserKey: "looking4_email_import" })
+    ).toBe("cavu");
+  });
 });

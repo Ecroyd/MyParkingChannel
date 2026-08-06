@@ -1,16 +1,24 @@
 import { createAdminClient } from '@/lib/supabase/server-admin';
 import { Resend } from 'resend';
 import { renderBookingConfirmationEmail } from '@/emails/BookingConfirmationEmail';
+import { renderTenantBookingNotificationEmail } from '@/emails/TenantBookingNotificationEmail';
 import { renderBookingCancelledEmail } from '@/emails/BookingCancelledEmail';
 import { renderSetupInviteEmail } from '@/emails/SetupInviteEmail';
 import { renderOpsAlertEmail } from '@/emails/OpsAlertEmail';
+
+export type EmailTemplateKey =
+  | 'booking_confirmation'
+  | 'tenant_booking_notification'
+  | 'booking_cancelled'
+  | 'setup_invite'
+  | 'ops_alert';
 
 export interface QueueEmailParams {
   tenantId?: string | null;
   to: string;
   toName?: string | null;
   subject: string;
-  templateKey: 'booking_confirmation' | 'booking_cancelled' | 'setup_invite' | 'ops_alert';
+  templateKey: EmailTemplateKey;
   payload: Record<string, any>;
   dedupeKey?: string | null;
 }
@@ -90,6 +98,10 @@ function renderTemplate(templateKey: string, payload: Record<string, any>): stri
   switch (templateKey) {
     case 'booking_confirmation':
       return renderBookingConfirmationEmail(payload as Parameters<typeof renderBookingConfirmationEmail>[0]);
+    case 'tenant_booking_notification':
+      return renderTenantBookingNotificationEmail(
+        payload as Parameters<typeof renderTenantBookingNotificationEmail>[0]
+      );
     case 'booking_cancelled':
       return renderBookingCancelledEmail(payload as Parameters<typeof renderBookingCancelledEmail>[0]);
     case 'setup_invite':

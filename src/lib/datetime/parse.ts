@@ -162,6 +162,18 @@ export function parseSupplierDateTimeToUtc(
     );
   }
 
+  // Looking4 OrdersPlacedToday: "2026/08/21 13:00:00"
+  const ymdSlashHm = s.match(
+    /^(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/
+  );
+  if (ymdSlashHm) {
+    return parseTenantLocalDateTimeToUtc(
+      `${ymdSlashHm[1]}-${ymdSlashHm[2]}-${ymdSlashHm[3]}`,
+      `${ymdSlashHm[4]}:${ymdSlashHm[5]}`,
+      timezone
+    );
+  }
+
   if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(s)) {
     return parseNaiveLocalIsoToUtc(s, timezone);
   }

@@ -53,6 +53,7 @@ function classifyUnparsedEmail(email: any): string {
   if (looksLikeFlyparksDirectEmail(subject, haystack)) return 'direct Flyparks text email';
   if (/ext\d|holiday\s*extras/i.test(haystack)) return 'Holiday Extras attachment';
   if (/\baph\b/i.test(haystack)) return 'APH attachment';
+  if (/ordersplacedtoday|looking4/i.test(haystack)) return 'Looking4 OrdersPlacedToday';
   if (/cavu|hourly|hourly order report/i.test(haystack)) return 'CAVU/hourly report';
   return 'unknown';
 }
@@ -252,6 +253,7 @@ export async function getEmailParseHealth(tenantId: string): Promise<EmailParseH
     'direct Flyparks text email': [],
     'Holiday Extras attachment': [],
     'APH attachment': [],
+    'Looking4 OrdersPlacedToday': [],
     'CAVU/hourly report': [],
     unknown: [],
   };

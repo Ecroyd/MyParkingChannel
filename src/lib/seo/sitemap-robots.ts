@@ -87,6 +87,7 @@ export function buildRobotsTxt(args: {
 
   if (sitemapHost && !disallowIndexing) {
     lines.push(`Sitemap: https://${sitemapHost}/sitemap.xml`);
+    lines.push(`# AI crawl summary: https://${sitemapHost}/llms.txt`);
   }
 
   return lines.join("\n") + "\n";

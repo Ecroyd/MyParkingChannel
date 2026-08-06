@@ -30,6 +30,7 @@ const EMAIL_PARSE_FALLBACK = {
     'direct Flyparks text email': [],
     'Holiday Extras attachment': [],
     'APH attachment': [],
+    'Looking4 OrdersPlacedToday': [],
     'CAVU/hourly report': [],
     unknown: [],
   },

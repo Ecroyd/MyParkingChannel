@@ -36,6 +36,99 @@ export function splitName(name: string | null): { first: string | null; last: st
   return { first: bits[0], last: bits.slice(1).join(" ") };
 }
 
+/** Case-insensitive CSV cell lookup (Looking4 headers vary slightly by export). */
+function csvCell(row: Record<string, unknown>, ...keys: string[]): string | null {
+  const entries = Object.entries(row);
+  for (const key of keys) {
+    const want = key.toLowerCase().replace(/\s+/g, " ").trim();
+    for (const [k, v] of entries) {
+      if (String(k).toLowerCase().replace(/\s+/g, " ").trim() === want) {
+        const s = v == null ? "" : String(v).trim();
+        return s || null;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Looking4.com OrdersPlacedToday hourly CSV
+ * Headers: Reference, Order Price, Drop Off Date/Time, Return Date/Time, Car Reg, Status, ...
+ */
+export function looksLikeLooking4OrdersCsv(filename: string, text: string): boolean {
+  const name = filename.toLowerCase();
+  if (name.includes("ordersplacedtoday")) return true;
+  const head = text.slice(0, 800).toLowerCase();
+  return (
+    head.includes("drop off date/time") &&
+    head.includes("return date/time") &&
+    (head.includes("car reg") || head.includes("third party reference"))
+  );
+}
+
+/** Looking4 "2026/08/21 13:00:00" → naive tenant-local ISO for staging promotion. */
+function looking4DateTimeToNaiveLocal(raw: string | null): string | null {
+  if (!raw) return null;
+  const m = String(raw)
+    .trim()
+    .match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!m) return parseSupplierDateTimeToUtc(raw); // fallback
+  const y = m[1];
+  const mo = m[2].padStart(2, "0");
+  const d = m[3].padStart(2, "0");
+  const h = m[4].padStart(2, "0");
+  const mi = m[5].padStart(2, "0");
+  const s = (m[6] ?? "00").padStart(2, "0");
+  return `${y}-${mo}-${d}T${h}:${mi}:${s}`;
+}
+
+export function mapLooking4OrdersCsv(csvText: string): CanonicalBooking[] {
+  const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+  const rows = (parsed.data as Record<string, unknown>[]).filter(Boolean);
+  const bookings: CanonicalBooking[] = [];
+
+  for (const r of rows) {
+    const bookingRef = csvCell(r, "Reference");
+    if (!bookingRef) continue;
+
+    const customerName = csvCell(r, "Customer Full Name");
+    const nm = splitName(customerName);
+    const externalStatus = csvCell(r, "Status");
+    const priceRaw =
+      csvCell(r, "Product Native Price") ?? csvCell(r, "Order Price");
+
+    bookings.push({
+      channel: "LOOKING4",
+      booking_reference: bookingRef,
+      third_party_reference: csvCell(r, "Third Party Reference"),
+      // Naive local (no Z) — bookingFromStaging converts London → UTC once
+      start_at: looking4DateTimeToNaiveLocal(csvCell(r, "Drop Off Date/Time")),
+      end_at: looking4DateTimeToNaiveLocal(csvCell(r, "Return Date/Time")),
+      vehicle_registration: csvCell(r, "Car Reg"),
+      vehicle_make: csvCell(r, "Make"),
+      vehicle_model: csvCell(r, "Model"),
+      vehicle_colour: csvCell(r, "Car Colour"),
+      customer_firstname: nm.first,
+      customer_lastname: nm.last,
+      customer_email: null,
+      customer_phone: csvCell(r, "Contact Number"),
+      outbound_flight_number: csvCell(r, "Departure Flight Number"),
+      return_flight_number: csvCell(r, "Return Flight Number"),
+      total_price: priceRaw ? Number(priceRaw) : null,
+      currency:
+        csvCell(r, "Transaction Currency") ??
+        csvCell(r, "Product Native Currency") ??
+        "GBP",
+      raw: {
+        ...r,
+        external_status: externalStatus,
+      },
+    });
+  }
+
+  return bookings;
+}
+
 /**
  * Map CAVU hourly CSV format
  */
@@ -229,6 +322,18 @@ export function detectAndMapFromAttachment(filename: string, text: string): Dete
       }
     } catch (err) {
       console.error("[detectAndMap] ParkVia parse failed:", err);
+    }
+  }
+
+  // Looking4.com OrdersPlacedToday - before CAVU (different headers, no "hourly" in filename)
+  if (looksLikeLooking4OrdersCsv(filename, text)) {
+    try {
+      const bookings = mapLooking4OrdersCsv(text);
+      if (bookings.length > 0 || name.includes("ordersplacedtoday")) {
+        return { bookings, format: null };
+      }
+    } catch (err) {
+      console.error("[detectAndMap] Looking4 parse failed:", err);
     }
   }
 

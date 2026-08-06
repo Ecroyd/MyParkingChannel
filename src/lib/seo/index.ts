@@ -37,3 +37,4 @@ export {
 } from "./load-site-seo";
 export { buildSitemapXml, buildRobotsTxt } from "./sitemap-robots";
 export { collectPageJsonLdScripts, buildFaqPageJsonLd } from "./json-ld";
+export { buildLlmsTxt } from "./llms-txt";

@@ -1176,6 +1176,22 @@ export default function SiteSeoAdminPage() {
                   }
                 />
               </Field>
+              <Field label="Twitter / X URL">
+                <Input
+                  value={String(profile.twitter_url ?? "")}
+                  onChange={(e) =>
+                    setProfile({ ...profile, twitter_url: e.target.value })
+                  }
+                />
+              </Field>
+              <Field label="LinkedIn URL">
+                <Input
+                  value={String(profile.linkedin_url ?? "")}
+                  onChange={(e) =>
+                    setProfile({ ...profile, linkedin_url: e.target.value })
+                  }
+                />
+              </Field>
               <div className="md:col-span-2">
                 <Field label="Opening hours JSON">
                   <Textarea

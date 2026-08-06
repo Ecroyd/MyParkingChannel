@@ -7,6 +7,7 @@ export type ImportPlatformId =
   | "holiday_extras"
   | "aph"
   | "cavu"
+  | "looking4"
   | "flyparks_email"
   | "parkvia"
   | "holiday_extras_extz10"
@@ -35,6 +36,11 @@ const PLATFORM_BY_CHANNEL: Record<string, ImportPlatformAttribution> = {
     bookingSource: "cavu",
     platformId: "cavu",
     parserKey: "cavu_email_import",
+  },
+  LOOKING4: {
+    bookingSource: "cavu",
+    platformId: "looking4",
+    parserKey: "looking4_email_import",
   },
   FLYPARKS_EMAIL: {
     bookingSource: "other",
@@ -84,6 +90,8 @@ export function resolveImportPlatform(opts: {
         ? "aph"
         : parserKey === "cavu_email_import"
           ? "cavu"
+          : parserKey === "looking4_email_import"
+            ? "looking4"
           : parserKey === "flyparks_email_import"
             ? "flyparks_email"
             : parserKey === "parkvia_email_body"

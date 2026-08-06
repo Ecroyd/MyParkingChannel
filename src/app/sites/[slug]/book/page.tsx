@@ -55,6 +55,13 @@ export default async function BookPage({
 
   return (
     <>
+      {seo?.jsonLdScripts?.map((script, i) => (
+        <script
+          key={i}
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: script }}
+        />
+      ))}
       <Header title={title} tenantSlug={resolvedParams.slug} />
       <BookingHero
         slug={resolvedParams.slug}

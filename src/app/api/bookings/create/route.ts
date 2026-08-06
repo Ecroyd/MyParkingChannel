@@ -205,6 +205,18 @@ export async function POST(req: NextRequest) {
   
   // Sync to Videofit if configured (fire and forget)
   if (data) {
+    try {
+      const { snapshotBookingFinancials } = await import('@/lib/analytics/reportingEngine');
+      await snapshotBookingFinancials({
+        tenantId,
+        bookingId: data.id,
+        channel: 'manual',
+        grossAmount: totalAmount,
+      });
+    } catch (err) {
+      console.warn('[reporting] snapshot after create failed', err);
+    }
+
     const { syncBookingToVideofit } = await import('@/lib/videofit/bookingSync');
     const adminClient = createAdminClient();
     void syncBookingToVideofit(

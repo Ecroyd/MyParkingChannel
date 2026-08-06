@@ -49,7 +49,7 @@ function isPlatformHost(rawHost: string | null, normalizedHost: string): boolean
 export const config = {
   matcher: [
     // match everything except static files & public assets
-    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
+    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|llms.txt).*)",
   ],
 };
 

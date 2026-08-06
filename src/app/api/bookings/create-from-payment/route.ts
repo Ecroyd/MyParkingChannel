@@ -84,38 +84,44 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 });
     }
 
-    // Queue booking confirmation email
-    if (booking && customerEmail) {
+    if (booking?.id) {
       try {
-        const { queueEmail } = await import('@/lib/email/emailService');
-        const { data: tenant } = await admin
-          .from('tenants')
-          .select('name, slug')
-          .eq('id', tenantId)
-          .single();
-
-        await queueEmail({
+        const { snapshotBookingFinancials } = await import('@/lib/analytics/reportingEngine');
+        await snapshotBookingFinancials({
           tenantId,
-          to: customerEmail,
-          toName: customerName,
-          subject: `Booking Confirmed - ${booking.reference}`,
-          templateKey: 'booking_confirmation',
-          payload: {
-            bookingReference: booking.reference,
-            customerName,
-            customerEmail,
-            plate: normalizedPlate || '',
-            startAt: startAt,
-            endAt: endAt,
-            amount: booking.money_charged || amount || 0,
-            currency: 'GBP',
-            tenantName: tenant?.name,
-            tenantSlug: tenant?.slug,
-          },
-          dedupeKey: `booking:${booking.id}:confirmation:v1`,
+          bookingId: booking.id,
+          channel: 'direct',
+          grossAmount: Number(booking.money_charged ?? amount ?? 0),
+          bookingAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.warn('[reporting] snapshot after payment create failed', err);
+      }
+    }
+
+    // Queue customer confirmation + tenant notification
+    if (booking) {
+      try {
+        const { queueBookingConfirmationEmails } = await import(
+          '@/lib/email/bookingEmails'
+        );
+        await queueBookingConfirmationEmails({
+          tenantId,
+          bookingId: booking.id,
+          bookingReference: booking.reference,
+          customerName,
+          customerEmail,
+          customerPhone,
+          plate: normalizedPlate || '',
+          flightNumber: flightNumber || null,
+          startAt,
+          endAt,
+          amount: booking.money_charged || amount || 0,
+          currency: 'GBP',
+          source: 'Website',
         });
       } catch (emailError) {
-        console.error('[BOOKING CREATE] Failed to queue confirmation email:', emailError);
+        console.error('[BOOKING CREATE] Failed to queue booking emails:', emailError);
         // Don't fail the booking creation if email fails
       }
     }

@@ -56,7 +56,16 @@ export function normalizeBookingSourceForDb(
     return "aph";
   }
 
-  if (ch === "CAVU" || s === "cavu" || ext === "cavu" || parser === "cavu_email_import") {
+  if (
+    ch === "CAVU" ||
+    ch === "LOOKING4" ||
+    s === "cavu" ||
+    s === "looking4" ||
+    ext === "cavu" ||
+    ext === "looking4" ||
+    parser === "cavu_email_import" ||
+    parser === "looking4_email_import"
+  ) {
     return "cavu";
   }
 

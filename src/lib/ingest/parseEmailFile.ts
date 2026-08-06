@@ -63,6 +63,14 @@ function parseFileWithCanonicalMappers(
     return { rows: [], detectedFormat: "HOLIDAY_EXTRAS", holidayExtrasStats };
   }
 
+  // Looking4 OrdersPlacedToday with headers but no data rows → empty, not format failure
+  if (
+    canonicalBookings.length === 0 &&
+    /ordersplacedtoday/i.test(filename)
+  ) {
+    return { rows: [], detectedFormat: "LOOKING4" };
+  }
+
   if (canonicalBookings.length === 0) {
     throw new Error(`Could not detect format for file: ${filename}`);
   }
@@ -300,6 +308,38 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     };
   }
 
+  // Looking4 OrdersPlacedToday with no data rows → empty success
+  if (
+    parsedData.rows.length === 0 &&
+    (parsedData.detectedFormat === "LOOKING4" || /ordersplacedtoday/i.test(file.filename))
+  ) {
+    const attribution = getAttribution("looking4_email_import");
+    const parseReason = buildParseReasonSummary({
+      rowsParsed: 0,
+      rowsStaged: 0,
+      rowsUpserted: 0,
+      rowsCancelled: 0,
+      extra: "looking4_empty",
+    });
+    await finalizeIngestEmailFileParseSuccess(adminSupabase, {
+      fileId,
+      parseReason,
+      parseOutcome: "empty",
+      parserKey: "looking4_email_import",
+      detectedSource: attribution.detectedSource,
+      externalSource: attribution.externalSource,
+    });
+    return {
+      ok: true,
+      fileId: file.id,
+      filename: file.filename,
+      rowsParsed: 0,
+      stagedCount: 0,
+      parseStats: null,
+      importResult: { runId: null, successCount: 0, errorCount: 0, errors: [], cancelledCount: 0 },
+    };
+  }
+
   if (!parsedData.rows || parsedData.rows.length === 0) {
     console.error(`[parseEmailFile] No valid rows found - file format detected but extracted 0 rows`);
     await markIngestEmailFileParseFailed(
@@ -389,6 +429,8 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
         mapping:
           channel === "CAVU"
             ? "cavuV1"
+            : channel === "LOOKING4"
+              ? "looking4OrdersV1"
             : channel === "FLYPARKS_EMAIL"
               ? "flyparksV1"
               : channel === "HOLIDAY_EXTRAS" || channel === "HOLIDAY_EXTRAS_EXTZ10"

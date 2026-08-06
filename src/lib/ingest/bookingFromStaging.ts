@@ -416,6 +416,24 @@ async function insertBookingWithVariants(
       .single();
 
     if (!insertErr) {
+      if (inserted?.id) {
+        try {
+          const { snapshotBookingFinancials } = await import('@/lib/analytics/reportingEngine');
+          const channel =
+            (variant.external_source as string | null) ||
+            (variant.source as string | null) ||
+            'other';
+          await snapshotBookingFinancials({
+            tenantId: String(variant.tenant_id),
+            bookingId: inserted.id,
+            channel,
+            grossAmount: Number(variant.money_charged ?? variant.money_received ?? 0),
+            bookingAt: String(variant.created_at ?? variant.updated_at ?? new Date().toISOString()),
+          });
+        } catch (err) {
+          console.warn('[reporting] snapshot after insert failed', err);
+        }
+      }
       return {
         log: {
           ...baseLog,
@@ -606,6 +624,25 @@ async function tryPostgrestUpsert(
     .single();
 
   if (upsertErr) return null;
+
+  if (upserted?.id) {
+    try {
+      const { snapshotBookingFinancials } = await import('@/lib/analytics/reportingEngine');
+      const channel =
+        (payload.external_source as string | null) ||
+        (payload.source as string | null) ||
+        'other';
+      await snapshotBookingFinancials({
+        tenantId: String(payload.tenant_id),
+        bookingId: upserted.id,
+        channel,
+        grossAmount: Number(payload.money_charged ?? payload.money_received ?? 0),
+        bookingAt: String(payload.created_at ?? payload.updated_at ?? new Date().toISOString()),
+      });
+    } catch (err) {
+      console.warn('[reporting] snapshot after upsert failed', err);
+    }
+  }
 
   return {
     log: {

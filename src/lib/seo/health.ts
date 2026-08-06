@@ -26,6 +26,15 @@ export type HealthInput = {
     latitude?: number | string | null;
     longitude?: number | string | null;
     faq?: unknown;
+    airports?: string[] | null;
+    hours?: Array<{ day?: string; open?: string; close?: string }> | null;
+    business_description?: string | null;
+    about_text?: string | null;
+    facebook_url?: string | null;
+    twitter_url?: string | null;
+    instagram_url?: string | null;
+    linkedin_url?: string | null;
+    external_review_links?: unknown;
   } | null;
   sitePrimaryDomain?: string | null;
 };
@@ -119,6 +128,81 @@ export function runSeoHealthChecks(input: HealthInput): HealthCheck[] {
       title: "Missing telephone",
       detail: "No public telephone is set on the business profile.",
       fixHint: "Add a public telephone in Local Business.",
+    });
+  }
+
+  const airports = Array.isArray(input.profile?.airports)
+    ? input.profile!.airports!.filter((a) => typeof a === "string" && a.trim())
+    : [];
+  if (!airports.length) {
+    checks.push({
+      id: "missing_airports_served",
+      severity: "recommended",
+      title: "Missing airports served",
+      detail:
+        "Optional: List airports you serve so schema areaServed and AI summaries can cite them.",
+      fixHint: "Add airports in Local Business (comma-separated).",
+    });
+  }
+
+  const hasSocial =
+    Boolean(input.profile?.facebook_url?.trim()) ||
+    Boolean(input.profile?.twitter_url?.trim()) ||
+    Boolean(input.profile?.instagram_url?.trim()) ||
+    Boolean(input.profile?.linkedin_url?.trim()) ||
+    (Array.isArray(input.profile?.external_review_links) &&
+      input.profile!.external_review_links!.length > 0) ||
+    Boolean(
+      parseGoogleReviewsConfig(input.settings?.presentation_json).mapsUrlOverride
+    );
+  if (!hasSocial) {
+    checks.push({
+      id: "missing_same_as_profiles",
+      severity: "recommended",
+      title: "Missing social or Maps profiles",
+      detail:
+        "Optional: Add social or Google Maps links so Organization/LocalBusiness sameAs can help AI entity matching.",
+      fixHint:
+        "Add Facebook/Instagram/Twitter/LinkedIn or external review/Maps URLs in Local Business or Google reviews settings.",
+    });
+  }
+
+  const hours = Array.isArray(input.profile?.hours) ? input.profile!.hours : [];
+  const hasHours = hours.some((h) => h?.day && h?.open && h?.close);
+  if (!hasHours) {
+    checks.push({
+      id: "missing_opening_hours",
+      severity: "recommended",
+      title: "Missing opening hours",
+      detail: "Optional: Opening hours strengthen LocalBusiness structured data.",
+      fixHint: "Add opening hours JSON in Local Business.",
+    });
+  }
+
+  const description =
+    input.profile?.business_description?.trim() ||
+    input.profile?.about_text?.trim() ||
+    "";
+  if (description.length < 40) {
+    checks.push({
+      id: "thin_business_description",
+      severity: "recommended",
+      title: "Thin business description",
+      detail:
+        "Optional: A clearer business description improves Organization/Service schema and llms.txt.",
+      fixHint: "Expand the business description in Local Business.",
+    });
+  }
+
+  const bookPage = input.pages.find((p) => p.page_key === "book" || p.path === "/book");
+  if (!bookPage || bookPage.status !== "published") {
+    checks.push({
+      id: "missing_book_page",
+      severity: "recommended",
+      title: "Book page not published",
+      detail:
+        "Optional: A published /book page backs ReserveAction targets used in structured data.",
+      fixHint: "Publish the Book system page under Site SEO → Pages.",
     });
   }
 

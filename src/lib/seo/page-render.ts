@@ -64,23 +64,30 @@ export async function getTenantPageRenderData(args: {
   const siteUrl = host ? buildAbsoluteUrl(host, "/") : null;
   const pageUrl = host ? buildAbsoluteUrl(host, args.path) : null;
 
+  const isHome = args.path === "/" || args.pageKey === "home";
+  const isContact = args.path === "/contact" || args.pageKey === "contact";
+  const isDirections =
+    args.path === "/directions" || args.pageKey === "directions";
+
   const jsonLdScripts = collectPageJsonLdScripts({
     page,
     settings: bundle.settings,
     profile: bundle.profile as JsonLdProfile | null,
     siteUrl,
     pageUrl,
-    includeLocalBusiness: args.path === "/" || args.pageKey === "home",
-    breadcrumbs:
-      args.path === "/"
-        ? undefined
-        : [
-            { name: "Home", url: siteUrl || "/" },
-            {
-              name: String(page?.nav_label || page?.title || args.path),
-              url: pageUrl || args.path,
-            },
-          ],
+    // Entity URL is always site root; include LB on home + contact
+    includeLocalBusiness: isHome || isContact,
+    includeService: true,
+    includePlace: isDirections,
+    breadcrumbs: isHome
+      ? undefined
+      : [
+          { name: "Home", url: siteUrl || "/" },
+          {
+            name: String(page?.nav_label || page?.title || args.path),
+            url: pageUrl || args.path,
+          },
+        ],
   });
 
   return {

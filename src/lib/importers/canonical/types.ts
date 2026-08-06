@@ -8,7 +8,8 @@ export type CanonicalBooking = {
     | "FLYPARKS_EMAIL"
     | "HOLIDAY_EXTRAS"
     | "HOLIDAY_EXTRAS_EXTZ10"
-    | "PARKVIA_EMAIL";
+    | "PARKVIA_EMAIL"
+    | "LOOKING4";
   booking_reference: string | null;
   third_party_reference: string | null;
 

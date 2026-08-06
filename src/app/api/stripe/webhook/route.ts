@@ -170,38 +170,29 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
     } else {
       console.log('Booking created successfully:', booking?.reference);
       
-      // Queue booking confirmation email
-      if (booking && finalCustomerEmail) {
+      // Queue customer confirmation + tenant notification
+      if (booking) {
         try {
-          const { queueEmail } = await import('@/lib/email/emailService');
-          const { data: tenant } = await admin
-            .from('tenants')
-            .select('name, slug')
-            .eq('id', tenantId)
-            .single();
-
-          await queueEmail({
+          const { queueBookingConfirmationEmails } = await import(
+            '@/lib/email/bookingEmails'
+          );
+          await queueBookingConfirmationEmails({
             tenantId,
-            to: finalCustomerEmail,
-            toName: finalCustomerName,
-            subject: `Booking Confirmed - ${booking.reference}`,
-            templateKey: 'booking_confirmation',
-            payload: {
-              bookingReference: booking.reference,
-              customerName: finalCustomerName,
-              customerEmail: finalCustomerEmail,
-              plate: plate || '',
-              startAt: startAt,
-              endAt: endAt,
-              amount: booking.money_charged || paymentIntent.amount / 100,
-              currency: 'GBP',
-              tenantName: tenant?.name,
-              tenantSlug: tenant?.slug,
-            },
-            dedupeKey: `booking:${booking.id}:confirmation:v1`,
+            bookingId: booking.id,
+            bookingReference: booking.reference,
+            customerName: finalCustomerName,
+            customerEmail: finalCustomerEmail,
+            customerPhone: finalCustomerPhone,
+            plate: plate || '',
+            flightNumber,
+            startAt,
+            endAt,
+            amount: booking.money_charged || paymentIntent.amount / 100,
+            currency: 'GBP',
+            source: 'Website',
           });
         } catch (emailError) {
-          console.error('[STRIPE WEBHOOK] Failed to queue confirmation email:', emailError);
+          console.error('[STRIPE WEBHOOK] Failed to queue booking emails:', emailError);
           // Don't fail the booking creation if email fails
         }
       }

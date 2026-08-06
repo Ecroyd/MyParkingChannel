@@ -4,7 +4,6 @@ import type { Metadata } from "next";
 import { generateTenantPageMetadata, getTenantPageRenderData } from "@/lib/seo/page-render";
 import { SiteContentBlocks } from "@/components/site/SiteContentBlocks";
 import { formatAddressLines } from "@/lib/seo/public-address";
-import { buildLocalBusinessJsonLd } from "@/lib/seo/json-ld";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -61,16 +60,6 @@ export default async function ContactPage({
   });
   const hours = Array.isArray(profile?.hours) ? profile!.hours : null;
 
-  const localLd =
-    seo?.pageUrl && profile
-      ? buildLocalBusinessJsonLd({
-          profile: profile as never,
-          url: seo.pageUrl,
-          schemaType: seo?.bundle.settings?.schema_business_type,
-          logo: seo?.bundle.settings?.logo_url || (profile?.logo_url as string),
-        })
-      : null;
-
   return (
     <>
       {seo?.jsonLdScripts?.map((script, i) => (
@@ -80,14 +69,6 @@ export default async function ContactPage({
           dangerouslySetInnerHTML={{ __html: script }}
         />
       ))}
-      {localLd ? (
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{
-            __html: JSON.stringify(localLd).replace(/</g, "\\u003c"),
-          }}
-        />
-      ) : null}
       <Header
         title={title}
         logoUrl={profile?.logo_url as string}

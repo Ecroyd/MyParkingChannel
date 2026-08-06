@@ -23,6 +23,7 @@ export type ParserKey =
   | "aph_email_import"
   | "holiday_extras_email_import"
   | "cavu_email_import"
+  | "looking4_email_import"
   | "flyparks_email_import"
   | "parkvia_email_body"
   | "holiday_extras_extz10_tab"
@@ -54,6 +55,11 @@ export const ATTRIBUTION_BY_PARSER: Record<ParserKey, Attribution> = {
     bookingSource: "cavu",
     externalSource: "cavu",
     detectedSource: "CAVU",
+  },
+  looking4_email_import: {
+    bookingSource: "cavu",
+    externalSource: "looking4",
+    detectedSource: "LOOKING4",
   },
   flyparks_email_import: {
     bookingSource: "other",
@@ -87,6 +93,8 @@ export function channelToParserKey(channel: string | null | undefined): ParserKe
       return "holiday_extras_email_import";
     case "CAVU":
       return "cavu_email_import";
+    case "LOOKING4":
+      return "looking4_email_import";
     case "FLYPARKS_EMAIL":
       return "flyparks_email_import";
     case "PARKVIA_EMAIL":

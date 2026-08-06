@@ -1,55 +1,37 @@
 import { getSiteContext } from "@/lib/site";
 import { Header, Footer } from "../_components/SiteChrome";
-import { DollarSign, Check, X, Clock, Car, Shield, Wifi } from "lucide-react";
+import { DollarSign, Check, X, Shield, Wifi } from "lucide-react";
 import type { Metadata } from "next";
+import {
+  generateTenantPageMetadata,
+  getTenantPageRenderData,
+} from "@/lib/seo/page-render";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
 }
 
-async function getProfile(slug: string) {
-  const ctx = await getSiteContext(slug);
-  if (!ctx) return null;
-  
-  const { getServerSupabase } = await import("@/lib/supabase/server");
-  const supabase = await getServerSupabase();
-  
-  const { data: profile } = await supabase
-    .from("tenant_public_profile")
-    .select("*")
-    .eq("tenant_id", ctx.tenant.id)
-    .maybeSingle();
-    
-  return { tenant: ctx.tenant, profile, branding: ctx.branding };
-}
-
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const resolvedParams = await params;
-  const data = await getProfile(resolvedParams.slug);
-  
-  if (!data) {
-    return {
-      title: "Pricing | Airport Parking",
-      description: "Transparent pricing for our secure airport parking service.",
-    };
-  }
-  
-  const title = `Pricing - ${data.profile?.business_name ?? data.branding?.app_name ?? "Airport Parking"}`;
-  const description = "Transparent pricing for our secure airport parking service. No hidden fees, clear daily rates.";
-
-  return {
-    title,
-    description,
-  };
+  return generateTenantPageMetadata({
+    slug: resolvedParams.slug,
+    path: "/prices",
+    pageKey: "prices",
+  });
 }
 
 export default async function PricesPage({ params }: PageProps) {
   const resolvedParams = await params;
-  const data = await getProfile(resolvedParams.slug);
-  
-  if (!data) {
-    if (process.env.NEXT_PUBLIC_DEBUG_SITE === '1') {
-      console.warn('[SITE_GUARD] slug=', resolvedParams.slug, 'no data found')
+  const ctx = await getSiteContext(resolvedParams.slug);
+  const seo = await getTenantPageRenderData({
+    slug: resolvedParams.slug,
+    path: "/prices",
+    pageKey: "prices",
+  });
+
+  if (!ctx) {
+    if (process.env.NEXT_PUBLIC_DEBUG_SITE === "1") {
+      console.warn("[SITE_GUARD] slug=", resolvedParams.slug, "no data found");
     }
     return (
       <main className="max-w-xl mx-auto py-24 px-4">
@@ -59,18 +41,22 @@ export default async function PricesPage({ params }: PageProps) {
     );
   }
 
-  const { tenant, profile, branding } = data;
-  const p = profile;
-  const title = p?.business_name ?? branding?.app_name ?? tenant.name ?? "Airport Parking";
+  const profile = seo?.profile as Record<string, unknown> | null;
+  const branding = ctx.branding;
+  const title =
+    (profile?.business_name as string) ||
+    branding?.app_name ||
+    ctx.tenant.name ||
+    "Airport Parking";
+  const h1 = seo?.page?.h1 || "Transparent Pricing";
 
-  // Get pricing from tenant_pricing table
   const { getServerSupabase } = await import("@/lib/supabase/server");
   const supabase = await getServerSupabase();
-  
+
   const { data: pricing } = await supabase
     .from("tenant_pricing")
     .select("daily_rate")
-    .eq("tenant_id", tenant.id)
+    .eq("tenant_id", ctx.tenant.id)
     .single();
 
   const dailyRate = pricing?.daily_rate || 7.0;
@@ -86,25 +72,37 @@ export default async function PricesPage({ params }: PageProps) {
 
   return (
     <>
-      <Header title={title} logoUrl={p?.logo_url} tenantSlug={resolvedParams.slug} />
+      {seo?.jsonLdScripts?.map((script, i) => (
+        <script
+          key={i}
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: script }}
+        />
+      ))}
+      <Header
+        title={title}
+        logoUrl={(profile?.logo_url as string) || undefined}
+        tenantSlug={resolvedParams.slug}
+      />
       <main className="max-w-4xl mx-auto px-4 pt-14 pb-10">
         <div className="mb-8">
           <h1 className="text-3xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
             <DollarSign className="h-8 w-8 text-sky-600" />
-            Transparent Pricing
+            {h1}
           </h1>
           <p className="text-slate-600">
-            Simple, clear pricing with no hidden fees. Pay only for what you use.
+            {seo?.page?.excerpt ||
+              seo?.page?.meta_description ||
+              "Simple, clear pricing with no hidden fees. Pay only for what you use."}
           </p>
         </div>
 
         <div className="grid lg:grid-cols-2 gap-8">
-          {/* Pricing Card */}
           <div className="rounded-2xl border bg-white/70 backdrop-blur shadow-lg p-8">
             <div className="text-center mb-6">
               <h2 className="text-2xl font-semibold text-slate-900 mb-2">Daily Rate</h2>
               <div className="text-4xl font-bold text-sky-600 mb-2">
-                £{dailyRate.toFixed(2)}
+                £{Number(dailyRate).toFixed(2)}
               </div>
               <p className="text-slate-600">per day</p>
             </div>
@@ -115,19 +113,25 @@ export default async function PricesPage({ params }: PageProps) {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span>1 day</span>
-                    <span className="font-medium">£{dailyRate.toFixed(2)}</span>
+                    <span className="font-medium">£{Number(dailyRate).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>3 days</span>
-                    <span className="font-medium">£{(dailyRate * 3).toFixed(2)}</span>
+                    <span className="font-medium">
+                      £{(Number(dailyRate) * 3).toFixed(2)}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span>7 days</span>
-                    <span className="font-medium">£{(dailyRate * 7).toFixed(2)}</span>
+                    <span className="font-medium">
+                      £{(Number(dailyRate) * 7).toFixed(2)}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span>14 days</span>
-                    <span className="font-medium">£{(dailyRate * 14).toFixed(2)}</span>
+                    <span className="font-medium">
+                      £{(Number(dailyRate) * 14).toFixed(2)}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -141,14 +145,17 @@ export default async function PricesPage({ params }: PageProps) {
             </a>
           </div>
 
-          {/* What's Included */}
           <div className="space-y-6">
             <div className="rounded-2xl border bg-white/70 backdrop-blur shadow-lg p-6">
-              <h2 className="text-xl font-semibold text-slate-900 mb-4">What's Included</h2>
+              <h2 className="text-xl font-semibold text-slate-900 mb-4">What&apos;s Included</h2>
               <div className="grid grid-cols-1 gap-3">
                 {features.map((feature, index) => (
                   <div key={index} className="flex items-center gap-3">
-                    <div className={`p-1 rounded-full ${feature.included ? 'bg-green-100' : 'bg-red-100'}`}>
+                    <div
+                      className={`p-1 rounded-full ${
+                        feature.included ? "bg-green-100" : "bg-red-100"
+                      }`}
+                    >
                       {feature.included ? (
                         <Check className="h-4 w-4 text-green-600" />
                       ) : (
@@ -201,14 +208,14 @@ export default async function PricesPage({ params }: PageProps) {
           </div>
         </div>
 
-        {/* Additional Information */}
         <div className="mt-12 rounded-2xl border bg-white/70 backdrop-blur shadow-lg p-6">
           <h2 className="text-xl font-semibold text-slate-900 mb-4">Need Help?</h2>
           <div className="grid md:grid-cols-2 gap-6">
             <div>
               <h3 className="font-medium text-slate-900 mb-2">Questions about pricing?</h3>
               <p className="text-slate-600 text-sm mb-3">
-                Our pricing is straightforward with no hidden fees. If you have any questions, we're here to help.
+                Our pricing is straightforward with no hidden fees. If you have any questions,
+                we&apos;re here to help.
               </p>
               {branding?.contact_phone && (
                 <a
