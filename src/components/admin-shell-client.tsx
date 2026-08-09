@@ -13,6 +13,7 @@ import MobileSidebar from '@/components/admin/MobileSidebar';
 import InstallPWAButton from '@/components/InstallPWAButton';
 import { MoneyVisibilityProvider } from '@/lib/auth/money-visibility';
 import { canViewMoney } from '@/lib/auth/permissions';
+import { useEdgeSwipeOpen } from '@/hooks/useEdgeSwipeOpen';
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -111,10 +112,22 @@ export default function AdminShellClient({
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- run once on mount
 
-  // Visibility: only refetch if data is stale (older than STALE_MS)
+  // Visibility: keep auth session warm for PWA resume, then refetch stale health data
   useEffect(() => {
     const onVisibilityChange = () => {
       if (typeof document === 'undefined' || document.visibilityState !== 'visible') return;
+
+      // Refresh/touch session when returning from background so the next RSC
+      // navigation does not hit an expired access token and bounce to /login.
+      void supabase.auth.getSession().then(({ data }) => {
+        const expiresAt = data.session?.expires_at;
+        if (!expiresAt) return;
+        const secondsLeft = expiresAt - Math.floor(Date.now() / 1000);
+        if (secondsLeft < 120) {
+          void supabase.auth.refreshSession();
+        }
+      });
+
       const last = lastFetchedAtRef.current;
       if (!last) return;
       const age = Date.now() - new Date(last).getTime();
@@ -136,6 +149,16 @@ export default function AdminShellClient({
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
+
+  const openMobileMenu = useCallback(() => {
+    setIsMobileMenuOpen(true);
+  }, []);
+
+  // Native-feel: swipe right from the left edge to open the nav drawer (mobile/PWA).
+  useEdgeSwipeOpen({
+    enabled: !isMobileMenuOpen,
+    onOpen: openMobileMenu,
+  });
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -219,10 +242,31 @@ export default function AdminShellClient({
         </main>
       </div>
 
+      {/* Invisible left-edge affordance for swipe-to-open (mobile/PWA) */}
+      {!isMobileMenuOpen && (
+        <div
+          className="md:hidden fixed inset-y-0 left-0 w-3 z-40"
+          aria-hidden="true"
+          onClick={openMobileMenu}
+        />
+      )}
+
       {/* Mobile Navigation Overlay */}
       {isMobileMenuOpen && (
         <div className="md:hidden fixed inset-0 z-50 bg-black bg-opacity-50" onClick={() => setIsMobileMenuOpen(false)}>
-          <div className="fixed inset-y-0 left-0 w-80 max-w-[85vw] bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="fixed inset-y-0 left-0 w-80 max-w-[85vw] bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+            onTouchStart={(e) => {
+              const t = e.touches[0];
+              (e.currentTarget as HTMLElement).dataset.touchStartX = String(t.clientX);
+            }}
+            onTouchEnd={(e) => {
+              const start = Number((e.currentTarget as HTMLElement).dataset.touchStartX || 0);
+              const end = e.changedTouches[0]?.clientX ?? start;
+              if (start - end > 60) setIsMobileMenuOpen(false);
+            }}
+          >
             <div className="flex flex-col h-full">
               <div className="flex items-center justify-between p-4 border-b">
                 <div className="flex items-center gap-3">

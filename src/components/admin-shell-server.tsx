@@ -49,8 +49,9 @@ export default async function AdminShellServer({ children }: AdminShellServerPro
       // Allow setup page to render without tenant context
       return <>{children}</>;
     } else {
-      // User has tenants but context couldn't be resolved - redirect to login
-      redirect('/login');
+      // User is authenticated and has tenants, but active tenant context failed.
+      // Do NOT send them to /login (feels like a random PWA logout) — recover via setup.
+      redirect('/admin/setup');
     }
   }
 

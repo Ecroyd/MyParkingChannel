@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createTelemetryFetch } from "@/lib/supabase/queryTelemetry";
+import { copyAuthCookies, updateSession } from "@/lib/supabase/middleware";
 
 const PLATFORM_HOSTS = [
   "myparkingchannel.app",
@@ -135,12 +136,18 @@ export async function middleware(req: NextRequest) {
     decodedPath.includes("file.svg") ||
     decodedPath.includes("parking") && decodedPath.includes("favicon")
   ) {
+    // Still refresh auth cookies on admin API calls so PWA sessions stay alive.
+    if (url.pathname.startsWith("/api/admin") || url.pathname.startsWith("/api/auth")) {
+      return updateSession(req);
+    }
     return NextResponse.next();
   }
 
-  // If it's one of the platform hosts, just let the normal routing handle it
+  // Platform hosts (admin PWA): refresh Supabase session cookies on every navigation.
+  // Without this, Server Components call getUser() with a stale access token after the
+  // app has been backgrounded and redirect to /login ("aggressive logout").
   if (!normalizedHost || isPlatformHost(rawHost, normalizedHost)) {
-    return NextResponse.next();
+    return updateSession(req);
   }
 
   try {
@@ -173,7 +180,8 @@ export async function middleware(req: NextRequest) {
     if (!slug) {
       // Unknown domain → DO NOT fall back to platform site, show a specific page
       url.pathname = "/site-not-available";
-      return NextResponse.rewrite(url);
+      const sessionResponse = await updateSession(req);
+      return copyAuthCookies(sessionResponse, NextResponse.rewrite(url));
     }
 
     // Resolve tenant-scoped redirects before page rendering (genuine HTTP redirect).
@@ -204,11 +212,13 @@ export async function middleware(req: NextRequest) {
           const status = redirectRow.status_code === 302 ? 302 : 301;
           const target = redirectRow.new_path;
           if (/^https?:\/\//i.test(target)) {
-            return NextResponse.redirect(target, status);
+            const sessionResponse = await updateSession(req);
+            return copyAuthCookies(sessionResponse, NextResponse.redirect(target, status));
           }
           const dest = url.clone();
           dest.pathname = target.startsWith("/") ? target : `/${target}`;
-          return NextResponse.redirect(dest, status);
+          const sessionResponse = await updateSession(req);
+          return copyAuthCookies(sessionResponse, NextResponse.redirect(dest, status));
         }
 
         // Non-primary production domains → verified primary.
@@ -233,7 +243,8 @@ export async function middleware(req: NextRequest) {
                 `${url.pathname}${url.search}`,
                 `https://${primaryHost}`
               );
-              return NextResponse.redirect(dest, 301);
+              const sessionResponse = await updateSession(req);
+              return copyAuthCookies(sessionResponse, NextResponse.redirect(dest, 301));
             }
           }
         }
@@ -248,11 +259,13 @@ export async function middleware(req: NextRequest) {
     //   /booking    → /sites/flyparksexeter/booking
     const originalPath = url.pathname === "/" ? "" : url.pathname;
     url.pathname = `/sites/${slug}${originalPath}`;
-    return NextResponse.rewrite(url);
+    const sessionResponse = await updateSession(req);
+    return copyAuthCookies(sessionResponse, NextResponse.rewrite(url));
   } catch (err) {
     console.error("[TENANT_RESOLVE] Unexpected error", err);
     // Fail safe: show site-not-available instead of wrong brand
     url.pathname = "/site-not-available";
-    return NextResponse.rewrite(url);
+    const sessionResponse = await updateSession(req);
+    return copyAuthCookies(sessionResponse, NextResponse.rewrite(url));
   }
 }

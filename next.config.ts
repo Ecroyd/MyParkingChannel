@@ -104,7 +104,8 @@ export default async (phase: any) => {
       disable: process.env.NODE_ENV === "development",
       cacheStartUrl: true,
       dynamicStartUrl: true,
-      reloadOnOnline: true,
+      // Avoid forced reloads on reconnect that bounce a stale admin session to /login
+      reloadOnOnline: false,
       fallbacks: { document: "/~offline" }, // we'll add this page below
       // Extend runtime caching to play nice with Supabase
       extendDefaultRuntimeCaching: true,
@@ -124,6 +125,12 @@ export default async (phase: any) => {
         // Ignore precache errors for missing files
         ignoreURLParametersMatching: [/^utm_/, /^fbclid$/],
         runtimeCaching: [
+          // Never cache authenticated admin HTML/RSC — stale shells cause surprise logouts
+          {
+            urlPattern: ({ url }: any) =>
+              typeof url?.pathname === "string" && url.pathname.startsWith("/admin"),
+            handler: "NetworkOnly",
+          },
           // Cache GET requests for public assets (images, css, js)
           {
             urlPattern: ({ request }: any) =>

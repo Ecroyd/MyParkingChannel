@@ -11,26 +11,18 @@ export async function getServerSupabase() {
     {
       ...telemetryClientOptions('server-ssr'),
       cookies: {
-        get: (name: string) => {
-          return cookieStore.get(name)?.value;
+        getAll() {
+          return cookieStore.getAll();
         },
-        set: (name: string, value: string, options: any) => {
-          // In Next.js 15, cookies can only be modified in Server Actions or Route Handlers.
-          // In Server Components, we make this a no-op to avoid errors.
-          // Token refresh will happen in Route Handlers/Server Actions where cookies can be set.
+        setAll(cookiesToSet) {
+          // Server Components cannot always mutate cookies (Next.js 15).
+          // Middleware is responsible for persisting refreshed auth cookies.
           try {
-            cookieStore.set({ name, value, ...options });
-          } catch (error) {
-            // Silently ignore cookie setting errors in Server Components
-            // This is expected behavior in Next.js 15
-          }
-        },
-        remove: (name: string, options: any) => {
-          // Same as set - no-op in Server Components
-          try {
-            cookieStore.set({ name, value: '', ...options });
-          } catch (error) {
-            // Silently ignore cookie removal errors in Server Components
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
+            });
+          } catch {
+            // Expected in Server Components — ignore.
           }
         },
       },
