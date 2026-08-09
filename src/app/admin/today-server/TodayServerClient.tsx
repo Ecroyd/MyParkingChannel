@@ -1184,7 +1184,9 @@ export default function TodayServerClient({
                     setSelectedBookingId(booking.id);
                   }}
                 >
-                  <div className="font-medium text-gray-900">{booking.customer_name || '—'}</div>
+                  <div className="font-medium text-gray-900 truncate" title={booking.customer_name || undefined}>
+                    {booking.customer_name || '—'}
+                  </div>
                   <div className="mt-1 font-mono text-sm font-semibold uppercase tracking-wider text-gray-900">
                     {(booking.plate || '—').toUpperCase()}
                   </div>

@@ -287,7 +287,7 @@ function TodayBookingRow({
             </div>
           </div>
         </td>
-        <td className="px-2 py-2 text-sm align-middle cursor-pointer" onClick={handleRowClick}>
+        <td className="px-2 py-2 text-sm align-middle cursor-pointer max-w-0" onClick={handleRowClick}>
           <div className="flex items-center gap-1.5 min-w-0">
             {isKeyTaken && <KeyRound className="h-4 w-4 shrink-0" />}
             {highlightMode ? (
@@ -306,7 +306,9 @@ function TodayBookingRow({
             ) : !isKeyTaken ? (
               <BookingHighlightIcon highlightCode={effectiveHighlightCode} />
             ) : null}
-            <span className="truncate">{booking.customer_name || '—'}</span>
+            <span className="truncate min-w-0" title={booking.customer_name || undefined}>
+              {booking.customer_name || '—'}
+            </span>
           </div>
         </td>
         <td className="px-2 py-2 text-sm align-middle cursor-pointer whitespace-nowrap" onClick={handleRowClick}>

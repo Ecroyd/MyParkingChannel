@@ -59,7 +59,12 @@ export function findUkPhone(text: string | null | undefined): string | null {
 
 export function customerNameLooksContaminated(name: string | null | undefined): boolean {
   if (!name) return false;
-  return EMAIL_ADDRESS_PATTERN.test(name) || Boolean(name.match(UK_PHONE_PATTERN));
+  if (EMAIL_ADDRESS_PATTERN.test(name) || Boolean(name.match(UK_PHONE_PATTERN))) return true;
+  // ParkVia/HTML import tails that were swallowed into Name
+  if (name.length > 80) return true;
+  if (/\b(?:parkvia|parkcloud|kind regards|best regards|https?:\/\/|www\.)/i.test(name)) return true;
+  if (/\b(?:from|sent|subject)\s*:/i.test(name)) return true;
+  return false;
 }
 
 /**
