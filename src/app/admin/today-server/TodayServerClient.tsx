@@ -949,11 +949,12 @@ export default function TodayServerClient({
           )}
           {!arrivalsDeparturesCollapsed && (
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50 hidden md:table-header-group">
+              {/* On narrow/resized windows rows use the card layout; lg+ gets a full-width scrollable table */}
+              <table className="w-full lg:min-w-[72rem] divide-y divide-gray-200">
+                <thead className="bg-gray-50 hidden lg:table-header-group">
                   <tr>
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Time</th>
-                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[10rem]">Name</th>
+                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap min-w-[14rem]">Name</th>
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Reference</th>
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap min-w-[8.5rem]">Number plate</th>
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Telephone</th>
@@ -1132,11 +1133,11 @@ export default function TodayServerClient({
             </div>
           </div>
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50 hidden md:table-header-group">
+            <table className="w-full min-w-[72rem] divide-y divide-gray-200">
+              <thead className="bg-gray-50 hidden lg:table-header-group">
                 <tr>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
-                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Time</th>
+                  <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap min-w-[14rem]">Name</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Reference</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase min-w-[8.5rem]">Number plate</th>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Telephone</th>
