@@ -71,6 +71,9 @@ function getRowStyleClasses(
     } else if (s === 'arrived') {
       rowBg = 'bg-white';
       text = 'text-red-600';
+    } else if (s === 'departed') {
+      rowBg = 'bg-slate-100';
+      text = 'text-slate-800';
     }
   } else if (section === 'departures') {
     if (s === 'no_show') {
@@ -287,8 +290,8 @@ function TodayBookingRow({
             </div>
           </div>
         </td>
-        <td className="px-2 py-2 text-sm align-middle cursor-pointer max-w-0" onClick={handleRowClick}>
-          <div className="flex items-center gap-1.5 min-w-0">
+        <td className="px-2 py-2 text-sm align-middle cursor-pointer min-w-[10rem]" onClick={handleRowClick}>
+          <div className="flex items-center gap-1.5">
             {isKeyTaken && <KeyRound className="h-4 w-4 shrink-0" />}
             {highlightMode ? (
               <div
@@ -306,7 +309,7 @@ function TodayBookingRow({
             ) : !isKeyTaken ? (
               <BookingHighlightIcon highlightCode={effectiveHighlightCode} />
             ) : null}
-            <span className="truncate min-w-0" title={booking.customer_name || undefined}>
+            <span className="whitespace-normal break-words font-medium">
               {booking.customer_name || '—'}
             </span>
           </div>
@@ -348,7 +351,7 @@ function TodayBookingRow({
                   />
                 </span>
                 <div className="min-w-0">
-                  <div className="font-medium truncate">{booking.customer_name || '—'}</div>
+                  <div className="font-medium whitespace-normal break-words">{booking.customer_name || '—'}</div>
                   <div className="text-xs opacity-80">
                     <span className="font-mono">{booking.reference || '—'}</span>
                     {' · '}

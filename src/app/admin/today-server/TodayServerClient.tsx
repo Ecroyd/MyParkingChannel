@@ -29,6 +29,7 @@ import {
   isArrivalRemaining,
   isCancelledBooking,
   isCurrentlyParked,
+  isDepartedBooking,
   isDepartureRemaining,
   isKeysToTakeRemaining,
   isNoShowBooking,
@@ -106,7 +107,7 @@ export default function TodayServerClient({
   const [parkedSort, setParkedSort] = useState<'closest' | 'most_recent'>('closest');
   const [highlightMode, setHighlightMode] = useState(false);
   const [arrivalsDeparturesCollapsed, setArrivalsDeparturesCollapsed] = useState(false);
-  const [showHidden, setShowHidden] = useState(false); // show departed/no_show rows so you can unhide
+  const [showHidden, setShowHidden] = useState(false); // show manually hidden / cancelled soft-hidden rows so you can unhide
   const [filterKeysTaken, setFilterKeysTaken] = useState(false);
   const [filterArrivedKeyTaken, setFilterArrivedKeyTaken] = useState(false);
   const [collapsedDates, setCollapsedDates] = useState<Set<string>>(new Set());
@@ -509,6 +510,8 @@ export default function TodayServerClient({
   }
 
   // Operational lists hide cancelled bookings permanently; reports still retain the records.
+  // Departed bookings stay on Arrivals (marked Departed) so staff can see arrived/no-show/key/departed history for that day.
+  // They are removed from Departures via visibleDepartures below.
   function applyStatusFilters<T extends { ops_hidden?: boolean | null; gate_status?: string | null; status?: string | null }>(
     bookings: T[],
     section: 'arrivals' | 'departures'
@@ -518,7 +521,9 @@ export default function TodayServerClient({
       const keepVisible = Boolean(id && recentlyUpdatedById[id]);
       if (!keepVisible && isCancelledBooking(b)) return false;
       if (!keepVisible && section === 'departures' && isNoShowBooking(b)) return false;
-      if (!keepVisible && !showHidden && b.ops_hidden && !(section === 'arrivals' && isNoShowBooking(b))) return false;
+      const keepOpsHiddenOnArrivals =
+        section === 'arrivals' && (isNoShowBooking(b) || isDepartedBooking(b));
+      if (!keepVisible && !showHidden && b.ops_hidden && !keepOpsHiddenOnArrivals) return false;
       return matchesKeyFilters(b);
     });
   }
@@ -944,11 +949,11 @@ export default function TodayServerClient({
           )}
           {!arrivalsDeparturesCollapsed && (
             <div className="overflow-x-auto">
-              <table className="min-w-full table-fixed divide-y divide-gray-200">
+              <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50 hidden md:table-header-group">
                   <tr>
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Time</th>
-                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[10rem]">Name</th>
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Reference</th>
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap min-w-[8.5rem]">Number plate</th>
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Telephone</th>
@@ -1184,7 +1189,7 @@ export default function TodayServerClient({
                     setSelectedBookingId(booking.id);
                   }}
                 >
-                  <div className="font-medium text-gray-900 truncate" title={booking.customer_name || undefined}>
+                  <div className="font-medium text-gray-900 whitespace-normal break-words">
                     {booking.customer_name || '—'}
                   </div>
                   <div className="mt-1 font-mono text-sm font-semibold uppercase tracking-wider text-gray-900">
