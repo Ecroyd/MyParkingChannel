@@ -1133,7 +1133,7 @@ export default function TodayServerClient({
             </div>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[72rem] divide-y divide-gray-200">
+            <table className="w-full lg:min-w-[72rem] divide-y divide-gray-200">
               <thead className="bg-gray-50 hidden lg:table-header-group">
                 <tr>
                   <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Time</th>
