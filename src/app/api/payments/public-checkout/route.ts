@@ -31,6 +31,8 @@ export async function POST(req: Request) {
       flight_number,
       reference,
       application_fee_cents = 0,
+      anonymous_id,
+      session_id,
     } = body;
 
     // Comprehensive validation
@@ -155,6 +157,8 @@ export async function POST(req: Request) {
           tenant_id: tenant_id,
           temp_booking_id: tempBookingId,
           reference: bookingReference,
+          funnel_anonymous_id: typeof anonymous_id === 'string' ? anonymous_id.slice(0, 80) : '',
+          funnel_session_id: typeof session_id === 'string' ? session_id.slice(0, 80) : '',
         },
         payment_intent_data: {
           application_fee_amount: Number(application_fee_cents) || 0,
@@ -175,6 +179,45 @@ export async function POST(req: Request) {
       },
       useConnected(accountId),
     );
+
+    // First-party funnel: checkout + payment started (never block on analytics)
+    try {
+      const { recordConversionEventSafe } = await import(
+        '@/lib/website-performance/recordEvent'
+      );
+      const anon =
+        (typeof anonymous_id === 'string' && anonymous_id.trim()) ||
+        `srv_${bookingReference}`;
+      const sess =
+        (typeof session_id === 'string' && session_id.trim()) ||
+        `srv_sess_${bookingReference}`;
+      recordConversionEventSafe({
+        tenantId: tenant_id,
+        eventName: 'checkout_started',
+        anonymousId: anon,
+        sessionId: sess,
+        dedupeKey: `checkout:${tenant_id}:${bookingReference}`,
+        bookingValueCents: amount_cents,
+        bookingCurrency: currency,
+        bookingReference,
+        serverTrusted: true,
+        meta: { stripe_session_id: session.id },
+      });
+      recordConversionEventSafe({
+        tenantId: tenant_id,
+        eventName: 'payment_started',
+        anonymousId: anon,
+        sessionId: sess,
+        dedupeKey: `payment:${tenant_id}:${bookingReference}`,
+        bookingValueCents: amount_cents,
+        bookingCurrency: currency,
+        bookingReference,
+        serverTrusted: true,
+        meta: { stripe_session_id: session.id },
+      });
+    } catch (analyticsErr) {
+      console.error('[public-checkout] funnel analytics failed', analyticsErr);
+    }
 
     return NextResponse.json({ url: session.url });
   } catch (error: any) {

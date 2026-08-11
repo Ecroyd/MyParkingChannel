@@ -18,6 +18,7 @@ interface BookingHeroProps {
   trustPoints?: string[];
   heroImageUrl?: string | null;
   heroImageAlt?: string | null;
+  cookieConsentMode?: string | null;
 }
 
 export default function BookingHero({
@@ -31,6 +32,7 @@ export default function BookingHero({
   trustPoints,
   heroImageUrl,
   heroImageAlt,
+  cookieConsentMode,
 }: BookingHeroProps) {
   const style = (site?.booking_modal_style ?? "card").toLowerCase();
   const h1 = heading || "Airport parking made simple";
@@ -63,7 +65,11 @@ export default function BookingHero({
             {subtitle}
           </p>
         </div>
-        <BookingBannerHero slug={slug} tenantId={tenantId} />
+        <BookingBannerHero
+          slug={slug}
+          tenantId={tenantId}
+          cookieConsentMode={cookieConsentMode}
+        />
         <span className="sr-only">{businessName}</span>
       </section>
     );
@@ -146,7 +152,11 @@ export default function BookingHero({
           id="booking"
           className="scroll-mt-28 w-full justify-self-stretch lg:max-w-[460px] lg:justify-self-end"
         >
-          <BookingWidget tenantSlug={slug} tenantId={tenantId} />
+          <BookingWidget
+            tenantSlug={slug}
+            tenantId={tenantId}
+            cookieConsentMode={cookieConsentMode}
+          />
         </div>
       </div>
 

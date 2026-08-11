@@ -55,6 +55,14 @@ export const ADMIN_NAV: NavNode[] = [
     ],
   },
   { key: "analytics", label: "Analytics", href: "/admin/analytics", section: "Core", minRole: "admin", requiresFinancials: true },
+  {
+    key: "website-performance",
+    label: "Website Performance",
+    href: "/admin/website-performance",
+    section: "Core",
+    minRole: "admin",
+    requiresFinancials: true,
+  },
 
   // ——— Sites & Integrations ———
   { key: "tenant-sites", label: "Tenant Sites", href: "/admin/tenant-sites-server", section: "Sites & Integrations", minRole: "admin" },
