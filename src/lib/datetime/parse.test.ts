@@ -22,7 +22,7 @@ describe("tenant-local import and display", () => {
         timestamp: utc,
         timezone: "Europe/London",
       })
-    ).toBe("25 Jun, 14:00");
+    ).toBe("Thu 25 Jun, 14:00");
   });
 
   it("parses winter GMT local 14:00 to 14:00 UTC", () => {
@@ -37,7 +37,7 @@ describe("tenant-local import and display", () => {
         timestamp: utc,
         timezone: "Europe/London",
       })
-    ).toBe("25 Dec, 14:00");
+    ).toBe("Fri 25 Dec, 14:00");
   });
 
   it("repairs wrongly Z-suffixed supplier local datetimes via resolveBookingTimesToUtc", () => {
@@ -61,13 +61,13 @@ describe("tenant-local import and display", () => {
         timestamp: times?.start_at,
         timezone: "Europe/London",
       })
-    ).toBe("25 Jun, 14:00");
+    ).toBe("Thu 25 Jun, 14:00");
     expect(
       formatBookingDateTimeForTenant({
         timestamp: times?.end_at,
         timezone: "Europe/London",
       })
-    ).toBe("29 Jun, 18:00");
+    ).toBe("Mon 29 Jun, 18:00");
   });
 
   it("strips erroneous Z suffix from supplier input", () => {

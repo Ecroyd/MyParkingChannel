@@ -70,7 +70,7 @@ function getRowStyleClasses(
       text = 'text-black [&_*]:!text-black';
     } else if (s === 'arrived') {
       rowBg = 'bg-white';
-      text = 'text-red-600';
+      text = 'text-red-600 [&_*]:!text-red-600';
     } else if (s === 'departed') {
       rowBg = 'bg-slate-100';
       text = 'text-slate-800';
@@ -105,10 +105,24 @@ function getRowStyleClasses(
   return `${rowBg} ${text}`;
 }
 
-function PlateBadge({ plate }: { plate: string | null | undefined }) {
+function PlateBadge({
+  plate,
+  emphasize,
+}: {
+  plate: string | null | undefined;
+  /** When booking is marked arrived, show the reg in red. */
+  emphasize?: boolean;
+}) {
   const value = (plate || '').trim().toUpperCase() || '—';
   return (
-    <span className="inline-flex max-w-[9rem] shrink-0 items-center justify-center whitespace-nowrap rounded border border-gray-300 bg-gray-100 px-2 py-0.5 font-mono text-sm font-semibold uppercase tracking-wider text-gray-900">
+    <span
+      className={cn(
+        'inline-flex max-w-[9rem] shrink-0 items-center justify-center whitespace-nowrap rounded border px-2 py-0.5 font-mono text-sm font-semibold uppercase tracking-wider',
+        emphasize
+          ? 'border-red-300 bg-red-50 text-red-600'
+          : 'border-gray-300 bg-gray-100 text-gray-900'
+      )}
+    >
       {value}
     </span>
   );
@@ -188,6 +202,9 @@ function TodayBookingRow({
     ? 'key'
     : booking.highlight_code || 'none';
   const displayGateStatus = booking.gate_status ?? GATE_STATUS.RESERVED;
+  const plateEmphasize =
+    displayGateStatus === GATE_STATUS.ARRIVED ||
+    displayGateStatus === GATE_STATUS.ARRIVED_KEY_TAKEN;
 
   const rowClass = cn(
     'group border-b transition-colors',
@@ -318,7 +335,7 @@ function TodayBookingRow({
           <span className="font-mono text-xs font-medium tabular-nums">{booking.reference || '—'}</span>
         </td>
         <td className="px-2 py-2 align-middle cursor-pointer" onClick={handleRowClick}>
-          <PlateBadge plate={booking.plate} />
+          <PlateBadge plate={booking.plate} emphasize={plateEmphasize} />
         </td>
         <td className="px-2 py-2 align-middle whitespace-nowrap">
           <PhoneCell phone={booking.customer_phone} />
@@ -363,7 +380,7 @@ function TodayBookingRow({
                   </div>
                 </div>
               </div>
-              <PlateBadge plate={booking.plate} />
+              <PlateBadge plate={booking.plate} emphasize={plateEmphasize} />
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
               <PhoneCell phone={booking.customer_phone} />

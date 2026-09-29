@@ -170,6 +170,7 @@ function CreateForm({
     end_at: '',
     money_charged: '',
     money_received: '',
+    send_confirmation: true,
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -186,6 +187,7 @@ function CreateForm({
           ...form,
           money_charged: form.money_charged ? parseFloat(form.money_charged) : undefined,
           money_received: form.money_received ? parseFloat(form.money_received) : undefined,
+          send_confirmation: form.send_confirmation,
         }),
       });
 
@@ -376,6 +378,24 @@ function CreateForm({
           onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
         />
       </div>
+
+      <label className="flex items-start gap-2 rounded border border-gray-200 bg-gray-50 p-3 text-sm">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={form.send_confirmation}
+          onChange={(e) =>
+            setForm((prev) => ({ ...prev, send_confirmation: e.target.checked }))
+          }
+        />
+        <span>
+          <span className="font-medium">Email booking confirmation to customer</span>
+          <span className="block text-xs text-gray-500">
+            Sends the same confirmation email used after online payment. You can also resend
+            later from the booking details.
+          </span>
+        </span>
+      </label>
 
       <div className="flex justify-end gap-2 pt-2">
         <button

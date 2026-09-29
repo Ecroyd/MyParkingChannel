@@ -4,6 +4,26 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { evaluateBookingRules } from '@/lib/booking-rules/evaluation'
 import { BookingRule } from '@/lib/validation/booking-rules'
 import { makeDedupeKey, checkDuplicateBooking } from '@/lib/bookings/dedupe'
+import { zonedTimeToUtc } from 'date-fns-tz'
+
+const DEFAULT_TZ = 'Europe/London'
+
+/** datetime-local (YYYY-MM-DDTHH:mm) or ISO → UTC ISO, treating naive values as Europe/London. */
+function toUtcIso(value: string, timezone: string = DEFAULT_TZ): string {
+  const trimmed = value.trim()
+  if (!trimmed) return trimmed
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(trimmed)) {
+    return zonedTimeToUtc(`${trimmed}:00`, timezone).toISOString()
+  }
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(trimmed) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(trimmed)) {
+    return zonedTimeToUtc(trimmed, timezone).toISOString()
+  }
+  const d = new Date(trimmed)
+  if (Number.isNaN(d.getTime())) {
+    throw new Error(`Invalid datetime: ${value}`)
+  }
+  return d.toISOString()
+}
 
 type Body = {
   reference?: string
@@ -25,6 +45,8 @@ type Body = {
   car_make?: string
   car_model?: string
   car_color?: string
+  /** When true, queue a customer booking confirmation email (no payment required). */
+  send_confirmation?: boolean
 }
 
 export async function POST(req: NextRequest) {
@@ -49,21 +71,32 @@ export async function POST(req: NextRequest) {
   const tenantId =
     membership.find((m) => m.is_default)?.tenant_id ?? membership[0].tenant_id
 
-  // 3) normalize times → TIMESTAMPTZ (treat as UK timezone)
+  // 3) normalize times → TIMESTAMPTZ (treat naive datetime-local as Europe/London)
   const startRaw = body.startAt ?? body.start_at
   const endRaw = body.endAt ?? body.end_at
   if (!startRaw || !endRaw) {
     return NextResponse.json({ error: 'Start and end dates are required' }, { status: 400 })
   }
-  const start_at = new Date(startRaw)
-  const end_at = new Date(endRaw)
-  if (Number.isNaN(start_at.getTime()) || Number.isNaN(end_at.getTime())) {
+
+  const { data: tenant } = await adminClient
+    .from('tenants')
+    .select('timezone')
+    .eq('id', tenantId)
+    .maybeSingle()
+  const timezone = tenant?.timezone || DEFAULT_TZ
+
+  let start_at_iso: string
+  let end_at_iso: string
+  try {
+    start_at_iso = toUtcIso(startRaw, timezone)
+    end_at_iso = toUtcIso(endRaw, timezone)
+  } catch {
     return NextResponse.json({ error: 'Invalid dates' }, { status: 400 })
   }
-  
-  // Convert to UK timezone (treat input dates as UK time)
-  const start_at_uk = new Date(start_at.toLocaleString("en-US", {timeZone: "Europe/London"}))
-  const end_at_uk = new Date(end_at.toLocaleString("en-US", {timeZone: "Europe/London"}))
+
+  if (new Date(end_at_iso).getTime() <= new Date(start_at_iso).getTime()) {
+    return NextResponse.json({ error: 'End must be after start' }, { status: 400 })
+  }
 
   // 4) Check booking rules
   const { data: rules, error: rulesError } = await supabase
@@ -76,8 +109,8 @@ export async function POST(req: NextRequest) {
   }
 
   const ruleEvaluation = evaluateBookingRules(rules as BookingRule[], {
-    start_at: start_at_uk.toISOString(),
-    end_at: end_at_uk.toISOString()
+    start_at: start_at_iso,
+    end_at: end_at_iso
   })
 
   // If booking is blocked by rules, return error
@@ -116,8 +149,8 @@ export async function POST(req: NextRequest) {
     reference: reference,
     plate: normalizedPlate,
     customer_email: body.customer_email,
-    start_at: start_at_uk.toISOString(),
-    end_at: end_at_uk.toISOString()
+    start_at: start_at_iso,
+    end_at: end_at_iso
   })
 
   // 6) Check for duplicate booking
@@ -156,8 +189,8 @@ export async function POST(req: NextRequest) {
     car_make: body.car_make || null,
     car_model: body.car_model || null,
     car_color: body.car_color || null,
-    start_at: start_at_uk.toISOString(),
-    end_at: end_at_uk.toISOString(),
+    start_at: start_at_iso,
+    end_at: end_at_iso,
     status: 'reserved',
     gate_status: 'reserved',
     source: 'manual',
@@ -218,19 +251,43 @@ export async function POST(req: NextRequest) {
     }
 
     const { syncBookingToVideofit } = await import('@/lib/videofit/bookingSync');
-    const adminClient = createAdminClient();
+    const adminClientForSync = createAdminClient();
     void syncBookingToVideofit(
       {
         id: data.id,
         tenant_id: tenantId,
         plate: normalizedPlate,
-        start_at: start_at_uk.toISOString(),
-        end_at: end_at_uk.toISOString(),
+        start_at: start_at_iso,
+        end_at: end_at_iso,
         status: 'reserved',
       },
       'created',
-      adminClient
+      adminClientForSync
     ).catch((err) => console.error('[Videofit] Background sync error:', err));
+
+    // Optional customer confirmation (manual bookings do not auto-email unless requested)
+    if (body.send_confirmation) {
+      try {
+        const { queueBookingConfirmationEmails } = await import('@/lib/email/bookingEmails');
+        await queueBookingConfirmationEmails({
+          tenantId,
+          bookingId: data.id,
+          bookingReference: data.reference,
+          customerName: body.customer_name,
+          customerEmail: body.customer_email,
+          customerPhone: body.customer_phone || null,
+          plate: normalizedPlate || '',
+          flightNumber: body.flight_number?.toUpperCase() || null,
+          startAt: start_at_iso,
+          endAt: end_at_iso,
+          amount: totalAmount,
+          currency: 'GBP',
+          source: 'Manual',
+        });
+      } catch (emailErr) {
+        console.error('[BOOKING CREATE] Failed to queue confirmation email:', emailErr);
+      }
+    }
   }
 
   // Return booking data with surcharge information
@@ -239,9 +296,10 @@ export async function POST(req: NextRequest) {
     booking: data,
     surchargeApplied: surchargeAmount > 0,
     surchargeAmount,
-    totalAmount
+    totalAmount,
+    confirmationQueued: Boolean(body.send_confirmation),
   }
   
-  return NextResponse.json(response, )
+  return NextResponse.json(response)
 }
 

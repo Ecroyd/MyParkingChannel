@@ -11,6 +11,7 @@ import {
 } from "@/lib/importers/holidayExtras/parseHolidayExtras";
 import { flyparksTextToStaging, looksLikeFlyparksDirectEmail } from "@/lib/ingest/flyparksTextToStaging";
 import { parkViaEmailBodyToStaging, looksLikeParkViaEmail } from "@/lib/ingest/parkviaEmailBodyToStaging";
+import { extractAphCsvFromText } from "@/lib/importers/aph/extractAphCsvFromText";
 
 /**
  * Convert UK date/time format to naive tenant-local ISO (no Z suffix).
@@ -182,6 +183,8 @@ export function mapAphCsvLike(csvText: string): CanonicalBooking[] {
     const bookingRef = f[2] || null;
     const startAt = f[4] && f[11] ? toIsoFromDMY_HM(f[4], f[11]) : null;
     const endAt = f[15] && f[16] ? toIsoFromDMY_HM(f[15], f[16]) : null;
+    // Phone is last column (32); fall back to 31 for older/shorter row layouts
+    const phone = f[32] || f[31] || null;
 
     return {
       channel: "APH",
@@ -196,7 +199,7 @@ export function mapAphCsvLike(csvText: string): CanonicalBooking[] {
       customer_firstname: f[6] || null, // May be initial
       customer_lastname: f[21] || null,
       customer_email: null,
-      customer_phone: f[31] || null,
+      customer_phone: phone,
       outbound_flight_number: null,
       return_flight_number: f[17] || null,
       total_price: f[13] ? parseMoney(f[13]) : null,
@@ -356,9 +359,15 @@ export function detectAndMapFromAttachment(filename: string, text: string): Dete
     }
   }
 
-  // APH csv-like - check filename OR content signature
-  if (name.includes("aph") || text.startsWith('"0') || text.includes('"NEW')) {
-    return { bookings: mapAphCsvLike(text), format: null };
+  // APH csv-like - check filename OR content signature (including CSV buried in forwarded email bodies)
+  if (
+    name.includes("aph") ||
+    text.startsWith('"0') ||
+    text.includes('"NEW') ||
+    /"0[^"]*"\s*,\s*"(?:NEW|AMENDED?|CANCELLED?|CANX)/i.test(text)
+  ) {
+    const extracted = extractAphCsvFromText(text);
+    return { bookings: mapAphCsvLike(extracted || text), format: null };
   }
 
   return null;

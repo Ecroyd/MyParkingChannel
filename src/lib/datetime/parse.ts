@@ -228,7 +228,9 @@ export function tenantDateKeyFromUtc(
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
-/** Format UTC timestamp for tenant-facing display (single conversion). */
+/** Format UTC timestamp for tenant-facing display (single conversion).
+ * Example: "Sat 10 Oct, 18:00"
+ */
 export function formatBookingDateTimeForTenant(opts: {
   timestamp: string | null | undefined;
   timezone?: string;
@@ -239,6 +241,7 @@ export function formatBookingDateTimeForTenant(opts: {
   const tz = opts.timezone ?? DEFAULT_TENANT_TIMEZONE;
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: tz,
+    weekday: 'short',
     day: '2-digit',
     month: 'short',
     hour: '2-digit',
@@ -246,7 +249,7 @@ export function formatBookingDateTimeForTenant(opts: {
     hour12: false,
   }).formatToParts(date);
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
-  return `${get('day')} ${get('month')}, ${get('hour')}:${get('minute')}`;
+  return `${get('weekday')} ${get('day')} ${get('month')}, ${get('hour')}:${get('minute')}`;
 }
 
 /**

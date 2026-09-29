@@ -26,6 +26,7 @@ const Schema = z.object({
   money_received: z.coerce.number().min(0).default(0),
   notes: z.string().optional(),
   flight_number: z.string().optional(),
+  send_confirmation: z.boolean().default(true),
 })
 
 type FormValues = z.infer<typeof Schema>
@@ -52,6 +53,7 @@ export default function NewBookingDialog({
       money_received: 0,
       notes: '',
       flight_number: '',
+      send_confirmation: true,
     },
   })
 
@@ -208,6 +210,29 @@ export default function NewBookingDialog({
                   <FormLabel>Notes</FormLabel>
                   <FormControl><Textarea rows={3} {...field} /></FormControl>
                   <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="send_confirmation"
+              render={({ field }) => (
+                <FormItem className="md:col-span-2 flex flex-row items-start gap-2 space-y-0 rounded border border-gray-200 bg-gray-50 p-3">
+                  <FormControl>
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={field.value}
+                      onChange={(e) => field.onChange(e.target.checked)}
+                    />
+                  </FormControl>
+                  <div>
+                    <FormLabel className="font-medium">Email booking confirmation to customer</FormLabel>
+                    <p className="text-xs text-muted-foreground">
+                      Sends the same confirmation used after online payment. You can resend later from booking details.
+                    </p>
+                  </div>
                 </FormItem>
               )}
             />

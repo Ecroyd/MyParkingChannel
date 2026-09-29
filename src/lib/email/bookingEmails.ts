@@ -18,6 +18,13 @@ export type QueueBookingEmailsInput = {
   amount: number;
   currency?: string;
   source?: string | null;
+  /**
+   * When true, skip the one-shot confirmation dedupe key so staff can resend.
+   * Still avoids accidental double-queue within the same second via a unique suffix.
+   */
+  forceResend?: boolean;
+  /** Customer confirmation only (skip tenant notify). Default false. */
+  customerOnly?: boolean;
 };
 
 function isValidEmail(email: string | null | undefined): email is string {
@@ -126,16 +133,25 @@ async function resolveTenantNotifyContext(tenantId: string) {
 }
 
 /**
- * Queue customer confirmation + tenant notification for a new paid booking.
+ * Queue customer confirmation + tenant notification for a booking.
+ * Used after paid website checkout, and on demand for manual bookings / resends.
  * Never throws — callers should not fail booking creation on email errors.
  */
 export async function queueBookingConfirmationEmails(
   input: QueueBookingEmailsInput
-): Promise<{ customerQueued: boolean; tenantQueued: boolean }> {
+): Promise<{ customerQueued: boolean; tenantQueued: boolean; error?: string }> {
   let customerQueued = false;
   let tenantQueued = false;
 
   try {
+    if (!isValidEmail(input.customerEmail)) {
+      return {
+        customerQueued: false,
+        tenantQueued: false,
+        error: "Customer email is missing or invalid",
+      };
+    }
+
     const ctx = await resolveTenantNotifyContext(input.tenantId);
     const currency = input.currency || "GBP";
     const sharedPayload = {
@@ -160,48 +176,63 @@ export async function queueBookingConfirmationEmails(
       source: input.source || "Website",
     };
 
-    if (isValidEmail(input.customerEmail)) {
-      const result = await queueEmail({
-        tenantId: input.tenantId,
-        to: input.customerEmail.trim(),
-        toName: input.customerName,
-        subject: `Booking confirmed — ${input.bookingReference} | ${ctx.tenantName}`,
-        templateKey: "booking_confirmation",
-        payload: sharedPayload,
-        dedupeKey: `booking:${input.bookingId}:confirmation:v2`,
-      });
-      customerQueued = result.success;
-      if (!result.success) {
-        console.error("[BOOKING EMAIL] Customer queue failed:", result.error);
-      }
+    const confirmationDedupe = input.forceResend
+      ? `booking:${input.bookingId}:confirmation:resend:${Date.now()}`
+      : `booking:${input.bookingId}:confirmation:v2`;
+
+    const result = await queueEmail({
+      tenantId: input.tenantId,
+      to: input.customerEmail.trim(),
+      toName: input.customerName,
+      subject: `Booking confirmed — ${input.bookingReference} | ${ctx.tenantName}`,
+      templateKey: "booking_confirmation",
+      payload: sharedPayload,
+      dedupeKey: confirmationDedupe,
+    });
+    customerQueued = result.success;
+    if (!result.success) {
+      console.error("[BOOKING EMAIL] Customer queue failed:", result.error);
+      return {
+        customerQueued: false,
+        tenantQueued: false,
+        error: result.error || "Failed to queue confirmation email",
+      };
     }
 
-    if (ctx.notifyEmail) {
+    if (!input.customerOnly && ctx.notifyEmail) {
       // Avoid double-sending if tenant email equals customer email
       const sameAsCustomer =
         ctx.notifyEmail.toLowerCase() === input.customerEmail.trim().toLowerCase();
       if (!sameAsCustomer) {
-        const result = await queueEmail({
+        const tenantDedupe = input.forceResend
+          ? `booking:${input.bookingId}:tenant-notify:resend:${Date.now()}`
+          : `booking:${input.bookingId}:tenant-notify:v1`;
+        const tenantResult = await queueEmail({
           tenantId: input.tenantId,
           to: ctx.notifyEmail,
           toName: ctx.tenantName,
           subject: `New booking — ${input.bookingReference} | ${input.customerName}`,
           templateKey: "tenant_booking_notification",
           payload: sharedPayload,
-          dedupeKey: `booking:${input.bookingId}:tenant-notify:v1`,
+          dedupeKey: tenantDedupe,
         });
-        tenantQueued = result.success;
-        if (!result.success) {
-          console.error("[BOOKING EMAIL] Tenant queue failed:", result.error);
+        tenantQueued = tenantResult.success;
+        if (!tenantResult.success) {
+          console.error("[BOOKING EMAIL] Tenant queue failed:", tenantResult.error);
         }
       }
-    } else {
+    } else if (!input.customerOnly && !ctx.notifyEmail) {
       console.warn(
         `[BOOKING EMAIL] No tenant notify email configured for tenant ${input.tenantId}`
       );
     }
   } catch (err) {
     console.error("[BOOKING EMAIL] queueBookingConfirmationEmails failed:", err);
+    return {
+      customerQueued: false,
+      tenantQueued: false,
+      error: err instanceof Error ? err.message : "Failed to queue emails",
+    };
   }
 
   return { customerQueued, tenantQueued };

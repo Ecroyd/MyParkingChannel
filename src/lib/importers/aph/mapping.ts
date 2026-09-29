@@ -17,7 +17,8 @@ export const aphV1 = {
     customer_title: 5,
     customer_first_name: 6,     // best effort: may be initial
     customer_last_name: 21,
-    customer_phone: 31,
+    // Phone is the last column (index 32). Older docs listed 31 — keep a fallback in parsers.
+    customer_phone: 32,
     vehicle_reg: 7,
     vehicle_make: 8,
     vehicle_colour: 9,

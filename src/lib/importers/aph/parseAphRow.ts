@@ -51,7 +51,10 @@ export function parseAphRow(row: string[]) {
     customer_first_name: customerFirstName || null,
     customer_last_name: customerLastName || null,
     customer_name: customerName || null,
-    customer_phone: trim(row[c.customer_phone] || "") || null,
+    customer_phone:
+      trim(row[c.customer_phone] || "") ||
+      trim(row[31] || "") ||
+      null,
     return_flight_no: trim(row[c.return_flight_no] || "") || null,
     product_code: trim(row[c.product_code] || "") || null,
     total_price: parseMoney(row[c.total_price] || ""),

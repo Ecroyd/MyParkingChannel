@@ -477,7 +477,39 @@ export async function processIngestEmail(
         (/qr code/i.test(parsableBodyText) &&
           !/booking|vehicle|registration|arrival|departure|date|time/i.test(parsableBodyText));
 
-      if (
+      // APH booking CSV sometimes lands in the forwarded email body (no attachment).
+      // Persist as a synthetic .csv so the normal APH parser path can promote it.
+      const { extractAphCsvFromText } = await import(
+        "@/lib/importers/aph/extractAphCsvFromText"
+      );
+      const aphCsv = extractAphCsvFromText(parsableBodyText);
+
+      if (aphCsv) {
+        const timestamp = Date.now();
+        const storagePath = `${emailId}/${timestamp}-aph-forwarded.csv`;
+        const bodyBuffer = Buffer.from(aphCsv, "utf-8");
+        const { data: fileData, error: fileError } = await supabase
+          .from("ingest_email_files")
+          .insert({
+            email_id: emailId,
+            filename: "aph-forwarded.csv",
+            content_type: "text/csv",
+            file_size: bodyBuffer.length,
+            storage_bucket: "email-imports",
+            storage_path: storagePath,
+            parse_status: "pending",
+          })
+          .select("id")
+          .single();
+
+        if (!fileError && fileData) {
+          fileIds.push(fileData.id);
+          await supabase.storage.from("email-imports").upload(storagePath, bodyBuffer, {
+            contentType: "text/csv",
+            upsert: false,
+          });
+        }
+      } else if (
         !looksLikeOnlySignatureOrQr &&
         (parsableBodyText.includes("Departure date") ||
           parsableBodyText.includes("Booking Confirmation") ||

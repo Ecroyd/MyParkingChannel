@@ -1193,7 +1193,14 @@ export default function TodayServerClient({
                   <div className="font-medium text-gray-900 whitespace-normal break-words">
                     {booking.customer_name || '—'}
                   </div>
-                  <div className="mt-1 font-mono text-sm font-semibold uppercase tracking-wider text-gray-900">
+                  <div
+                    className={
+                      booking.gate_status === 'arrived' ||
+                      booking.gate_status === 'arrived_key_taken'
+                        ? 'mt-1 font-mono text-sm font-semibold uppercase tracking-wider text-red-600'
+                        : 'mt-1 font-mono text-sm font-semibold uppercase tracking-wider text-gray-900'
+                    }
+                  >
                     {(booking.plate || '—').toUpperCase()}
                   </div>
                   <div className="mt-1 text-xs text-gray-600">

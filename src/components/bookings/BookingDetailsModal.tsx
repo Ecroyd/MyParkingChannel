@@ -89,10 +89,16 @@ export default function BookingDetailsModal({
   const [payload, setPayload] = React.useState<any>(null);
   const [payloadLoading, setPayloadLoading] = React.useState(false);
   const [localBooking, setLocalBooking] = React.useState<Booking | null>(booking);
+  const [confirmationState, setConfirmationState] = React.useState<
+    'idle' | 'sending' | 'sent' | 'error'
+  >('idle');
+  const [confirmationMessage, setConfirmationMessage] = React.useState('');
 
   React.useEffect(() => {
     setLocalBooking(booking);
     setTab('overview');
+    setConfirmationState('idle');
+    setConfirmationMessage('');
   }, [booking?.id, open]);
 
   // List rows omit large fields (e.g. notes). Load full booking when the modal opens
@@ -142,6 +148,33 @@ export default function BookingDetailsModal({
       alert(err.message || 'Failed to load payload');
     } finally {
       setPayloadLoading(false);
+    }
+  };
+
+  const sendConfirmationEmail = async () => {
+    if (!displayBooking?.id) return;
+    setConfirmationState('sending');
+    setConfirmationMessage('');
+    try {
+      const res = await fetch(`/api/bookings/${displayBooking.id}/send-confirmation`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.error || 'Failed to send confirmation');
+      }
+      setConfirmationState('sent');
+      setConfirmationMessage(
+        json.to
+          ? `Confirmation queued for ${json.to}`
+          : 'Confirmation email queued'
+      );
+    } catch (err: unknown) {
+      setConfirmationState('error');
+      setConfirmationMessage(
+        err instanceof Error ? err.message : 'Failed to send confirmation'
+      );
     }
   };
 
@@ -223,6 +256,40 @@ export default function BookingDetailsModal({
                     <div className="col-span-2">
                       <Info label="Notes" value={displayBooking.notes || '—'} />
                     </div>
+                  </div>
+                  <div className="mt-4 pt-4 border-t flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={sendConfirmationEmail}
+                      disabled={
+                        confirmationState === 'sending' ||
+                        !displayBooking.customer_email?.trim()
+                      }
+                      className="px-3 py-1.5 text-sm border rounded hover:bg-gray-50 disabled:opacity-50"
+                      title={
+                        displayBooking.customer_email?.trim()
+                          ? 'Email the booking confirmation to the customer'
+                          : 'Add a customer email before sending confirmation'
+                      }
+                    >
+                      {confirmationState === 'sending'
+                        ? 'Sending…'
+                        : 'Email booking confirmation'}
+                    </button>
+                    {confirmationMessage && (
+                      <span
+                        className={`text-sm ${
+                          confirmationState === 'error' ? 'text-red-600' : 'text-green-700'
+                        }`}
+                      >
+                        {confirmationMessage}
+                      </span>
+                    )}
+                    {!displayBooking.customer_email?.trim() && (
+                      <span className="text-xs text-gray-500">
+                        Customer email required to send confirmation
+                      </span>
+                    )}
                   </div>
                   {displayBooking.source === 'cavu' && (
                     <div className="mt-4 pt-4 border-t">
