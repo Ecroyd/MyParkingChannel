@@ -176,6 +176,6 @@ describe('OccupancyTimelineChart refetch invariants', () => {
   });
 
   it('skips the background poll while the tab is hidden', () => {
-    expect(source).toContain("document.visibilityState === 'hidden'");
+    expect(source).toMatch(/document\.visibilityState === ['"]hidden['"]/);
   });
 });

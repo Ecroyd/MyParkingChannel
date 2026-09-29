@@ -2,13 +2,30 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { createTelemetryFetch } from "@/lib/supabase/queryTelemetry";
 
+/** True when the request likely carries a Supabase auth session cookie. */
+export function hasSupabaseAuthCookie(request: NextRequest): boolean {
+  return request.cookies.getAll().some(
+    (c) =>
+      c.name.includes('-auth-token') ||
+      c.name.startsWith('sb-') ||
+      c.name.includes('supabase')
+  );
+}
+
 /**
  * Refresh the Supabase auth session and write updated cookies onto the response.
  * Must run in middleware so Server Components can read a valid access token after
  * the PWA has been backgrounded (JWT expiry / refresh rotation).
+ *
+ * Cookie-less requests skip Auth entirely — public traffic was paying getUser()
+ * RTT + Active CPU on every HTML hit.
  */
 export async function updateSession(request: NextRequest): Promise<NextResponse> {
   let supabaseResponse = NextResponse.next({ request });
+
+  if (!hasSupabaseAuthCookie(request)) {
+    return supabaseResponse;
+  }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;

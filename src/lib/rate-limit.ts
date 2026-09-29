@@ -24,6 +24,7 @@ export function checkRateLimit(
   limit: { windowMs: number; maxRequests: number }
 ): { allowed: boolean; remaining: number; resetTime: number } {
   const now = Date.now();
+  maybeCleanupRateLimitStore();
   const entry = rateLimitStore.get(identifier);
   
   // If no entry exists or window has expired, create new entry
@@ -97,8 +98,9 @@ export function rateLimitMiddleware(
 }
 
 /**
- * Clean up expired entries from the rate limit store
- * This should be called periodically to prevent memory leaks
+ * Clean up expired entries from the rate limit store.
+ * Called lazily from checkRateLimit — never use module-scope setInterval
+ * on Fluid Compute (keeps isolates warm and burns Active CPU).
  */
 export function cleanupRateLimitStore(): void {
   const now = Date.now();
@@ -109,5 +111,10 @@ export function cleanupRateLimitStore(): void {
   }
 }
 
-// Clean up expired entries every 5 minutes
-setInterval(cleanupRateLimitStore, 5 * 60 * 1000);
+const RATE_LIMIT_CLEANUP_THRESHOLD = 500;
+
+function maybeCleanupRateLimitStore(): void {
+  if (rateLimitStore.size >= RATE_LIMIT_CLEANUP_THRESHOLD) {
+    cleanupRateLimitStore();
+  }
+}

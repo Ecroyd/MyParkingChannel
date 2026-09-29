@@ -429,6 +429,72 @@ export function applyOccupancyEventPure(
   return { state, applied: false, reason: 'unsupported' };
 }
 
+type SweepDelta = { t: number; d: 1 | -1 };
+
+/**
+ * Half-open interval sweep events. At equal timestamps, -1 sorts before +1 so
+ * end times are exclusive (matches `end_at > slot` / `departure <= slot`).
+ */
+function compareSweepDeltas(a: SweepDelta, b: SweepDelta): number {
+  if (a.t !== b.t) return a.t - b.t;
+  return a.d - b.d;
+}
+
+function buildExpectedSweepEvents(bookings: OccupancyBookingRow[]): SweepDelta[] {
+  const events: SweepDelta[] = [];
+  for (const booking of bookings) {
+    if (!bookingIsIncludedInExpectedOccupancy(booking)) continue;
+    const startMs = new Date(booking.start_at).getTime();
+    const endMs = new Date(booking.end_at).getTime();
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) continue;
+    events.push({ t: startMs, d: 1 }, { t: endMs, d: -1 });
+  }
+  events.sort(compareSweepDeltas);
+  return events;
+}
+
+/**
+ * Actual occupancy intervals matching actualOccupiesSlot:
+ * - completed stay: [arrival, departure)
+ * - open on-site stay: [arrival, +∞)
+ */
+function buildActualSweepEvents(bookings: OccupancyBookingRow[]): SweepDelta[] {
+  const events: SweepDelta[] = [];
+  for (const booking of bookings) {
+    if (isCancelledForExpectedOccupancy(booking) || isNoShowForExpectedOccupancy(booking)) {
+      continue;
+    }
+    if (lower(booking.gate_status) === GATE_STATUS.TAKE_KEY && !effectiveArrivalAt(booking)) {
+      continue;
+    }
+    const arrival = effectiveArrivalAt(booking);
+    if (!arrival) continue;
+    const arrivalMs = new Date(arrival).getTime();
+    if (!Number.isFinite(arrivalMs)) continue;
+
+    const departure = effectiveDepartureAt(booking);
+    if (departure) {
+      const departureMs = new Date(departure).getTime();
+      if (!Number.isFinite(departureMs) || departureMs <= arrivalMs) continue;
+      events.push({ t: arrivalMs, d: 1 }, { t: departureMs, d: -1 });
+      continue;
+    }
+
+    if (!isAuthoritativeOnSite(booking)) continue;
+    events.push({ t: arrivalMs, d: 1 });
+  }
+  events.sort(compareSweepDeltas);
+  return events;
+}
+
+function sweepCountAt(events: SweepDelta[], slotMs: number, state: { i: number; count: number }): number {
+  while (state.i < events.length && events[state.i].t <= slotMs) {
+    state.count += events[state.i].d;
+    state.i += 1;
+  }
+  return state.count;
+}
+
 export function aggregateOccupancyTimeseries(opts: {
   bookings: OccupancyBookingRow[];
   snapshots: OccupancySnapshotRow[];
@@ -448,24 +514,23 @@ export function aggregateOccupancyTimeseries(opts: {
   const slots = generateOccupancySlots(opts.from, opts.to, intervalMinutes);
   const capacityByDate = opts.capacityByDate ?? {};
   const dataQuality = assessBookingDataQuality(opts.bookings);
-  let negative = false;
+
+  // O(bookings + slots) sweep instead of O(bookings × slots) nested scans.
+  const expectedEvents = buildExpectedSweepEvents(opts.bookings);
+  const actualEvents = buildActualSweepEvents(opts.bookings);
+  const expectedState = { i: 0, count: 0 };
+  const actualState = { i: 0, count: 0 };
 
   const points: OccupancyPoint[] = slots.map((slotIso) => {
-    let expected = 0;
-    for (const booking of opts.bookings) {
-      if (expectedOccupiesSlot(booking, slotIso)) expected += 1;
-    }
-    const actual = actualOccupancyAt({
-      slotIso,
-      nowMs,
-      bookings: opts.bookings,
-    });
-    if (actual.negative) negative = true;
+    const slotMs = new Date(slotIso).getTime();
+    const expected = sweepCountAt(expectedEvents, slotMs, expectedState);
+    const actual =
+      slotMs > nowMs ? null : sweepCountAt(actualEvents, slotMs, actualState);
     const dayKey = tenantDateKeyFromUtc(slotIso, timezone);
     return {
       timestamp: slotIso,
       expected,
-      actual: actual.count,
+      actual,
       capacity: dayKey ? capacityByDate[dayKey] ?? null : null,
     };
   });
@@ -481,7 +546,7 @@ export function aggregateOccupancyTimeseries(opts: {
     from: opts.from,
     to: opts.to,
     points,
-    dataQuality: { ...dataQuality, negativeOccupancyDetected: negative },
+    dataQuality: { ...dataQuality, negativeOccupancyDetected: false },
     reliableFrom,
     baselineAt,
     actualUnavailableBeforeBaseline: false,

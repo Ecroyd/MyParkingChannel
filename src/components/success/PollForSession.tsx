@@ -12,12 +12,20 @@ export default function PollForSession({ sessionId }: PollForSessionProps) {
   const router = useRouter();
 
   useEffect(() => {
+    let attempts = 0;
+    const maxAttempts = 20; // ~60s at 3s interval
     const interval = setInterval(async () => {
+      attempts += 1;
+      if (attempts > maxAttempts) {
+        clearInterval(interval);
+        return;
+      }
       const res = await fetch(`/api/bookings/by-checkout-session?session_id=${encodeURIComponent(sessionId)}`);
       if (res.ok) {
+        clearInterval(interval);
         router.refresh();
       }
-    }, 1500);
+    }, 3000);
     return () => clearInterval(interval);
   }, [sessionId, router]);
 
