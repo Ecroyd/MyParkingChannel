@@ -26,6 +26,7 @@ export async function POST(req: NextRequest) {
       tenantId,
       from_name,
       reply_to,
+      booking_notify_email,
       sender_domain_mode,
       tenant_from_email,
     } = body;
@@ -48,19 +49,28 @@ export async function POST(req: NextRequest) {
 
     const adminClient = await createAdminClient();
 
-    // Upsert tenant email settings
-    const { error } = await adminClient
+    const baseRow = {
+      tenant_id: tenantId,
+      from_name: from_name || null,
+      reply_to: reply_to || null,
+      sender_domain_mode: sender_domain_mode || 'platform',
+      tenant_from_email: sender_domain_mode === 'tenant_domain' ? (tenant_from_email || null) : null,
+      updated_at: new Date().toISOString(),
+    };
+
+    // Prefer writing booking_notify_email; fall back if migration not applied yet.
+    let { error } = await adminClient
       .from('tenant_email_settings')
-      .upsert({
-        tenant_id: tenantId,
-        from_name: from_name || null,
-        reply_to: reply_to || null,
-        sender_domain_mode: sender_domain_mode || 'platform',
-        tenant_from_email: sender_domain_mode === 'tenant_domain' ? (tenant_from_email || null) : null,
-        updated_at: new Date().toISOString(),
-      }, {
-        onConflict: 'tenant_id',
-      });
+      .upsert(
+        { ...baseRow, booking_notify_email: booking_notify_email || null },
+        { onConflict: 'tenant_id' }
+      );
+
+    if (error && /booking_notify_email/i.test(error.message || '')) {
+      ({ error } = await adminClient
+        .from('tenant_email_settings')
+        .upsert(baseRow, { onConflict: 'tenant_id' }));
+    }
 
     if (error) {
       console.error('[TENANT EMAIL SETTINGS] Error:', error);

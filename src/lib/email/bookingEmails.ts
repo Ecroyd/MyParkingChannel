@@ -3,6 +3,10 @@ import { queueEmail } from "@/lib/email/emailService";
 import { resolvePrimaryCanonicalHost, buildAbsoluteUrl } from "@/lib/seo/canonical";
 import type { DomainCandidate } from "@/lib/seo/canonical";
 import { formatAddressLines } from "@/lib/seo/public-address";
+import {
+  isValidEmail,
+  resolveTenantBookingNotifyEmail,
+} from "@/lib/email/tenantNotifyEmail";
 
 export type QueueBookingEmailsInput = {
   tenantId: string;
@@ -27,11 +31,6 @@ export type QueueBookingEmailsInput = {
   customerOnly?: boolean;
 };
 
-function isValidEmail(email: string | null | undefined): email is string {
-  if (!email?.trim()) return false;
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-}
-
 async function resolveTenantNotifyContext(tenantId: string) {
   const admin = createAdminClient();
 
@@ -46,7 +45,7 @@ async function resolveTenantNotifyContext(tenantId: string) {
     admin.from("tenants").select("name, slug").eq("id", tenantId).maybeSingle(),
     admin
       .from("tenant_email_settings")
-      .select("reply_to, from_name")
+      .select("*")
       .eq("tenant_id", tenantId)
       .maybeSingle(),
     admin
@@ -76,14 +75,13 @@ async function resolveTenantNotifyContext(tenantId: string) {
     tenant?.name?.trim() ||
     "Airport Parking";
 
-  const notifyEmailCandidates = [
-    emailSettings?.reply_to,
-    profile?.email,
-    branding?.contact_email,
-  ];
-  const notifyEmail =
-    notifyEmailCandidates.map((e) => e?.trim()).find((e) => isValidEmail(e)) ||
-    null;
+  const notifyEmail = resolveTenantBookingNotifyEmail({
+    bookingNotifyEmail: (emailSettings as { booking_notify_email?: string | null } | null)
+      ?.booking_notify_email,
+    profileEmail: profile?.email,
+    brandingContactEmail: branding?.contact_email,
+    replyTo: emailSettings?.reply_to,
+  });
 
   const contactEmail =
     [profile?.email, branding?.contact_email, emailSettings?.reply_to]

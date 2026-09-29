@@ -13,6 +13,7 @@ interface TenantEmailSettings {
   tenant_id: string;
   from_name: string | null;
   reply_to: string | null;
+  booking_notify_email?: string | null;
   sender_domain_mode: 'platform' | 'tenant_domain';
   tenant_from_email: string | null;
 }
@@ -31,6 +32,7 @@ export default function TenantEmailSettingsClient({
   const [settings, setSettings] = useState({
     from_name: initialSettings?.from_name || '',
     reply_to: initialSettings?.reply_to || '',
+    booking_notify_email: initialSettings?.booking_notify_email || '',
     sender_domain_mode: initialSettings?.sender_domain_mode || 'platform' as 'platform' | 'tenant_domain',
     tenant_from_email: initialSettings?.tenant_from_email || '',
   });
@@ -48,6 +50,7 @@ export default function TenantEmailSettingsClient({
           tenantId,
           from_name: settings.from_name || null,
           reply_to: settings.reply_to || null,
+          booking_notify_email: settings.booking_notify_email || null,
           sender_domain_mode: settings.sender_domain_mode,
           tenant_from_email: settings.sender_domain_mode === 'tenant_domain' ? (settings.tenant_from_email || null) : null,
         }),
@@ -91,6 +94,21 @@ export default function TenantEmailSettingsClient({
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
+              <Label htmlFor="booking_notify_email">Booking notification email</Label>
+              <Input
+                id="booking_notify_email"
+                type="email"
+                value={settings.booking_notify_email}
+                onChange={(e) => setSettings({ ...settings, booking_notify_email: e.target.value })}
+                placeholder="info@yourdomain.com"
+              />
+              <p className="text-xs text-gray-500">
+                Where new manual and website booking alerts are sent. If empty, your public
+                contact email is used. Platform ops addresses are never used for these alerts.
+              </p>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="from_name">From Name (Optional)</Label>
               <Input
                 id="from_name"
@@ -113,7 +131,8 @@ export default function TenantEmailSettingsClient({
                 placeholder="support@yourdomain.com"
               />
               <p className="text-xs text-gray-500">
-                Email address for replies. If empty, platform default will be used.
+                Address used when customers reply to confirmation emails. This is not the
+                primary inbox for new-booking alerts (use Booking notification email above).
               </p>
             </div>
 
