@@ -5,7 +5,7 @@ import type { DomainCandidate } from "@/lib/seo/canonical";
 import { formatAddressLines } from "@/lib/seo/public-address";
 import {
   isValidEmail,
-  resolveTenantBookingNotifyEmail,
+  resolveTenantBookingNotifyEmails,
 } from "@/lib/email/tenantNotifyEmail";
 
 export type QueueBookingEmailsInput = {
@@ -29,6 +29,13 @@ export type QueueBookingEmailsInput = {
   forceResend?: boolean;
   /** Customer confirmation only (skip tenant notify). Default false. */
   customerOnly?: boolean;
+};
+
+type TenantEmailSettingsRow = {
+  reply_to?: string | null;
+  from_name?: string | null;
+  booking_notify_emails?: string[] | null;
+  booking_notify_email?: string | null;
 };
 
 async function resolveTenantNotifyContext(tenantId: string) {
@@ -69,22 +76,22 @@ async function resolveTenantNotifyContext(tenantId: string) {
       .maybeSingle(),
   ]);
 
+  const settings = emailSettings as TenantEmailSettingsRow | null;
+
   const tenantName =
     profile?.business_name?.trim() ||
     branding?.app_name?.trim() ||
     tenant?.name?.trim() ||
     "Airport Parking";
 
-  const notifyEmail = resolveTenantBookingNotifyEmail({
-    bookingNotifyEmail: (emailSettings as { booking_notify_email?: string | null } | null)
-      ?.booking_notify_email,
-    profileEmail: profile?.email,
-    brandingContactEmail: branding?.contact_email,
-    replyTo: emailSettings?.reply_to,
+  // Explicit list only — never reply_to / profile / branding / platform ops.
+  const notifyEmails = resolveTenantBookingNotifyEmails({
+    bookingNotifyEmails: settings?.booking_notify_emails,
+    bookingNotifyEmail: settings?.booking_notify_email,
   });
 
   const contactEmail =
-    [profile?.email, branding?.contact_email, emailSettings?.reply_to]
+    [profile?.email, branding?.contact_email, settings?.reply_to]
       .map((e) => e?.trim())
       .find((e) => isValidEmail(e)) || null;
 
@@ -119,7 +126,7 @@ async function resolveTenantNotifyContext(tenantId: string) {
   return {
     tenantName,
     tenantSlug: tenant?.slug || null,
-    notifyEmail,
+    notifyEmails,
     contactEmail,
     contactPhone,
     siteUrl,
@@ -137,15 +144,22 @@ async function resolveTenantNotifyContext(tenantId: string) {
  */
 export async function queueBookingConfirmationEmails(
   input: QueueBookingEmailsInput
-): Promise<{ customerQueued: boolean; tenantQueued: boolean; error?: string }> {
+): Promise<{
+  customerQueued: boolean;
+  tenantQueued: boolean;
+  tenantRecipients: string[];
+  error?: string;
+}> {
   let customerQueued = false;
   let tenantQueued = false;
+  let tenantRecipients: string[] = [];
 
   try {
     if (!isValidEmail(input.customerEmail)) {
       return {
         customerQueued: false,
         tenantQueued: false,
+        tenantRecipients: [],
         error: "Customer email is missing or invalid",
       };
     }
@@ -193,45 +207,143 @@ export async function queueBookingConfirmationEmails(
       return {
         customerQueued: false,
         tenantQueued: false,
+        tenantRecipients: [],
         error: result.error || "Failed to queue confirmation email",
       };
     }
 
-    if (!input.customerOnly && ctx.notifyEmail) {
-      // Avoid double-sending if tenant email equals customer email
-      const sameAsCustomer =
-        ctx.notifyEmail.toLowerCase() === input.customerEmail.trim().toLowerCase();
-      if (!sameAsCustomer) {
-        const tenantDedupe = input.forceResend
-          ? `booking:${input.bookingId}:tenant-notify:resend:${Date.now()}`
-          : `booking:${input.bookingId}:tenant-notify:v1`;
-        const tenantResult = await queueEmail({
-          tenantId: input.tenantId,
-          to: ctx.notifyEmail,
-          toName: ctx.tenantName,
-          subject: `New booking — ${input.bookingReference} | ${input.customerName}`,
-          templateKey: "tenant_booking_notification",
-          payload: sharedPayload,
-          dedupeKey: tenantDedupe,
-        });
-        tenantQueued = tenantResult.success;
-        if (!tenantResult.success) {
-          console.error("[BOOKING EMAIL] Tenant queue failed:", tenantResult.error);
-        }
-      }
-    } else if (!input.customerOnly && !ctx.notifyEmail) {
-      console.warn(
-        `[BOOKING EMAIL] No tenant notify email configured for tenant ${input.tenantId}`
+    if (!input.customerOnly) {
+      tenantRecipients = ctx.notifyEmails.filter(
+        (email) => email.toLowerCase() !== input.customerEmail.trim().toLowerCase()
       );
+
+      if (tenantRecipients.length === 0) {
+        if (ctx.notifyEmails.length === 0) {
+          console.warn(
+            `[BOOKING EMAIL] No booking_notify_emails configured for tenant ${input.tenantId}; skipping tenant notify`
+          );
+        }
+      } else {
+        let anyOk = false;
+        for (const to of tenantRecipients) {
+          const tenantDedupe = input.forceResend
+            ? `booking:${input.bookingId}:tenant-notify:${to}:resend:${Date.now()}`
+            : `booking:${input.bookingId}:tenant-notify:${to}:v2`;
+          const tenantResult = await queueEmail({
+            tenantId: input.tenantId,
+            to,
+            toName: ctx.tenantName,
+            subject: `New booking — ${input.bookingReference} | ${input.customerName}`,
+            templateKey: "tenant_booking_notification",
+            payload: sharedPayload,
+            dedupeKey: tenantDedupe,
+          });
+          if (tenantResult.success) {
+            anyOk = true;
+          } else {
+            console.error(
+              "[BOOKING EMAIL] Tenant queue failed:",
+              to,
+              tenantResult.error
+            );
+          }
+        }
+        tenantQueued = anyOk;
+      }
     }
   } catch (err) {
     console.error("[BOOKING EMAIL] queueBookingConfirmationEmails failed:", err);
     return {
       customerQueued: false,
       tenantQueued: false,
+      tenantRecipients: [],
       error: err instanceof Error ? err.message : "Failed to queue emails",
     };
   }
 
-  return { customerQueued, tenantQueued };
+  return { customerQueued, tenantQueued, tenantRecipients };
+}
+
+/**
+ * Queue a sample "New booking" notification to configured recipients (or an override list).
+ * Used by Admin → Email & Notifications "Send test email".
+ */
+export async function queueTenantBookingNotifyTest(opts: {
+  tenantId: string;
+  recipients?: string[];
+}): Promise<{ queued: string[]; skipped: boolean; error?: string }> {
+  try {
+    const ctx = await resolveTenantNotifyContext(opts.tenantId);
+    const recipients =
+      opts.recipients && opts.recipients.length > 0
+        ? opts.recipients
+        : ctx.notifyEmails;
+
+    if (recipients.length === 0) {
+      return {
+        queued: [],
+        skipped: true,
+        error:
+          "No booking notification emails configured. Add at least one address and save first.",
+      };
+    }
+
+    const now = new Date();
+    const end = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const payload = {
+      bookingReference: "TEST-NOTIFY",
+      customerName: "Test Customer",
+      customerEmail: "customer@example.com",
+      customerPhone: null,
+      plate: "TEST123",
+      flightNumber: null,
+      startAt: now.toISOString(),
+      endAt: end.toISOString(),
+      amount: 0,
+      currency: "GBP",
+      tenantName: ctx.tenantName,
+      siteUrl: ctx.siteUrl,
+      manageBookingUrl: ctx.manageBookingUrl,
+      directionsUrl: ctx.directionsUrl,
+      contactEmail: ctx.contactEmail,
+      contactPhone: ctx.contactPhone,
+      addressLine: ctx.addressLine,
+      adminBookingsUrl: ctx.adminBookingsUrl,
+      source: "Test",
+    };
+
+    const queued: string[] = [];
+    for (const to of recipients) {
+      const result = await queueEmail({
+        tenantId: opts.tenantId,
+        to,
+        toName: ctx.tenantName,
+        subject: `New booking — TEST-NOTIFY | Test Customer`,
+        templateKey: "tenant_booking_notification",
+        payload,
+        dedupeKey: `booking:test-notify:${opts.tenantId}:${to}:${Date.now()}`,
+      });
+      if (result.success) {
+        queued.push(to);
+      } else {
+        console.error("[BOOKING EMAIL] Test notify failed:", to, result.error);
+      }
+    }
+
+    if (queued.length === 0) {
+      return {
+        queued: [],
+        skipped: false,
+        error: "Failed to queue test notification",
+      };
+    }
+
+    return { queued, skipped: false };
+  } catch (err) {
+    return {
+      queued: [],
+      skipped: false,
+      error: err instanceof Error ? err.message : "Failed to send test email",
+    };
+  }
 }

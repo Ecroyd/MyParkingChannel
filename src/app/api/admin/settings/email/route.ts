@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentTenantContext } from '@/lib/auth/current-tenant-context';
 import { canManageSettings } from '@/lib/auth/permissions';
 import { createAdminClient } from '@/lib/supabase/server-admin';
+import { normalizeEmailList } from '@/lib/email/tenantNotifyEmail';
 
 export async function POST(req: NextRequest) {
   try {
     const ctx = await getCurrentTenantContext();
-    
+
     if (!ctx) {
       return NextResponse.json(
         { success: false, error: 'Not authenticated' },
@@ -26,12 +27,12 @@ export async function POST(req: NextRequest) {
       tenantId,
       from_name,
       reply_to,
+      booking_notify_emails,
       booking_notify_email,
       sender_domain_mode,
       tenant_from_email,
     } = body;
 
-    // Validate tenantId matches context
     if (tenantId !== ctx.tenantId) {
       return NextResponse.json(
         { success: false, error: 'Tenant ID mismatch' },
@@ -39,13 +40,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Validate sender_domain_mode
     if (sender_domain_mode === 'tenant_domain' && !tenant_from_email) {
       return NextResponse.json(
         { success: false, error: 'Tenant from email required for tenant_domain mode' },
         { status: 400 }
       );
     }
+
+    const notifyList = normalizeEmailList(
+      booking_notify_emails ?? booking_notify_email ?? []
+    );
 
     const adminClient = await createAdminClient();
 
@@ -54,22 +58,28 @@ export async function POST(req: NextRequest) {
       from_name: from_name || null,
       reply_to: reply_to || null,
       sender_domain_mode: sender_domain_mode || 'platform',
-      tenant_from_email: sender_domain_mode === 'tenant_domain' ? (tenant_from_email || null) : null,
+      tenant_from_email:
+        sender_domain_mode === 'tenant_domain' ? tenant_from_email || null : null,
       updated_at: new Date().toISOString(),
     };
 
-    // Prefer writing booking_notify_email; fall back if migration not applied yet.
-    let { error } = await adminClient
-      .from('tenant_email_settings')
-      .upsert(
-        { ...baseRow, booking_notify_email: booking_notify_email || null },
-        { onConflict: 'tenant_id' }
-      );
+    let { error } = await adminClient.from('tenant_email_settings').upsert(
+      {
+        ...baseRow,
+        booking_notify_emails: notifyList,
+      },
+      { onConflict: 'tenant_id' }
+    );
 
-    if (error && /booking_notify_email/i.test(error.message || '')) {
-      ({ error } = await adminClient
-        .from('tenant_email_settings')
-        .upsert(baseRow, { onConflict: 'tenant_id' }));
+    // Older DBs may only have the singular column from a previous migration.
+    if (error && /booking_notify_emails/i.test(error.message || '')) {
+      ({ error } = await adminClient.from('tenant_email_settings').upsert(
+        {
+          ...baseRow,
+          booking_notify_email: notifyList[0] ?? null,
+        },
+        { onConflict: 'tenant_id' }
+      ));
     }
 
     if (error) {
@@ -80,7 +90,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, booking_notify_emails: notifyList });
   } catch (error: any) {
     console.error('[TENANT EMAIL SETTINGS] Error:', error);
     return NextResponse.json(

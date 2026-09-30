@@ -1,58 +1,30 @@
--- Explicit inbox for "new booking" tenant notifications (manual + website).
--- Reply-To remains for customer reply routing and must not steal booking alerts
--- when set to a platform ops address.
+-- Explicit multi-recipient list for internal "New booking" notifications.
+-- Sent directly via Resend to these addresses — no Cloudflare forwarder required.
+-- No tenant-specific seeds (multi-tenant SaaS: each tenant configures in Admin UI).
 
 ALTER TABLE public.tenant_email_settings
-  ADD COLUMN IF NOT EXISTS booking_notify_email text;
+  ADD COLUMN IF NOT EXISTS booking_notify_emails text[] NOT NULL DEFAULT '{}';
 
-COMMENT ON COLUMN public.tenant_email_settings.booking_notify_email IS
-  'Where to send tenant_booking_notification emails for manual/website bookings. Falls back to public profile email.';
+COMMENT ON COLUMN public.tenant_email_settings.booking_notify_emails IS
+  'Internal New booking notification recipients (Resend To:). Empty = do not send tenant notify.';
 
--- Fly Parks Exeter: ensure booking alerts go to the site inbox, not platform ops.
-UPDATE public.tenant_public_profile
-SET email = 'info@flyparksexeter.co.uk',
-    updated_at = now()
-WHERE tenant_id = 'bab45dab-19e8-4230-b18e-ee1f663608e5'
-  AND (
-    email IS NULL
-    OR btrim(email) = ''
-    OR lower(btrim(email)) = 'ops@myparkingchannel.app'
-  );
-
-UPDATE public.tenant_branding
-SET contact_email = 'info@flyparksexeter.co.uk'
-WHERE tenant_id = 'bab45dab-19e8-4230-b18e-ee1f663608e5'
-  AND (
-    contact_email IS NULL
-    OR btrim(contact_email) = ''
-    OR lower(btrim(contact_email)) = 'ops@myparkingchannel.app'
-  );
-
-INSERT INTO public.tenant_email_settings (
-  tenant_id,
-  booking_notify_email,
-  reply_to,
-  sender_domain_mode,
-  updated_at
-)
-VALUES (
-  'bab45dab-19e8-4230-b18e-ee1f663608e5',
-  'info@flyparksexeter.co.uk',
-  'info@flyparksexeter.co.uk',
-  'platform',
-  now()
-)
-ON CONFLICT (tenant_id) DO UPDATE
-SET
-  booking_notify_email = COALESCE(
-    NULLIF(btrim(tenant_email_settings.booking_notify_email), ''),
-    'info@flyparksexeter.co.uk'
-  ),
-  reply_to = CASE
-    WHEN tenant_email_settings.reply_to IS NULL
-      OR btrim(tenant_email_settings.reply_to) = ''
-      OR lower(btrim(tenant_email_settings.reply_to)) = 'ops@myparkingchannel.app'
-      THEN 'info@flyparksexeter.co.uk'
-    ELSE tenant_email_settings.reply_to
-  END,
-  updated_at = now();
+-- Migrate legacy singular column if an earlier migration added it.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'tenant_email_settings'
+      AND column_name = 'booking_notify_email'
+  ) THEN
+    UPDATE public.tenant_email_settings
+    SET booking_notify_emails = ARRAY[btrim(booking_notify_email)]
+    WHERE booking_notify_email IS NOT NULL
+      AND btrim(booking_notify_email) <> ''
+      AND (
+        booking_notify_emails IS NULL
+        OR cardinality(booking_notify_emails) = 0
+      );
+  END IF;
+END $$;

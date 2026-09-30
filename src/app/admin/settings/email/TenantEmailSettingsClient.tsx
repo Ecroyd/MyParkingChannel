@@ -1,18 +1,21 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Save, Mail } from 'lucide-react';
+import { Loader2, Save, Mail, Send } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { normalizeEmailList } from '@/lib/email/tenantNotifyEmail';
 
 interface TenantEmailSettings {
   tenant_id: string;
   from_name: string | null;
   reply_to: string | null;
+  booking_notify_emails?: string[] | null;
   booking_notify_email?: string | null;
   sender_domain_mode: 'platform' | 'tenant_domain';
   tenant_from_email: string | null;
@@ -24,6 +27,13 @@ interface TenantEmailSettingsClientProps {
   tenantId: string;
 }
 
+function initialNotifyText(settings: TenantEmailSettings | null): string {
+  const fromArray = normalizeEmailList(settings?.booking_notify_emails);
+  if (fromArray.length > 0) return fromArray.join('\n');
+  const legacy = normalizeEmailList(settings?.booking_notify_email);
+  return legacy.join('\n');
+}
+
 export default function TenantEmailSettingsClient({
   initialSettings,
   tenantName,
@@ -32,11 +42,18 @@ export default function TenantEmailSettingsClient({
   const [settings, setSettings] = useState({
     from_name: initialSettings?.from_name || '',
     reply_to: initialSettings?.reply_to || '',
-    booking_notify_email: initialSettings?.booking_notify_email || '',
-    sender_domain_mode: initialSettings?.sender_domain_mode || 'platform' as 'platform' | 'tenant_domain',
+    booking_notify_emails_text: initialNotifyText(initialSettings),
+    sender_domain_mode:
+      initialSettings?.sender_domain_mode || ('platform' as 'platform' | 'tenant_domain'),
     tenant_from_email: initialSettings?.tenant_from_email || '',
   });
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+
+  const parsedNotifyEmails = useMemo(
+    () => normalizeEmailList(settings.booking_notify_emails_text),
+    [settings.booking_notify_emails_text]
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,9 +67,12 @@ export default function TenantEmailSettingsClient({
           tenantId,
           from_name: settings.from_name || null,
           reply_to: settings.reply_to || null,
-          booking_notify_email: settings.booking_notify_email || null,
+          booking_notify_emails: parsedNotifyEmails,
           sender_domain_mode: settings.sender_domain_mode,
-          tenant_from_email: settings.sender_domain_mode === 'tenant_domain' ? (settings.tenant_from_email || null) : null,
+          tenant_from_email:
+            settings.sender_domain_mode === 'tenant_domain'
+              ? settings.tenant_from_email || null
+              : null,
         }),
       });
 
@@ -64,7 +84,7 @@ export default function TenantEmailSettingsClient({
 
       toast({
         title: 'Success',
-        description: 'Email settings saved successfully',
+        description: 'Email & notification settings saved',
       });
     } catch (error: any) {
       toast({
@@ -77,37 +97,114 @@ export default function TenantEmailSettingsClient({
     }
   };
 
+  const handleSendTest = async () => {
+    if (parsedNotifyEmails.length === 0) {
+      toast({
+        title: 'Add an address first',
+        description: 'Enter at least one email under New booking notifications.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setTesting(true);
+    try {
+      const response = await fetch('/api/admin/settings/email/test-booking-notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenantId,
+          booking_notify_emails: parsedNotifyEmails,
+        }),
+      });
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to send test email');
+      }
+      toast({
+        title: 'Test queued',
+        description: result.message || `Sent to ${parsedNotifyEmails.join(', ')}`,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Test failed',
+        description: error.message || 'Failed to send test email',
+        variant: 'destructive',
+      });
+    } finally {
+      setTesting(false);
+    }
+  };
+
   return (
     <div className="max-w-2xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold flex items-center gap-2">
           <Mail className="h-6 w-6" />
-          Email Settings
+          Email &amp; Notifications
         </h1>
-        <p className="text-gray-600 mt-1">Configure email settings for {tenantName}</p>
+        <p className="text-gray-600 mt-1">
+          Configure outbound email and who receives new booking alerts for {tenantName}
+        </p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Tenant Email Configuration</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>New booking notifications</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="booking_notify_email">Booking notification email</Label>
-              <Input
-                id="booking_notify_email"
-                type="email"
-                value={settings.booking_notify_email}
-                onChange={(e) => setSettings({ ...settings, booking_notify_email: e.target.value })}
-                placeholder="info@yourdomain.com"
+              <Label htmlFor="booking_notify_emails">Notification recipients</Label>
+              <Textarea
+                id="booking_notify_emails"
+                value={settings.booking_notify_emails_text}
+                onChange={(e) =>
+                  setSettings({ ...settings, booking_notify_emails_text: e.target.value })
+                }
+                placeholder={'ops@yourparking.com\nmanager@yourparking.com'}
+                rows={4}
               />
               <p className="text-xs text-gray-500">
-                Where new manual and website booking alerts are sent. If empty, your public
-                contact email is used. Platform ops addresses are never used for these alerts.
+                One or more email addresses (comma or new line separated). Internal “New booking”
+                alerts for manual and website bookings are sent directly via Resend to these
+                addresses. Leave empty to disable internal booking alerts (customer confirmations
+                are unchanged).
               </p>
+              {parsedNotifyEmails.length > 0 && (
+                <p className="text-xs text-gray-700">
+                  {parsedNotifyEmails.length} recipient
+                  {parsedNotifyEmails.length === 1 ? '' : 's'}: {parsedNotifyEmails.join(', ')}
+                </p>
+              )}
             </div>
 
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleSendTest}
+              disabled={testing || parsedNotifyEmails.length === 0}
+            >
+              {testing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Sending test…
+                </>
+              ) : (
+                <>
+                  <Send className="mr-2 h-4 w-4" />
+                  Send test email
+                </>
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Sender settings</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="from_name">From Name (Optional)</Label>
               <Input
@@ -131,8 +228,8 @@ export default function TenantEmailSettingsClient({
                 placeholder="support@yourdomain.com"
               />
               <p className="text-xs text-gray-500">
-                Address used when customers reply to confirmation emails. This is not the
-                primary inbox for new-booking alerts (use Booking notification email above).
+                Used when customers reply to confirmation emails. Not used as the “New booking”
+                notification destination.
               </p>
             </div>
 
@@ -153,7 +250,8 @@ export default function TenantEmailSettingsClient({
                 </SelectContent>
               </Select>
               <p className="text-xs text-gray-500">
-                Choose whether to send from platform domain or your own domain (requires domain verification).
+                Choose whether to send from platform domain or your own domain (requires domain
+                verification).
               </p>
             </div>
 
@@ -164,7 +262,9 @@ export default function TenantEmailSettingsClient({
                   id="tenant_from_email"
                   type="email"
                   value={settings.tenant_from_email}
-                  onChange={(e) => setSettings({ ...settings, tenant_from_email: e.target.value })}
+                  onChange={(e) =>
+                    setSettings({ ...settings, tenant_from_email: e.target.value })
+                  }
                   placeholder="no-reply@yourdomain.com"
                   required={settings.sender_domain_mode === 'tenant_domain'}
                 />
@@ -187,9 +287,9 @@ export default function TenantEmailSettingsClient({
                 </>
               )}
             </Button>
-          </form>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </form>
     </div>
   );
 }

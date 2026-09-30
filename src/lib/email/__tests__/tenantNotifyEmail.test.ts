@@ -1,58 +1,54 @@
 import { describe, expect, it } from 'vitest';
 import {
-  platformOpsEmails,
-  resolveTenantBookingNotifyEmail,
+  normalizeEmailList,
+  parseEmailList,
+  resolveTenantBookingNotifyEmails,
 } from '@/lib/email/tenantNotifyEmail';
 
-describe('resolveTenantBookingNotifyEmail', () => {
-  const ops = platformOpsEmails('ops@myparkingchannel.app');
-
-  it('prefers the public profile contact over reply-to', () => {
+describe('parseEmailList / normalizeEmailList', () => {
+  it('parses comma and newline separated emails', () => {
     expect(
-      resolveTenantBookingNotifyEmail(
-        {
-          profileEmail: 'info@flyparksexeter.co.uk',
-          replyTo: 'ops@myparkingchannel.app',
-        },
-        ops
-      )
-    ).toBe('info@flyparksexeter.co.uk');
+      parseEmailList('ops@example.com, info@site.co.uk\nbookings@site.co.uk')
+    ).toEqual(['ops@example.com', 'info@site.co.uk', 'bookings@site.co.uk']);
   });
 
-  it('never sends booking notifications to platform ops', () => {
+  it('dedupes case-insensitively and drops invalids', () => {
+    expect(normalizeEmailList(['A@x.com', 'a@x.com', 'not-an-email', ''])).toEqual([
+      'A@x.com',
+    ]);
+  });
+});
+
+describe('resolveTenantBookingNotifyEmails', () => {
+  it('uses only the explicit booking_notify_emails list', () => {
     expect(
-      resolveTenantBookingNotifyEmail(
-        {
-          profileEmail: 'ops@myparkingchannel.app',
-          replyTo: 'ops@myparkingchannel.app',
-          brandingContactEmail: 'OPS@myparkingchannel.app',
-        },
-        ops
-      )
-    ).toBeNull();
+      resolveTenantBookingNotifyEmails({
+        bookingNotifyEmails: ['info@flyparksexeter.co.uk', 'manager@example.com'],
+        bookingNotifyEmail: 'legacy@example.com',
+      })
+    ).toEqual(['info@flyparksexeter.co.uk', 'manager@example.com']);
   });
 
-  it('uses explicit booking_notify_email first', () => {
+  it('falls back to legacy singular column when array is empty', () => {
     expect(
-      resolveTenantBookingNotifyEmail(
-        {
-          bookingNotifyEmail: 'bookings@flyparksexeter.co.uk',
-          profileEmail: 'info@flyparksexeter.co.uk',
-          replyTo: 'ops@myparkingchannel.app',
-        },
-        ops
-      )
-    ).toBe('bookings@flyparksexeter.co.uk');
+      resolveTenantBookingNotifyEmails({
+        bookingNotifyEmails: [],
+        bookingNotifyEmail: 'legacy@example.com',
+      })
+    ).toEqual(['legacy@example.com']);
   });
 
-  it('falls back to reply-to when it is a real tenant inbox', () => {
+  it('returns empty when nothing is configured (safe empty state)', () => {
     expect(
-      resolveTenantBookingNotifyEmail(
-        {
-          replyTo: 'info@flyparksexeter.co.uk',
-        },
-        ops
-      )
-    ).toBe('info@flyparksexeter.co.uk');
+      resolveTenantBookingNotifyEmails({
+        bookingNotifyEmails: null,
+        bookingNotifyEmail: null,
+      })
+    ).toEqual([]);
+  });
+
+  it('does not invent recipients from unrelated fields', () => {
+    // Type system only accepts booking notify fields — empty stays empty.
+    expect(resolveTenantBookingNotifyEmails({})).toEqual([]);
   });
 });

@@ -1,7 +1,9 @@
 /**
- * Resolve where tenant booking notifications should be delivered.
- * Platform ops addresses (ADMIN_NOTIFY_EMAIL / ops@myparkingchannel.app) are never used —
- * those are for delivery-failure alerts only, not parking-site booking alerts.
+ * Resolve explicit tenant "New booking" notification recipients.
+ *
+ * Only addresses configured on tenant_email_settings are used.
+ * Never fall back to reply_to, public profile, branding, or platform ops —
+ * those caused Cloudflare-forwarded ops@ mail and broke multi-tenant isolation.
  */
 
 export function isValidEmail(email: string | null | undefined): email is string {
@@ -9,55 +11,55 @@ export function isValidEmail(email: string | null | undefined): email is string 
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
 
-export function platformOpsEmails(
-  envAdminNotify: string | null | undefined = process.env.ADMIN_NOTIFY_EMAIL
-): Set<string> {
-  const emails = new Set<string>(['ops@myparkingchannel.app']);
-  const admin = envAdminNotify?.trim().toLowerCase();
-  if (admin) emails.add(admin);
-  return emails;
+/** Split a free-text field (commas / whitespace / newlines) into unique valid emails. */
+export function parseEmailList(raw: string | null | undefined): string[] {
+  if (!raw?.trim()) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw.split(/[\s,;]+/)) {
+    const email = part.trim();
+    if (!isValidEmail(email)) continue;
+    const key = email.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(email);
+  }
+  return out;
 }
 
-export function isTenantFacingNotifyEmail(
-  email: string | null | undefined,
-  opsEmails: Set<string> = platformOpsEmails()
-): email is string {
-  if (!isValidEmail(email)) return false;
-  return !opsEmails.has(email.trim().toLowerCase());
+export function normalizeEmailList(
+  value: string[] | string | null | undefined
+): string[] {
+  if (Array.isArray(value)) {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const item of value) {
+      if (!isValidEmail(item)) continue;
+      const key = item.trim().toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(item.trim());
+    }
+    return out;
+  }
+  return parseEmailList(value);
 }
 
-export type TenantNotifyEmailSources = {
-  /** Explicit booking notify override (tenant_email_settings.booking_notify_email). */
+export type TenantBookingNotifySettings = {
+  /** Preferred: tenant_email_settings.booking_notify_emails (text[]). */
+  bookingNotifyEmails?: string[] | string | null;
+  /** Legacy single column from earlier migration, if still present. */
   bookingNotifyEmail?: string | null;
-  /** Public profile / SEO contact email — preferred business inbox. */
-  profileEmail?: string | null;
-  /** Branding contact email. */
-  brandingContactEmail?: string | null;
-  /**
-   * Reply-To for customer emails. Used only as a last resort for notifications,
-   * and never when it is a platform ops address.
-   */
-  replyTo?: string | null;
 };
 
 /**
- * Pick the tenant inbox for "new booking" notifications (manual + website).
- * Priority: explicit notify → public profile → branding → reply-to (non-ops).
+ * Recipients for internal "New booking — …" notifications.
+ * Empty list = do not send (safe empty state).
  */
-export function resolveTenantBookingNotifyEmail(
-  sources: TenantNotifyEmailSources,
-  opsEmails: Set<string> = platformOpsEmails()
-): string | null {
-  const candidates = [
-    sources.bookingNotifyEmail,
-    sources.profileEmail,
-    sources.brandingContactEmail,
-    sources.replyTo,
-  ];
-  for (const candidate of candidates) {
-    if (isTenantFacingNotifyEmail(candidate, opsEmails)) {
-      return candidate.trim();
-    }
-  }
-  return null;
+export function resolveTenantBookingNotifyEmails(
+  settings: TenantBookingNotifySettings
+): string[] {
+  const fromArray = normalizeEmailList(settings.bookingNotifyEmails);
+  if (fromArray.length > 0) return fromArray;
+  return normalizeEmailList(settings.bookingNotifyEmail);
 }
