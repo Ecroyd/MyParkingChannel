@@ -1,7 +1,18 @@
 import { createAdminClient } from '@/lib/supabase/server'
+import { logRequestAttribution, validateCronAuth } from '@/lib/jobSecret'
 import crypto from 'crypto'
 
+/**
+ * ParkVia channel pull cron.
+ * Auth: Authorization Bearer INTERNAL_CRON_KEY / CRON_SECRET, or x-job-secret.
+ * Previously unauthenticated — public hits still paid for a Supabase round-trip (~0.5–1.2s).
+ */
 export async function GET(request: Request) {
+  logRequestAttribution(request, '/api/cron/pull-parkvia')
+  if (!validateCronAuth(request)) {
+    return new Response('Forbidden', { status: 403 })
+  }
+
   const supabase = await createAdminClient()
   
   try {

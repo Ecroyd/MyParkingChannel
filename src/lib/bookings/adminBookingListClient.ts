@@ -5,7 +5,8 @@
 
 export const SEARCH_DEBOUNCE_MS = 300;
 export const STALE_AFTER_MS = 60_000;
-export const VISIBLE_POLL_INTERVAL_MS = 60_000;
+/** Poll while the bookings tab is visible. 3 min keeps ops fresh without burning Active CPU. */
+export const VISIBLE_POLL_INTERVAL_MS = 180_000;
 
 export type BookingListFetchGate = {
   visibilityState: DocumentVisibilityState | 'hidden' | 'visible';

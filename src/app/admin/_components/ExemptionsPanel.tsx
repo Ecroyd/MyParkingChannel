@@ -14,7 +14,7 @@ import { toast } from "@/hooks/use-toast";
 import { toMoney } from "@/lib/money";
 import { useCanViewMoney } from "@/lib/auth/money-visibility";
 
-const EXEMPTIONS_POLL_INTERVAL_MS = 60_000;
+const EXEMPTIONS_POLL_INTERVAL_MS = 180_000;
 
 type Exemption = {
   tenant_id: string;

@@ -120,32 +120,121 @@ export async function getEmailParseHealth(tenantId: string): Promise<EmailParseH
     return fileTenantId === tenantId;
   }).slice(0, 50);
 
+  // Batch staging + import_runs + booking existence checks (was N+1 per file).
+  const emailIds = [
+    ...new Set(parsedFiles.map((f: any) => (f.ingest_emails as any)?.id).filter(Boolean)),
+  ] as string[];
+
+  const stagingByKey = new Map<string, { rows: any[]; count: number }>();
+  if (emailIds.length > 0) {
+    const { data: allStaging } = await adminClient
+      .from('booking_import_staging')
+      .select('id, reference, vehicle_reg, start_at, source_email_id, source_filename')
+      .in('source_email_id', emailIds);
+    for (const row of allStaging || []) {
+      const key = `${row.source_email_id}::${row.source_filename ?? ''}`;
+      const bucket = stagingByKey.get(key) ?? { rows: [], count: 0 };
+      bucket.rows.push(row);
+      bucket.count += 1;
+      stagingByKey.set(key, bucket);
+    }
+  }
+
+  let importRunsWindow: any[] = [];
+  const parsedAts = parsedFiles
+    .map((f: any) => (f.parsed_at ? new Date(f.parsed_at).getTime() : null))
+    .filter((n: number | null): n is number => n != null);
+  if (parsedAts.length > 0) {
+    const windowStart = new Date(Math.min(...parsedAts) - 10 * 60 * 1000).toISOString();
+    const windowEnd = new Date(Math.max(...parsedAts) + 10 * 60 * 1000).toISOString();
+    const { data: runs } = await adminClient
+      .from('import_runs')
+      .select('id, inserted_count, error_count, created_at, profile_name, meta')
+      .eq('tenant_id', tenantId)
+      .gte('created_at', windowStart)
+      .lte('created_at', windowEnd);
+    importRunsWindow = runs || [];
+  }
+
+  const refsNeeded = new Set<string>();
+  const platesNeeded = new Set<string>();
+  for (const file of parsedFiles) {
+    const emailId = (file.ingest_emails as any).id;
+    const staging = stagingByKey.get(`${emailId}::${file.filename}`);
+    for (const s of staging?.rows ?? []) {
+      if (s.reference) refsNeeded.add(String(s.reference));
+      if (s.vehicle_reg) platesNeeded.add(String(s.vehicle_reg));
+    }
+  }
+
+  const bookingRefSet = new Set<string>();
+  const bookingPlateSet = new Set<string>();
+  if (refsNeeded.size > 0 || platesNeeded.size > 0) {
+    const orParts: string[] = [];
+    if (refsNeeded.size > 0) orParts.push(`reference.in.(${[...refsNeeded].join(',')})`);
+    if (platesNeeded.size > 0) orParts.push(`plate.in.(${[...platesNeeded].join(',')})`);
+    const { data: existingBookings } = await adminClient
+      .from('bookings')
+      .select('reference, plate')
+      .eq('tenant_id', tenantId)
+      .or(orParts.join(','));
+    for (const b of existingBookings || []) {
+      if (b.reference) bookingRefSet.add(String(b.reference));
+      if (b.plate) bookingPlateSet.add(String(b.plate));
+    }
+  }
+
+  // Fallback recent-booking windows only for files with no staging and no upsert reason.
+  const recentCountByFileId = new Map<string, number>();
+  const filesNeedingRecent = parsedFiles.filter((file: any) => {
+    const emailId = (file.ingest_emails as any).id;
+    const stagingCount = stagingByKey.get(`${emailId}::${file.filename}`)?.count ?? 0;
+    const upsertedFromReason = (() => {
+      const reason = file.parse_reason as string | null;
+      if (!reason) return 0;
+      const m = reason.match(/rows_upserted=(\d+)/);
+      return m ? Number(m[1]) : 0;
+    })();
+    return stagingCount === 0 && upsertedFromReason === 0 && !!file.parsed_at;
+  });
+  // Cap sequential fallbacks — rare path; avoid reintroducing full N+1.
+  for (const file of filesNeedingRecent.slice(0, 10)) {
+    const parsedTime = new Date(file.parsed_at);
+    const checkStart = new Date(parsedTime.getTime() - 5 * 60 * 1000);
+    const checkEnd = new Date(parsedTime.getTime() + 10 * 60 * 1000);
+    const { count: recentBookingCount } = await adminClient
+      .from('bookings')
+      .select('*', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .gte('created_at', checkStart.toISOString())
+      .lte('created_at', checkEnd.toISOString());
+    recentCountByFileId.set(file.id, recentBookingCount || 0);
+  }
+
   const parsedWithIssues: any[] = [];
   for (const file of parsedFiles) {
     const emailId = (file.ingest_emails as any).id;
-    const { data: stagingRows, count: stagingCount } = await adminClient
-      .from('booking_import_staging')
-      .select('id, reference, vehicle_reg, start_at', { count: 'exact' })
-      .eq('source_email_id', emailId)
-      .eq('source_filename', file.filename);
+    const staging = stagingByKey.get(`${emailId}::${file.filename}`);
+    const stagingRows = staging?.rows ?? [];
+    const stagingCount = staging?.count ?? 0;
 
     let bookingCount = 0;
     let hasSuccessfulImportRun = false;
 
     if (file.parsed_at) {
-      const parsedTime = new Date(file.parsed_at);
-      const checkStart = new Date(parsedTime.getTime() - 10 * 60 * 1000);
-      const checkEnd = new Date(parsedTime.getTime() + 10 * 60 * 1000);
+      const parsedTime = new Date(file.parsed_at).getTime();
+      const checkStart = parsedTime - 10 * 60 * 1000;
+      const checkEnd = parsedTime + 10 * 60 * 1000;
       const exactMatch = `Email import: ${file.filename}`;
-      const escapedFilename = file.filename.replace(/%/g, '\\%').replace(/_/g, '\\_');
-      const { data: importRuns } = await adminClient
-        .from('import_runs')
-        .select('id, inserted_count, error_count, created_at, profile_name, meta')
-        .eq('tenant_id', tenantId)
-        .gte('created_at', checkStart.toISOString())
-        .lte('created_at', checkEnd.toISOString())
-        .or(`profile_name.eq.${exactMatch},profile_name.ilike.%${escapedFilename}%`);
-      if (importRuns?.length) {
+      const importRuns = importRunsWindow.filter((r: any) => {
+        const created = new Date(r.created_at).getTime();
+        if (created < checkStart || created > checkEnd) return false;
+        if (r.profile_name === exactMatch) return true;
+        return String(r.profile_name ?? '')
+          .toLowerCase()
+          .includes(String(file.filename).toLowerCase());
+      });
+      if (importRuns.length) {
         const exactMatchRun = importRuns.find((r: any) => r.profile_name === exactMatch);
         const successfulRun =
           exactMatchRun ||
@@ -181,53 +270,26 @@ export async function getEmailParseHealth(tenantId: string): Promise<EmailParseH
       bookingCount = Math.max(bookingCount, upsertedFromReason);
     }
 
-    if (hasSuccessfulImportRun && bookingCount === 0 && stagingRows?.length) {
+    if (stagingRows.length) {
       const refs = [...new Set(stagingRows.map((s: any) => s.reference).filter(Boolean))];
       const plates = [...new Set(stagingRows.map((s: any) => s.vehicle_reg).filter(Boolean))];
-      if (refs.length || plates.length) {
-        const orCondition = refs.length && plates.length
-          ? `reference.in.(${refs.join(',')}),plate.in.(${plates.join(',')})`
-          : refs.length ? `reference.in.(${refs.join(',')})` : `plate.in.(${plates.join(',')})`;
-        const { count: existingBookingCount } = await adminClient
-          .from('bookings')
-          .select('*', { count: 'exact', head: true })
-          .eq('tenant_id', tenantId)
-          .or(orCondition);
-        if (existingBookingCount && existingBookingCount > 0) bookingCount = existingBookingCount;
+      const existing =
+        refs.filter((r) => bookingRefSet.has(String(r))).length +
+        plates.filter((p) => bookingPlateSet.has(String(p))).length;
+      if (hasSuccessfulImportRun && bookingCount === 0 && existing > 0) {
+        bookingCount = existing;
       }
+      if (!hasSuccessfulImportRun) {
+        bookingCount = existing;
+      }
+    } else if (!hasSuccessfulImportRun) {
+      bookingCount = recentCountByFileId.get(file.id) || 0;
     }
 
-    if (!hasSuccessfulImportRun && stagingRows?.length) {
-      const refs = [...new Set(stagingRows.map((s: any) => s.reference).filter(Boolean))];
-      const plates = [...new Set(stagingRows.map((s: any) => s.vehicle_reg).filter(Boolean))];
-      if (refs.length || plates.length) {
-        const orCondition = refs.length && plates.length
-          ? `reference.in.(${refs.join(',')}),plate.in.(${plates.join(',')})`
-          : refs.length ? `reference.in.(${refs.join(',')})` : `plate.in.(${plates.join(',')})`;
-        const { count } = await adminClient
-          .from('bookings')
-          .select('id', { count: 'exact', head: true })
-          .eq('tenant_id', tenantId)
-          .or(orCondition);
-        bookingCount = count || 0;
-      }
-    } else if (!hasSuccessfulImportRun && file.parsed_at) {
-      const parsedTime = new Date(file.parsed_at);
-      const checkStart = new Date(parsedTime.getTime() - 5 * 60 * 1000);
-      const checkEnd = new Date(parsedTime.getTime() + 10 * 60 * 1000);
-      const { count: recentBookingCount } = await adminClient
-        .from('bookings')
-        .select('*', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId)
-        .gte('created_at', checkStart.toISOString())
-        .lte('created_at', checkEnd.toISOString());
-      bookingCount = recentBookingCount || 0;
-    }
-
-    if (file.parse_outcome === 'empty' || ((stagingCount || 0) === 0 && bookingCount === 0)) {
+    if (file.parse_outcome === 'empty' || (stagingCount === 0 && bookingCount === 0)) {
       parsedWithIssues.push({
         ...file,
-        staging_count: stagingCount || 0,
+        staging_count: stagingCount,
         booking_count: bookingCount,
       });
     }
