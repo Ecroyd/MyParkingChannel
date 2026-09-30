@@ -26,6 +26,9 @@ import {
   parkViaEmailBodyToStaging,
 } from "@/lib/ingest/parkviaEmailBodyToStaging";
 import { safeStagingUpsertPayload } from "@/lib/ingest/safeStagingUpsertPayload";
+import { normalizeInboundToAddress } from "@/lib/ingest/normalizeInboundToAddress";
+
+export { normalizeInboundToAddress } from "@/lib/ingest/normalizeInboundToAddress";
 
 export type IngestAttachment = {
   filename: string;
@@ -71,15 +74,17 @@ function looksLikeFlyparksReceipt(subject: string | null | undefined, text: stri
   return looksLikeFlyparksDirectEmail(subject, text);
 }
 
+/** Normalize inbox addresses so BOOKINGS@… matches bookings@… in tenant_inbound_inboxes. */
 async function resolveTenantFromInbox(
   supabase: SupabaseClient,
   toAddress: string | null | undefined
 ): Promise<string | null> {
-  if (!toAddress) return null;
+  const normalized = normalizeInboundToAddress(toAddress);
+  if (!normalized) return null;
   const { data: inboxRow, error: inboxErr } = await supabase
     .from("tenant_inbound_inboxes")
     .select("tenant_id")
-    .eq("to_address", toAddress)
+    .eq("to_address", normalized)
     .maybeSingle();
   if (inboxErr) {
     console.error("[process-ingest] tenant inbox lookup failed", inboxErr);
@@ -88,15 +93,65 @@ async function resolveTenantFromInbox(
   return inboxRow?.tenant_id ?? null;
 }
 
-async function parseFilesAsync(fileIds: string[], tenantId: string) {
+type FileParseSummary = {
+  attempted: number;
+  succeeded: number;
+  skipped: number;
+  failed: number;
+  errors: string[];
+};
+
+async function parseFilesAsync(
+  supabase: SupabaseClient,
+  fileIds: string[],
+  tenantId: string
+): Promise<FileParseSummary> {
   const { parseEmailFile } = await import("@/lib/ingest/parseEmailFile");
+  const summary: FileParseSummary = {
+    attempted: fileIds.length,
+    succeeded: 0,
+    skipped: 0,
+    failed: 0,
+    errors: [],
+  };
+
   for (const fileId of fileIds) {
     try {
       await parseEmailFile(fileId, tenantId);
     } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       console.error(`[process-ingest] auto-parse error for file ${fileId}:`, err);
+      summary.failed += 1;
+      summary.errors.push(`${fileId}: ${message}`);
     }
   }
+
+  const { data: files } = await supabase
+    .from("ingest_email_files")
+    .select("id, parse_status, parse_outcome, parse_error")
+    .in("id", fileIds);
+
+  summary.succeeded = 0;
+  summary.skipped = 0;
+  // Recompute from persisted rows so skipped images don't count as success/failure.
+  let recomputedFailed = 0;
+  for (const file of files ?? []) {
+    if (file.parse_outcome === "skipped") {
+      summary.skipped += 1;
+    } else if (file.parse_status === "failed" || file.parse_outcome === "failed") {
+      recomputedFailed += 1;
+      if (file.parse_error) {
+        summary.errors.push(`${file.id}: ${file.parse_error}`);
+      }
+    } else if (
+      file.parse_status === "parsed" &&
+      (file.parse_outcome === "parsed" || file.parse_outcome === "empty")
+    ) {
+      summary.succeeded += 1;
+    }
+  }
+  summary.failed = Math.max(summary.failed, recomputedFailed);
+  return summary;
 }
 
 /**
@@ -554,9 +609,19 @@ export async function processIngestEmail(
         : null;
 
     let autoParseTriggered = false;
+    let fileParseSummary: FileParseSummary | null = null;
     if (fileIds.length > 0 && tenantIdForFiles) {
       autoParseTriggered = true;
-      await parseFilesAsync(fileIds, tenantIdForFiles);
+      fileParseSummary = await parseFilesAsync(supabase, fileIds, tenantIdForFiles);
+      // Booking attachments that fail must fail the parent email — previously errors were
+      // swallowed and the row stayed status=received with error=null ("no failure").
+      if (fileParseSummary.failed > 0 && fileParseSummary.succeeded === 0) {
+        throw new Error(
+          `Attachment parse failed for ${fileParseSummary.failed} file(s): ${fileParseSummary.errors
+            .slice(0, 3)
+            .join("; ")}`
+        );
+      }
     } else if (fileIds.length > 0 && !tenantIdForFiles) {
       const noTenantParseError = "Attachment received but tenant could not be resolved for parsing";
       await supabase
@@ -571,8 +636,24 @@ export async function processIngestEmail(
       throw new Error(noTenantParseError);
     }
 
-    if (textPromoted || bookingId) {
+    const attachmentParseOk =
+      !!fileParseSummary &&
+      fileParseSummary.succeeded > 0 &&
+      fileParseSummary.failed === 0;
+
+    if (textPromoted || bookingId || attachmentParseOk) {
       await markIngestSuccess(supabase, emailId, parseSuccessPatch);
+    } else if (
+      fileParseSummary &&
+      fileParseSummary.succeeded > 0 &&
+      fileParseSummary.failed > 0
+    ) {
+      // Partial success: keep bookings from good files, but surface a failure for ops.
+      throw new Error(
+        `Partial attachment parse: ${fileParseSummary.succeeded} ok, ${fileParseSummary.failed} failed: ${fileParseSummary.errors
+          .slice(0, 3)
+          .join("; ")}`
+      );
     }
 
     return {
