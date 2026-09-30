@@ -7,6 +7,8 @@ import { getCanaryHealth } from '@/lib/health/canary';
 import { writeHealthStatus } from '@/lib/health/writeHealthStatus';
 
 const CANARY_TO_EMAIL = 'canary-bookings@myparkingchannel.app';
+/** Also probe the production ingest inbox — canary-only address can stay healthy while bookings@ is broken. */
+const PRODUCTION_INGEST_EMAIL = 'bookings@myparkingchannel.app';
 const STALE_MINUTES = 10;
 const TOKEN_RANDOM_BYTES = 4; // 6 chars base64url
 
@@ -103,37 +105,54 @@ export async function POST(req: NextRequest) {
     const subject = `[CANARY] cloudflare-ingest token=${token}`;
     const dedupeKey = `ingest-canary-${timePart}`;
     console.log('[INGEST CANARY] step=send_start');
-    const queueResult = await queueEmail({
-      tenantId: null,
-      to: CANARY_TO_EMAIL,
-      subject,
-      templateKey: 'ops_alert',
-      payload: {
-        alertTitle: 'Ingest canary',
-        alertType: 'info',
-        message: `CANARY_TOKEN=${token}`,
-        details: { token },
-        tenantName: null,
-        timestamp: now.toISOString(),
-      },
-      dedupeKey,
-    });
 
-    if (!queueResult.success) {
-      console.error('[INGEST CANARY] Failed to queue email:', queueResult.error);
+    const canaryPayload = {
+      alertTitle: 'Ingest canary',
+      alertType: 'info',
+      message: `CANARY_TOKEN=${token}`,
+      details: { token },
+      tenantName: null,
+      timestamp: now.toISOString(),
+    };
+
+    const queueResults = await Promise.all([
+      queueEmail({
+        tenantId: null,
+        to: CANARY_TO_EMAIL,
+        subject,
+        templateKey: 'ops_alert',
+        payload: canaryPayload,
+        dedupeKey,
+      }),
+      queueEmail({
+        tenantId: null,
+        to: PRODUCTION_INGEST_EMAIL,
+        subject,
+        templateKey: 'ops_alert',
+        payload: canaryPayload,
+        dedupeKey: `${dedupeKey}-bookings`,
+      }),
+    ]);
+
+    const queueFailed = queueResults.find((r) => !r.success);
+    if (queueFailed && !queueFailed.success) {
+      console.error('[INGEST CANARY] Failed to queue email:', queueFailed.error);
       await supabase
         .from('ingest_canary_runs')
-        .update({ status: 'down', last_error: queueResult.error || 'queue failed' })
+        .update({ status: 'down', last_error: queueFailed.error || 'queue failed' })
         .eq('token', token);
       return NextResponse.json(
-        { ok: false, previousDown, token, error: queueResult.error },
+        { ok: false, previousDown, token, error: queueFailed.error },
         { status: 500 }
       );
     }
 
     // Send immediately so canary email goes out in this request
-    await sendDueEmails(5);
-    console.log('[INGEST CANARY] step=send_done');
+    await sendDueEmails(10);
+    console.log('[INGEST CANARY] step=send_done targets=', [
+      CANARY_TO_EMAIL,
+      PRODUCTION_INGEST_EMAIL,
+    ]);
 
     // Write canary health to system_health_status so UI can read from Supabase (revalidate: 60)
     try {

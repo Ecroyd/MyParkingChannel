@@ -1,17 +1,17 @@
-"use client";
+'use client';
 
-import { useCallback, useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useCallback, useEffect, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { RefreshCw, Play, AlertCircle } from "lucide-react";
+} from '@/components/ui/dialog';
+import { RefreshCw, Play, AlertCircle } from 'lucide-react';
 
-type FailedEmail = {
+type IngestEmailRow = {
   id: string;
   received_at: string;
   from_address: string | null;
@@ -23,6 +23,11 @@ type FailedEmail = {
   latest_parse_error: string | null;
   booking_plate_guess: string | null;
   booking_reference_guess: string | null;
+  file_count?: number;
+  booking_file_count?: number;
+  files_parsed_ok?: number;
+  files_failed?: number;
+  detected_sources?: string[];
 };
 
 type EmailDetail = {
@@ -44,10 +49,13 @@ type EmailDetail = {
   }>;
 };
 
+type Tab = 'recent' | 'failed';
+
 export default function EmailIngestClient() {
-  const [emails, setEmails] = useState<FailedEmail[]>([]);
+  const [tab, setTab] = useState<Tab>('recent');
+  const [emails, setEmails] = useState<IngestEmailRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [errorFilter, setErrorFilter] = useState("");
+  const [errorFilter, setErrorFilter] = useState('');
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [batchRunning, setBatchRunning] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -55,192 +63,256 @@ export default function EmailIngestClient() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  const fetchFailed = useCallback(async () => {
+  const fetchList = useCallback(async () => {
     setLoading(true);
     setMessage(null);
     try {
-      const params = new URLSearchParams({ days: "14" });
-      if (errorFilter.trim()) {
-        params.set("errorContains", errorFilter.trim());
-      }
-      const res = await fetch(`/api/admin/ingest-emails/failed?${params}`);
-      const data = await res.json();
-      if (data.ok) {
-        setEmails(data.emails ?? []);
+      if (tab === 'recent') {
+        const res = await fetch('/api/admin/ingest-emails/recent?days=7');
+        const data = await res.json();
+        if (data.ok) {
+          setEmails(data.emails ?? []);
+        } else {
+          setMessage(data.error ?? 'Failed to load');
+        }
       } else {
-        setMessage(data.error ?? "Failed to load");
+        const params = new URLSearchParams({ days: '14' });
+        if (errorFilter.trim()) {
+          params.set('errorContains', errorFilter.trim());
+        }
+        const res = await fetch(`/api/admin/ingest-emails/failed?${params}`);
+        const data = await res.json();
+        if (data.ok) {
+          setEmails(data.emails ?? []);
+        } else {
+          setMessage(data.error ?? 'Failed to load');
+        }
       }
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Failed to load");
+      setMessage(e instanceof Error ? e.message : 'Failed to load');
     } finally {
       setLoading(false);
     }
-  }, [errorFilter]);
+  }, [tab, errorFilter]);
 
   useEffect(() => {
-    fetchFailed();
-  }, [fetchFailed]);
+    void fetchList();
+  }, [fetchList]);
 
-  const reprocessOne = async (emailId: string) => {
-    setProcessingId(emailId);
-    setMessage(null);
-    try {
-      const res = await fetch("/api/admin/ingest-emails/reprocess", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ emailId }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        setMessage(`Reprocessed ${emailId} successfully`);
-        await fetchFailed();
-      } else {
-        setMessage(data.error ?? "Reprocess failed");
-      }
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Reprocess failed");
-    } finally {
-      setProcessingId(null);
-    }
-  };
-
-  const retryAllFailed = async () => {
-    setBatchRunning(true);
-    setMessage(null);
-    try {
-      const res = await fetch("/api/admin/ingest-emails/reprocess-failed", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          days: 14,
-          errorContains: errorFilter.trim() || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        setMessage(
-          `Retry all: ${data.succeeded}/${data.attempted} succeeded, ${data.failed} failed`
-        );
-        await fetchFailed();
-      } else {
-        setMessage(data.error ?? "Batch reprocess failed");
-      }
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Batch reprocess failed");
-    } finally {
-      setBatchRunning(false);
-    }
-  };
-
-  const openDetail = async (emailId: string) => {
+  const openDetail = async (id: string) => {
     setDetailOpen(true);
-    setDetailLoading(true);
     setDetail(null);
+    setDetailLoading(true);
     try {
-      const res = await fetch(`/api/admin/ingest-emails/${emailId}`);
+      const res = await fetch(`/api/admin/ingest-emails/${id}`);
       const data = await res.json();
-      if (data.ok) {
-        setDetail(data.email);
-      }
+      if (data.ok) setDetail(data.email);
+      else setMessage(data.error ?? 'Failed to load detail');
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Failed to load detail');
     } finally {
       setDetailLoading(false);
     }
   };
 
+  const reprocessOne = async (id: string) => {
+    setProcessingId(id);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/admin/ingest-emails/reprocess', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailId: id }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setMessage(`Reprocessed ${id.slice(0, 8)}…`);
+        await fetchList();
+      } else {
+        setMessage(data.error ?? 'Reprocess failed');
+      }
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Reprocess failed');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const reprocessAllFailed = async () => {
+    setBatchRunning(true);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/admin/ingest-emails/reprocess-failed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days: 14 }),
+      });
+      const data = await res.json();
+      if (data.ok || data.attempted > 0) {
+        setMessage(
+          `Retry all: ${data.succeeded}/${data.attempted} succeeded, ${data.failed} failed`
+        );
+        await fetchList();
+      } else {
+        setMessage(data.error ?? 'Batch reprocess failed');
+      }
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Batch reprocess failed');
+    } finally {
+      setBatchRunning(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2 items-end">
-        <div>
-          <label className="text-xs text-gray-500 block mb-1">Filter error contains</label>
-          <input
-            className="border rounded px-2 py-1 text-sm w-64"
-            value={errorFilter}
-            onChange={(e) => setErrorFilter(e.target.value)}
-            placeholder="e.g. external_status"
-          />
-        </div>
-        <Button variant="outline" size="sm" onClick={fetchFailed} disabled={loading}>
-          <RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant={tab === 'recent' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setTab('recent')}
+        >
+          Recent (7d)
+        </Button>
+        <Button
+          type="button"
+          variant={tab === 'failed' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setTab('failed')}
+        >
+          Failures only
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => void fetchList()}>
+          <RefreshCw className="mr-2 h-4 w-4" />
           Refresh
         </Button>
-        <Button size="sm" onClick={retryAllFailed} disabled={batchRunning || emails.length === 0}>
-          <Play className="h-4 w-4 mr-1" />
-          Retry all failed (14d)
-        </Button>
+        {tab === 'failed' && (
+          <>
+            <input
+              className="rounded border px-2 py-1 text-sm"
+              placeholder="e.g. external_status"
+              value={errorFilter}
+              onChange={(e) => setErrorFilter(e.target.value)}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={batchRunning}
+              onClick={() => void reprocessAllFailed()}
+            >
+              Retry all failed (14d)
+            </Button>
+          </>
+        )}
       </div>
 
       {message && (
-        <div className="text-sm p-3 rounded bg-gray-100 border">{message}</div>
+        <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          {message}
+        </p>
       )}
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <AlertCircle className="h-5 w-5 text-amber-600" />
-            Failed emails ({emails.length})
+          <CardTitle className="text-base flex items-center gap-2">
+            {tab === 'recent' ? 'Recent inbound to bookings@' : 'Failed ingest emails'}
+            {tab === 'failed' && <AlertCircle className="h-4 w-4 text-red-600" />}
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (
             <p className="p-4 text-sm text-gray-500">Loading…</p>
           ) : emails.length === 0 ? (
-            <p className="p-4 text-sm text-gray-500">No failed emails in the last 14 days.</p>
+            <p className="p-4 text-sm text-gray-500">
+              {tab === 'recent'
+                ? 'No emails received at bookings@ in the last 7 days.'
+                : 'No failed emails in the last 14 days.'}
+            </p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b">
-                  <tr>
-                    <th className="text-left p-2">Received</th>
-                    <th className="text-left p-2">From</th>
-                    <th className="text-left p-2">To</th>
-                    <th className="text-left p-2">Subject</th>
-                    <th className="text-left p-2">Status</th>
-                    <th className="text-left p-2">Error</th>
-                    <th className="text-left p-2">Parse</th>
-                    <th className="text-left p-2">Actions</th>
+                <thead>
+                  <tr className="border-b text-left text-gray-600">
+                    <th className="p-2">Received</th>
+                    <th className="p-2">Subject</th>
+                    <th className="p-2">Status</th>
+                    <th className="p-2">Files</th>
+                    <th className="p-2">Guess</th>
+                    <th className="p-2" />
                   </tr>
                 </thead>
                 <tbody>
                   {emails.map((row) => (
-                    <tr key={row.id} className="border-b hover:bg-gray-50">
+                    <tr key={row.id} className="border-b align-top">
                       <td className="p-2 whitespace-nowrap">
                         {new Date(row.received_at).toLocaleString()}
                       </td>
-                      <td className="p-2 max-w-[140px] truncate" title={row.from_address ?? ""}>
-                        {row.from_address ?? "—"}
-                      </td>
-                      <td className="p-2 max-w-[140px] truncate" title={row.to_address ?? ""}>
-                        {row.to_address ?? "—"}
-                      </td>
-                      <td className="p-2 max-w-[200px] truncate" title={row.subject ?? ""}>
-                        {row.subject ?? "—"}
-                      </td>
-                      <td className="p-2">{row.status}</td>
-                      <td className="p-2 max-w-[220px] truncate text-red-700" title={row.error ?? ""}>
-                        {row.error ?? "—"}
+                      <td className="p-2">
+                        <div className="font-medium">{row.subject || '—'}</div>
+                        <div className="text-xs text-gray-500">{row.from_address}</div>
+                        {row.error && (
+                          <div className="mt-1 text-xs text-red-700 line-clamp-2">{row.error}</div>
+                        )}
                       </td>
                       <td className="p-2">
-                        <span className="block">{row.latest_parse_status ?? "—"}</span>
-                        {row.latest_parse_error && (
-                          <span className="text-xs text-red-600 truncate block max-w-[160px]" title={row.latest_parse_error}>
-                            {row.latest_parse_error}
+                        <span
+                          className={
+                            row.status === 'parsed'
+                              ? 'text-emerald-700'
+                              : row.status === 'failed'
+                                ? 'text-red-700'
+                                : 'text-amber-800'
+                          }
+                        >
+                          {row.status}
+                        </span>
+                        <span className="block text-xs text-gray-500">
+                          {row.latest_parse_status ?? '—'}
+                        </span>
+                        {row.detected_sources && row.detected_sources.length > 0 && (
+                          <span className="block text-xs text-gray-600">
+                            {row.detected_sources.join(', ')}
                           </span>
                         )}
                       </td>
-                      <td className="p-2 space-x-1 whitespace-nowrap">
+                      <td className="p-2 text-xs text-gray-700">
+                        {typeof row.booking_file_count === 'number' ? (
+                          <>
+                            {row.files_parsed_ok ?? 0} ok / {row.files_failed ?? 0} fail
+                            <span className="block text-gray-500">
+                              {row.booking_file_count} booking file
+                              {row.booking_file_count === 1 ? '' : 's'}
+                            </span>
+                          </>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className="p-2 text-xs">
+                        {row.booking_reference_guess || '—'}
+                        <span className="block text-gray-500">
+                          {row.booking_plate_guess || ''}
+                        </span>
+                      </td>
+                      <td className="p-2 whitespace-nowrap">
                         <Button
-                          variant="outline"
+                          type="button"
+                          variant="ghost"
                           size="sm"
-                          onClick={() => openDetail(row.id)}
+                          onClick={() => void openDetail(row.id)}
                         >
-                          Details
+                          View
                         </Button>
                         <Button
+                          type="button"
+                          variant="outline"
                           size="sm"
                           disabled={processingId === row.id}
-                          onClick={() => reprocessOne(row.id)}
+                          onClick={() => void reprocessOne(row.id)}
                         >
-                          {processingId === row.id ? "…" : "Reprocess"}
+                          <Play className="mr-1 h-3 w-3" />
+                          Reprocess
                         </Button>
                       </td>
                     </tr>
@@ -253,59 +325,49 @@ export default function EmailIngestClient() {
       </Card>
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto bg-white text-slate-900 border border-gray-200 shadow-xl">
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Email ingest detail</DialogTitle>
+            <DialogTitle>Ingest email</DialogTitle>
           </DialogHeader>
           {detailLoading ? (
-            <p className="text-sm text-slate-500">Loading…</p>
+            <p className="text-sm text-gray-500">Loading…</p>
           ) : detail ? (
-            <div className="space-y-3 text-sm text-slate-800">
-              <p>
-                <strong>Subject:</strong> {detail.subject ?? "—"}
-              </p>
-              <p>
-                <strong>From / To:</strong> {detail.from_address} → {detail.to_address}
-              </p>
+            <div className="space-y-2 text-sm">
               <p>
                 <strong>Status:</strong> {detail.status}
-                {detail.error && (
-                  <span className="block mt-2 p-2 rounded border border-red-200 bg-red-50 text-red-800">
-                    {detail.error}
-                  </span>
-                )}
               </p>
               <p>
-                <strong>Raw RFC822:</strong>{" "}
-                {detail.raw_present ? "stored (reprocess uses DB copy)" : "missing"}
+                <strong>Subject:</strong> {detail.subject}
+              </p>
+              <p>
+                <strong>From:</strong> {detail.from_address}
+              </p>
+              <p>
+                <strong>To:</strong> {detail.to_address}
+              </p>
+              <p>
+                <strong>Error:</strong> {detail.error || '—'}
+              </p>
+              <p>
+                <strong>Raw stored:</strong> {detail.raw_present ? 'yes' : 'no'}
               </p>
               {(detail.ingest_email_parses ?? []).map((p, i) => (
-                <div key={i} className="border border-gray-200 rounded-md p-3 bg-gray-50">
+                <div key={i} className="rounded border p-2">
                   <p>
                     <strong>Parse status:</strong> {p.parse_status}
                   </p>
-                  {p.parse_error && (
-                    <p className="mt-2 p-2 rounded border border-red-200 bg-red-50 text-red-800">
-                      <strong>Parse error:</strong> {p.parse_error}
-                    </p>
-                  )}
                   <p>
-                    <strong>Ref guess:</strong> {p.booking_reference_guess ?? "—"}
+                    <strong>Parse error:</strong> {p.parse_error || '—'}
                   </p>
                   <p>
-                    <strong>Plate guess:</strong> {p.booking_plate_guess ?? "—"}
+                    <strong>Plate / ref guess:</strong>{' '}
+                    {p.booking_plate_guess || '—'} / {p.booking_reference_guess || '—'}
                   </p>
-                  {p.forwarded_text && (
-                    <pre className="mt-2 text-xs whitespace-pre-wrap max-h-40 overflow-auto rounded border border-gray-200 bg-white p-2 text-slate-800">
-                      {p.forwarded_text.slice(0, 2000)}
-                      {p.forwarded_text.length > 2000 ? "…" : ""}
-                    </pre>
-                  )}
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-sm text-slate-500">No detail</p>
+            <p className="text-sm text-gray-500">Not found</p>
           )}
         </DialogContent>
       </Dialog>

@@ -15,10 +15,11 @@ export default async function EmailIngestAdminPage() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <h1 className="text-2xl font-semibold mb-2">Email Ingest Failures</h1>
+      <h1 className="text-2xl font-semibold mb-2">Email Ingest</h1>
       <p className="text-sm text-gray-600 mb-6">
-        Failed inbound emails are always stored with raw RFC822. Reprocess from here without
-        resending from Cloudflare.
+        Inbound mail to <code>bookings@myparkingchannel.app</code> is stored and parsed into
+        bookings. Use Recent to confirm mail arrived; Failures for rows that need a reprocess
+        (raw RFC822 is kept — no need to resend from Cloudflare).
       </p>
       <EmailIngestClient />
     </div>

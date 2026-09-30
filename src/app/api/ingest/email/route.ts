@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { getServiceSupabase } from "@/lib/supabase/service";
+import { normalizeInboundToAddress } from "@/lib/ingest/normalizeInboundToAddress";
 import {
   processIngestEmail,
   type IngestAttachment,
@@ -23,18 +24,29 @@ export async function POST(req: Request) {
   try {
     const secret = req.headers.get("x-ingest-secret") || "";
     if (!process.env.INGEST_SECRET) {
+      console.error("[ingest-email] Missing INGEST_SECRET on server", { requestId });
       return Response.json(
         { ok: false, requestId, error: "Missing INGEST_SECRET on server" },
         { status: 500 }
       );
     }
     if (secret !== process.env.INGEST_SECRET) {
+      // Visible when Cloudflare Worker secret drifts from Vercel — previously silent
+      // from the operator's POV (no ingest_emails row, Worker only forwards).
+      console.error("[ingest-email] Unauthorized: x-ingest-secret mismatch", {
+        requestId,
+        hasHeader: Boolean(secret),
+        headerLen: secret.length,
+        ua: req.headers.get("user-agent"),
+        cfConnectingIp: req.headers.get("cf-connecting-ip"),
+      });
       return Response.json({ ok: false, requestId, error: "Unauthorized" }, { status: 401 });
     }
 
     const body = (await req.json()) as IngestPayload;
     const receivedAt = body.received_at ? new Date(body.received_at as string) : new Date();
     const raw = body.raw_rfc822_base64 || "";
+    const toAddress = normalizeInboundToAddress(body.to) ?? body.to ?? null;
 
     if (!raw || raw.length < 20) {
       return Response.json(
@@ -47,7 +59,7 @@ export async function POST(req: Request) {
 
     console.log("[ingest-email]", {
       requestId,
-      to: body.to,
+      to: toAddress,
       from: body.from,
       subject: body.subject,
       messageId: body.message_id,
@@ -63,7 +75,7 @@ export async function POST(req: Request) {
       .from("ingest_emails")
       .insert({
         received_at: receivedAt.toISOString(),
-        to_address: body.to || null,
+        to_address: toAddress,
         from_address: body.from || null,
         subject: body.subject || null,
         message_id: body.message_id || null,
@@ -128,7 +140,7 @@ export async function POST(req: Request) {
       pipelineResult = await processIngestEmail(supabase, {
         emailId,
         raw_rfc822_base64: raw,
-        to_address: body.to,
+        to_address: toAddress,
         from_address: body.from,
         subject: body.subject,
         message_id: body.message_id,
