@@ -30,11 +30,10 @@ interface TenantEmailSettingsClientProps {
   tenantId: string;
 }
 
-function initialNotifyText(settings: TenantEmailSettings | null): string {
+function initialNotifyPartition(settings: TenantEmailSettings | null) {
   const fromArray = normalizeEmailList(settings?.booking_notify_emails);
-  if (fromArray.length > 0) return fromArray.join('\n');
-  const legacy = normalizeEmailList(settings?.booking_notify_email);
-  return legacy.join('\n');
+  const raw = fromArray.length > 0 ? fromArray : normalizeEmailList(settings?.booking_notify_email);
+  return partitionBookingNotifyEmails(raw);
 }
 
 export default function TenantEmailSettingsClient({
@@ -42,10 +41,16 @@ export default function TenantEmailSettingsClient({
   tenantName,
   tenantId,
 }: TenantEmailSettingsClientProps) {
+  const initialPartition = useMemo(
+    () => initialNotifyPartition(initialSettings),
+    [initialSettings]
+  );
   const [settings, setSettings] = useState({
     from_name: initialSettings?.from_name || '',
     reply_to: initialSettings?.reply_to || '',
-    booking_notify_emails_text: initialNotifyText(initialSettings),
+    // Strip ingest addresses from the editable field immediately so Save cannot
+    // re-persist bookings@ after someone typed it by mistake.
+    booking_notify_emails_text: initialPartition.allowed.join('\n'),
     sender_domain_mode:
       initialSettings?.sender_domain_mode || ('platform' as 'platform' | 'tenant_domain'),
     tenant_from_email: initialSettings?.tenant_from_email || '',
@@ -56,6 +61,9 @@ export default function TenantEmailSettingsClient({
     kind: 'ok' | 'error';
     message: string;
   } | null>(null);
+  const [strippedIngestNotice, setStrippedIngestNotice] = useState(
+    initialPartition.blocked.length > 0 ? initialPartition.blocked : null
+  );
 
   const { allowed: parsedNotifyEmails, blocked: blockedIngestEmails } = useMemo(
     () => partitionBookingNotifyEmails(settings.booking_notify_emails_text),
@@ -193,6 +201,28 @@ export default function TenantEmailSettingsClient({
             <CardTitle>New booking notifications</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            {strippedIngestNotice && (
+              <div
+                role="status"
+                className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950"
+              >
+                <p className="font-medium">Ingest address removed from this list</p>
+                <p className="mt-1">
+                  {strippedIngestNotice.join(', ')} is the Cloudflare inbox for supplier booking
+                  emails (ParkVia, Holiday Extras, etc.). Mail Resend sends there is re-ingested
+                  and will not show as a booking in the app or reach your staff. Enter a real
+                  staff inbox below (for example info@yourparking.com), then Save and Send test
+                  email.
+                </p>
+                <button
+                  type="button"
+                  className="mt-2 text-xs underline"
+                  onClick={() => setStrippedIngestNotice(null)}
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="booking_notify_emails">Notification recipients</Label>
               <Textarea

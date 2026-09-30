@@ -5,6 +5,7 @@ import type { DomainCandidate } from "@/lib/seo/canonical";
 import { formatAddressLines } from "@/lib/seo/public-address";
 import {
   isValidEmail,
+  partitionBookingNotifyEmails,
   resolveTenantBookingNotifyEmails,
 } from "@/lib/email/tenantNotifyEmail";
 
@@ -86,6 +87,16 @@ async function resolveTenantNotifyContext(tenantId: string) {
 
   // Explicit list only — never reply_to / profile / branding / platform ops.
   // Also strips platform ingest addresses (bookings@ / canary-bookings@).
+  const notifyPartition = partitionBookingNotifyEmails(
+    settings?.booking_notify_emails?.length
+      ? settings.booking_notify_emails
+      : settings?.booking_notify_email
+  );
+  if (notifyPartition.blocked.length > 0) {
+    console.warn(
+      `[BOOKING EMAIL] Ignored platform ingest address(es) in booking_notify_emails for tenant ${tenantId}: ${notifyPartition.blocked.join(', ')}. Configure a staff inbox instead.`
+    );
+  }
   const notifyEmails = resolveTenantBookingNotifyEmails({
     bookingNotifyEmails: settings?.booking_notify_emails,
     bookingNotifyEmail: settings?.booking_notify_email,
