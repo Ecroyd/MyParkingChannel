@@ -3,6 +3,8 @@ import type { Metadata, Viewport } from 'next';
 import SwTools from '@/components/SwTools';
 import DevSwUnregister from '@/components/DevSwUnregister';
 import { Analytics } from "@vercel/analytics/next";
+import { Toaster } from '@/components/ui/toaster';
+import { Toaster as SonnerToaster } from 'sonner';
 
 export const metadata: Metadata = {
   title: 'Parking Channel',
@@ -34,6 +36,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {children}
         {isDev ? <DevSwUnregister /> : null}
         {process.env.NEXT_PUBLIC_DEBUG_SITE === '1' ? <SwTools /> : null}
+        <Toaster />
+        <SonnerToaster richColors position="top-right" />
         <Analytics />
       </body>
     </html>

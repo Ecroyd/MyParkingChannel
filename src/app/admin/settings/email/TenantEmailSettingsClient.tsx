@@ -49,6 +49,10 @@ export default function TenantEmailSettingsClient({
   });
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [testStatus, setTestStatus] = useState<{
+    kind: 'ok' | 'error';
+    message: string;
+  } | null>(null);
 
   const parsedNotifyEmails = useMemo(
     () => normalizeEmailList(settings.booking_notify_emails_text),
@@ -76,10 +80,10 @@ export default function TenantEmailSettingsClient({
         }),
       });
 
-      const result = await response.json();
+      const result = await response.json().catch(() => ({}));
 
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to save settings');
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || `Failed to save settings (${response.status})`);
       }
 
       toast({
@@ -99,15 +103,18 @@ export default function TenantEmailSettingsClient({
 
   const handleSendTest = async () => {
     if (parsedNotifyEmails.length === 0) {
+      const message = 'Enter at least one email under New booking notifications.';
+      setTestStatus({ kind: 'error', message });
       toast({
         title: 'Add an address first',
-        description: 'Enter at least one email under New booking notifications.',
+        description: message,
         variant: 'destructive',
       });
       return;
     }
 
     setTesting(true);
+    setTestStatus(null);
     try {
       const response = await fetch('/api/admin/settings/email/test-booking-notify', {
         method: 'POST',
@@ -117,18 +124,26 @@ export default function TenantEmailSettingsClient({
           booking_notify_emails: parsedNotifyEmails,
         }),
       });
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to send test email');
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        const detail =
+          result.error ||
+          (Array.isArray(result.failed) && result.failed[0]?.error) ||
+          `Failed to send test email (${response.status})`;
+        throw new Error(detail);
       }
+      const message = result.message || `Sent to ${parsedNotifyEmails.join(', ')}`;
+      setTestStatus({ kind: 'ok', message });
       toast({
         title: 'Test sent',
-        description: result.message || `Sent to ${parsedNotifyEmails.join(', ')}`,
+        description: message,
       });
     } catch (error: any) {
+      const message = error.message || 'Failed to send test email';
+      setTestStatus({ kind: 'error', message });
       toast({
         title: 'Test failed',
-        description: error.message || 'Failed to send test email',
+        description: message,
         variant: 'destructive',
       });
     } finally {
@@ -197,6 +212,19 @@ export default function TenantEmailSettingsClient({
                 </>
               )}
             </Button>
+
+            {testStatus && (
+              <div
+                role="status"
+                className={
+                  testStatus.kind === 'ok'
+                    ? 'rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900'
+                    : 'rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900'
+                }
+              >
+                {testStatus.message}
+              </div>
+            )}
           </CardContent>
         </Card>
 
