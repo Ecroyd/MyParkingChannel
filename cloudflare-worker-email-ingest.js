@@ -7,12 +7,17 @@
 //
 // Env: INGEST_URL, INGEST_SECRET, optional FALLBACK_FORWARD_TO, LOG_VERBOSE
 
-/** Chunked base64 — never spread a large Uint8Array into fromCharCode. */
+/** Safe base64 — never spread/apply a large Uint8Array (causes "Maximum call stack size exceeded"). */
 function bytesToBase64(bytes) {
-  const CHUNK = 0x8000;
+  const CHUNK = 8192;
   let binary = "";
   for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    const slice = bytes.subarray(i, Math.min(i + CHUNK, bytes.length));
+    let chunk = "";
+    for (let j = 0; j < slice.length; j++) {
+      chunk += String.fromCharCode(slice[j]);
+    }
+    binary += chunk;
   }
   return btoa(binary);
 }
