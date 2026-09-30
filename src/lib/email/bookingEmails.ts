@@ -85,6 +85,7 @@ async function resolveTenantNotifyContext(tenantId: string) {
     "Airport Parking";
 
   // Explicit list only — never reply_to / profile / branding / platform ops.
+  // Also strips platform ingest addresses (bookings@ / canary-bookings@).
   const notifyEmails = resolveTenantBookingNotifyEmails({
     bookingNotifyEmails: settings?.booking_notify_emails,
     bookingNotifyEmail: settings?.booking_notify_email,

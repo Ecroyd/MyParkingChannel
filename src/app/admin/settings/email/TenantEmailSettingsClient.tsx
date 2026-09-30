@@ -9,7 +9,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Save, Mail, Send } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
-import { normalizeEmailList } from '@/lib/email/tenantNotifyEmail';
+import {
+  normalizeEmailList,
+  partitionBookingNotifyEmails,
+} from '@/lib/email/tenantNotifyEmail';
 
 interface TenantEmailSettings {
   tenant_id: string;
@@ -54,13 +57,23 @@ export default function TenantEmailSettingsClient({
     message: string;
   } | null>(null);
 
-  const parsedNotifyEmails = useMemo(
-    () => normalizeEmailList(settings.booking_notify_emails_text),
+  const { allowed: parsedNotifyEmails, blocked: blockedIngestEmails } = useMemo(
+    () => partitionBookingNotifyEmails(settings.booking_notify_emails_text),
     [settings.booking_notify_emails_text]
   );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (blockedIngestEmails.length > 0) {
+      toast({
+        title: 'Invalid notification recipient',
+        description: `Do not use ${blockedIngestEmails.join(', ')}. That address is for Cloudflare inbound booking ingest, not staff alerts.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setSaving(true);
 
     try {
@@ -102,6 +115,17 @@ export default function TenantEmailSettingsClient({
   };
 
   const handleSendTest = async () => {
+    if (blockedIngestEmails.length > 0) {
+      const message = `Remove ${blockedIngestEmails.join(', ')} — that is the ingest inbox, not a notification recipient.`;
+      setTestStatus({ kind: 'error', message });
+      toast({
+        title: 'Invalid recipient',
+        description: message,
+        variant: 'destructive',
+      });
+      return;
+    }
+
     if (parsedNotifyEmails.length === 0) {
       const message = 'Enter at least one email under New booking notifications.';
       setTestStatus({ kind: 'error', message });
@@ -181,11 +205,22 @@ export default function TenantEmailSettingsClient({
                 rows={4}
               />
               <p className="text-xs text-gray-500">
-                One or more email addresses (comma or new line separated). Internal “New booking”
+                One or more staff inboxes (comma or new line separated). Internal “New booking”
                 alerts for manual and website bookings are sent directly via Resend to these
                 addresses. Leave empty to disable internal booking alerts (customer confirmations
-                are unchanged).
+                are unchanged). Do not use{' '}
+                <code className="text-[11px]">bookings@myparkingchannel.app</code> — that is the
+                Cloudflare ingest address for supplier booking emails, not a notification
+                mailbox. Mail sent there is re-ingested and will not appear as a booking or reach
+                your staff.
               </p>
+              {blockedIngestEmails.length > 0 && (
+                <p className="text-xs text-red-700">
+                  Remove ingest address
+                  {blockedIngestEmails.length === 1 ? '' : 'es'}:{' '}
+                  {blockedIngestEmails.join(', ')}. Use a real staff email instead.
+                </p>
+              )}
               {parsedNotifyEmails.length > 0 && (
                 <p className="text-xs text-gray-700">
                   {parsedNotifyEmails.length} recipient
@@ -198,7 +233,11 @@ export default function TenantEmailSettingsClient({
               type="button"
               variant="outline"
               onClick={handleSendTest}
-              disabled={testing || parsedNotifyEmails.length === 0}
+              disabled={
+                testing ||
+                parsedNotifyEmails.length === 0 ||
+                blockedIngestEmails.length > 0
+              }
             >
               {testing ? (
                 <>
