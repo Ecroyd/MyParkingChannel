@@ -167,6 +167,29 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
 
     if (error) {
       console.error('Failed to create booking:', error);
+      try {
+        const { recordConversionEventSafe } = await import(
+          '@/lib/website-performance/recordEvent'
+        );
+        const anon =
+          session.metadata?.funnel_anonymous_id?.trim() || `srv_${reference}`;
+        const sess =
+          session.metadata?.funnel_session_id?.trim() || `srv_sess_${reference}`;
+        recordConversionEventSafe({
+          tenantId,
+          eventName: 'booking_failed',
+          anonymousId: anon,
+          sessionId: sess,
+          dedupeKey: `booking_failed:insert:${tenantId}:${reference}:${paymentIntentId}`,
+          bookingValueCents: paymentIntent.amount,
+          bookingCurrency: (paymentIntent.currency || 'gbp').toUpperCase(),
+          bookingReference: reference,
+          serverTrusted: true,
+          meta: { reason: 'booking_insert_failed' },
+        });
+      } catch (analyticsErr) {
+        console.error('[STRIPE WEBHOOK] funnel analytics failed', analyticsErr);
+      }
     } else {
       console.log('Booking created successfully:', booking?.reference);
       
@@ -194,6 +217,31 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
         } catch (emailError) {
           console.error('[STRIPE WEBHOOK] Failed to queue booking emails:', emailError);
           // Don't fail the booking creation if email fails
+        }
+
+        // Authoritative conversion — only after server-side booking insert success
+        try {
+          const { recordConversionEventSafe } = await import(
+            '@/lib/website-performance/recordEvent'
+          );
+          const anon =
+            session.metadata?.funnel_anonymous_id?.trim() || `srv_${reference}`;
+          const sess =
+            session.metadata?.funnel_session_id?.trim() || `srv_sess_${reference}`;
+          recordConversionEventSafe({
+            tenantId,
+            eventName: 'booking_completed',
+            anonymousId: anon,
+            sessionId: sess,
+            dedupeKey: `booking_completed:${tenantId}:${paymentIntentId}`,
+            bookingValueCents: paymentIntent.amount,
+            bookingCurrency: (paymentIntent.currency || 'gbp').toUpperCase(),
+            bookingReference: booking.reference,
+            serverTrusted: true,
+            meta: { stripe_payment_intent_id: paymentIntentId },
+          });
+        } catch (analyticsErr) {
+          console.error('[STRIPE WEBHOOK] funnel analytics failed', analyticsErr);
         }
       }
     }
@@ -233,6 +281,26 @@ async function handlePaymentIntentFailed(paymentIntent: Stripe.PaymentIntent) {
 
     if (error) {
       console.error('Failed to update booking status for failed payment:', error);
+    }
+
+    try {
+      const { recordConversionEventSafe } = await import(
+        '@/lib/website-performance/recordEvent'
+      );
+      recordConversionEventSafe({
+        tenantId,
+        eventName: 'booking_failed',
+        anonymousId: `srv_${reference}`,
+        sessionId: `srv_sess_${reference}`,
+        dedupeKey: `booking_failed:pi:${tenantId}:${paymentIntent.id}`,
+        bookingValueCents: paymentIntent.amount,
+        bookingCurrency: (paymentIntent.currency || 'gbp').toUpperCase(),
+        bookingReference: reference,
+        serverTrusted: true,
+        meta: { reason: 'payment_intent_failed' },
+      });
+    } catch (analyticsErr) {
+      console.error('[STRIPE WEBHOOK] funnel analytics failed', analyticsErr);
     }
   } catch (error) {
     console.error('Error handling payment intent failed:', error);

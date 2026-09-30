@@ -1,16 +1,21 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { createBrowserClient } from "@supabase/ssr";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
 import { redirectToCheckout } from "@/lib/utils/redirect";
+import {
+  getAnonymousId,
+  getSessionId,
+  trackFunnelEvent,
+} from "@/lib/website-performance/clientTracker";
 
 interface BookingWidgetProps {
   tenantSlug: string;
   tenantId: string;
+  cookieConsentMode?: string | null;
 }
 
 interface PricingInfo {
@@ -18,9 +23,39 @@ interface PricingInfo {
   currency: string;
 }
 
-type BookingStep = "search" | "details";
+/** STEP 1 search → STEP 2 price → STEP 3 details → STEP 4 payment (Stripe redirect) */
+type BookingStep = "search" | "price" | "details" | "payment";
 
-export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: BookingWidgetProps) {
+function durationLabel(startDate: string, endDate: string): string {
+  if (!startDate || !endDate) return "";
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const ms = end.getTime() - start.getTime();
+  if (ms <= 0) return "";
+  const hours = ms / (1000 * 60 * 60);
+  const days = Math.max(1, Math.ceil(hours / 24));
+  return days === 1 ? "1 day" : `${days} days`;
+}
+
+function formatDisplayDate(value: string): string {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export default function BookingWidget({
+  tenantSlug,
+  tenantId,
+  cookieConsentMode,
+}: BookingWidgetProps) {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [customerName, setCustomerName] = useState("");
@@ -33,7 +68,6 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
   const [pricing, setPricing] = useState<PricingInfo | null>(null);
   const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
   const [step, setStep] = useState<BookingStep>("search");
-  const [hasQuoted, setHasQuoted] = useState(false);
 
   const [errors, setErrors] = useState<{
     startDate?: string;
@@ -43,12 +77,6 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
     vehicleReg?: string;
     general?: string;
   }>({});
-
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-  void supabase;
 
   const loadPricing = useCallback(async () => {
     try {
@@ -74,8 +102,7 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
   }, [loadPricing]);
 
   const resetQuoteIfNeeded = () => {
-    if (hasQuoted || calculatedPrice != null || step === "details") {
-      setHasQuoted(false);
+    if (calculatedPrice != null || step !== "search") {
       setCalculatedPrice(null);
       setStep("search");
       setErrors((prev) => ({ ...prev, general: undefined }));
@@ -131,6 +158,14 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
       return null;
     }
 
+    trackFunnelEvent("availability_search", {
+      tenantSlug,
+      cookieConsentMode,
+      allowRepeat: true,
+      dedupeKey: `${getSessionId()}:availability_search:${start.toISOString()}:${end.toISOString()}`,
+      meta: { step: "search" },
+    });
+
     setCalculatingPrice(true);
     try {
       const response = await fetch("/api/pricing/public-quote", {
@@ -146,15 +181,25 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
       if (response.ok) {
         const result = await response.json();
         if (result.success && result.data) {
-          setCalculatedPrice(result.data.amount);
+          const amount = result.data.amount as number;
+          setCalculatedPrice(amount);
           if (result.data.currency) {
             setPricing({
               dailyRate: pricing?.dailyRate || 7.0,
               currency: result.data.currency,
             });
           }
+          trackFunnelEvent("availability_result", {
+            tenantSlug,
+            cookieConsentMode,
+            allowRepeat: true,
+            dedupeKey: `${getSessionId()}:availability_result:${start.toISOString()}:${end.toISOString()}:${amount}`,
+            bookingValueCents: Math.round(amount * 100),
+            bookingCurrency: result.data.currency || "GBP",
+            meta: { available: true },
+          });
           setCalculatingPrice(false);
-          return result.data.amount as number;
+          return amount;
         }
       } else {
         const errorText = await response.text();
@@ -184,8 +229,23 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
     }
     const amount = await calculatePrice();
     if (amount && amount > 0) {
-      setHasQuoted(true);
+      setStep("price");
     }
+  };
+
+  const goToDetails = () => {
+    trackFunnelEvent("booking_started", {
+      tenantSlug,
+      cookieConsentMode,
+      bookingValueCents:
+        calculatedPrice != null ? Math.round(calculatedPrice * 100) : undefined,
+      bookingCurrency: pricing?.currency || "GBP",
+    });
+    trackFunnelEvent("customer_details_started", {
+      tenantSlug,
+      cookieConsentMode,
+    });
+    setStep("details");
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -237,6 +297,7 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
     }
 
     setLoading(true);
+    setStep("payment");
     try {
       const paymentResponse = await fetch("/api/payments/public-checkout", {
         method: "POST",
@@ -251,12 +312,15 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
           plate: vehicleReg.toUpperCase(),
           flight_number: flightNumber || null,
           application_fee_cents: Math.round(calculatedPrice * 0.1 * 100),
+          anonymous_id: getAnonymousId(),
+          session_id: getSessionId(),
         }),
       });
 
       const paymentResult = await paymentResponse.json();
 
       if (!paymentResponse.ok) {
+        setStep("details");
         let errorMessage = "Unable to process payment. Please try again.";
         const fieldErrors: typeof errors = {};
 
@@ -322,6 +386,7 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
       if (paymentResult.url) {
         redirectToCheckout(paymentResult.url);
       } else {
+        setStep("details");
         toast({
           title: "Payment Error",
           description: "No payment URL received. Please try again.",
@@ -330,6 +395,7 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
       }
     } catch (error) {
       console.error("Booking error:", error);
+      setStep("details");
       toast({
         title: "Error",
         description: "Something went wrong. Please try again.",
@@ -365,112 +431,127 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
   const fieldClass = (hasError?: string) =>
     `h-12 text-base ${hasError ? "border-red-500 focus-visible:ring-red-500" : ""}`;
 
-  const showPrice = hasQuoted && calculatedPrice && calculatedPrice > 0 && !calculatingPrice;
+  const duration = durationLabel(startDate, endDate);
+  const stepIndex =
+    step === "search" ? 1 : step === "price" ? 2 : step === "details" ? 3 : 4;
 
   return (
     <div className="w-full overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.12)]">
       <div className="border-b border-slate-100 px-6 py-5 sm:px-7">
-        <h2 className="text-xl font-semibold tracking-tight text-slate-900">
-          Check availability
+        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+          Step {stepIndex} of 4
+        </p>
+        <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-900">
+          {step === "search" && "Check price"}
+          {step === "price" && "Your price"}
+          {step === "details" && "Your details"}
+          {step === "payment" && "Payment"}
         </h2>
         <p className="mt-1.5 text-[15px] leading-snug text-slate-500">
-          Choose your arrival and return details to see the current price.
+          {step === "search" && "Choose arrival and return to see your parking price."}
+          {step === "price" && "Review the quote, then continue to book."}
+          {step === "details" && "Tell us how to reach you and your vehicle details."}
+          {step === "payment" && "Redirecting you to secure payment…"}
         </p>
       </div>
 
       <div className="px-6 py-6 sm:px-7 sm:py-7">
         <form onSubmit={handleSubmit} className="space-y-5" noValidate>
-          <fieldset className="space-y-4" disabled={step === "details"}>
-            <legend className="sr-only">Drop-off and pick-up</legend>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="arrivalDate" className="text-[15px] font-medium text-slate-800">
-                  Drop-off date
-                </Label>
-                <Input
-                  id="arrivalDate"
-                  type="date"
-                  value={startParts.date}
-                  onChange={(e) => {
-                    resetQuoteIfNeeded();
-                    setStartDate(join(e.target.value, startParts.time || "10:00"));
-                    clearError("startDate");
-                  }}
-                  min={minDateTime.slice(0, 10)}
-                  required
-                  className={fieldClass(errors.startDate)}
-                />
+          {(step === "search" || step === "price") && (
+            <fieldset className="space-y-4" disabled={step === "price"}>
+              <legend className="sr-only">Drop-off and pick-up</legend>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="arrivalDate" className="text-[15px] font-medium text-slate-800">
+                    Arrival date
+                  </Label>
+                  <Input
+                    id="arrivalDate"
+                    type="date"
+                    value={startParts.date}
+                    onChange={(e) => {
+                      resetQuoteIfNeeded();
+                      setStartDate(join(e.target.value, startParts.time || "10:00"));
+                      clearError("startDate");
+                    }}
+                    min={minDateTime.slice(0, 10)}
+                    required
+                    className={fieldClass(errors.startDate)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="arrivalTime" className="text-[15px] font-medium text-slate-800">
+                    Arrival time
+                  </Label>
+                  <Input
+                    id="arrivalTime"
+                    type="time"
+                    value={startParts.time}
+                    onChange={(e) => {
+                      resetQuoteIfNeeded();
+                      setStartDate(join(startParts.date, e.target.value));
+                      clearError("startDate");
+                    }}
+                    required
+                    className={fieldClass(errors.startDate)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="returnDate" className="text-[15px] font-medium text-slate-800">
+                    Return date
+                  </Label>
+                  <Input
+                    id="returnDate"
+                    type="date"
+                    value={endParts.date}
+                    onChange={(e) => {
+                      resetQuoteIfNeeded();
+                      setEndDate(join(e.target.value, endParts.time || "18:00"));
+                      clearError("endDate");
+                    }}
+                    min={startParts.date || minDateTime.slice(0, 10)}
+                    required
+                    className={fieldClass(errors.endDate)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="returnTime" className="text-[15px] font-medium text-slate-800">
+                    Return time
+                  </Label>
+                  <Input
+                    id="returnTime"
+                    type="time"
+                    value={endParts.time}
+                    onChange={(e) => {
+                      resetQuoteIfNeeded();
+                      setEndDate(join(endParts.date, e.target.value));
+                      clearError("endDate");
+                    }}
+                    required
+                    className={fieldClass(errors.endDate)}
+                  />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="arrivalTime" className="text-[15px] font-medium text-slate-800">
-                  Drop-off time
-                </Label>
-                <Input
-                  id="arrivalTime"
-                  type="time"
-                  value={startParts.time}
-                  onChange={(e) => {
-                    resetQuoteIfNeeded();
-                    setStartDate(join(startParts.date, e.target.value));
-                    clearError("startDate");
-                  }}
-                  required
-                  className={fieldClass(errors.startDate)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="returnDate" className="text-[15px] font-medium text-slate-800">
-                  Pick-up date
-                </Label>
-                <Input
-                  id="returnDate"
-                  type="date"
-                  value={endParts.date}
-                  onChange={(e) => {
-                    resetQuoteIfNeeded();
-                    setEndDate(join(e.target.value, endParts.time || "18:00"));
-                    clearError("endDate");
-                  }}
-                  min={startParts.date || minDateTime.slice(0, 10)}
-                  required
-                  className={fieldClass(errors.endDate)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="returnTime" className="text-[15px] font-medium text-slate-800">
-                  Pick-up time
-                </Label>
-                <Input
-                  id="returnTime"
-                  type="time"
-                  value={endParts.time}
-                  onChange={(e) => {
-                    resetQuoteIfNeeded();
-                    setEndDate(join(endParts.date, e.target.value));
-                    clearError("endDate");
-                  }}
-                  required
-                  className={fieldClass(errors.endDate)}
-                />
-              </div>
-            </div>
-            {(errors.startDate || errors.endDate) && (
-              <p className="text-sm text-red-600" role="alert">
-                {errors.startDate || errors.endDate}
-              </p>
-            )}
-          </fieldset>
+              {(errors.startDate || errors.endDate) && (
+                <p className="text-sm text-red-600" role="alert">
+                  {errors.startDate || errors.endDate}
+                </p>
+              )}
+            </fieldset>
+          )}
 
           {calculatingPrice ? (
             <div
               className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-[15px] text-slate-700"
               aria-live="polite"
             >
-              Checking availability…
+              Checking price…
             </div>
           ) : null}
 
-          {showPrice ? (
+          {(step === "price" || step === "details" || step === "payment") &&
+          calculatedPrice &&
+          calculatedPrice > 0 ? (
             <div
               className="rounded-xl border border-slate-200 px-5 py-5"
               style={{
@@ -481,10 +562,15 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
               }}
               aria-live="polite"
             >
-              <p className="text-[15px] font-medium text-slate-600">Your parking price</p>
+              <p className="text-[15px] font-medium text-slate-600">Parking price</p>
               <p className="mt-1 text-4xl font-semibold tracking-tight text-slate-900">
-                £{calculatedPrice!.toFixed(2)}
+                £{calculatedPrice.toFixed(2)}
               </p>
+              <div className="mt-3 space-y-1 text-sm text-slate-600">
+                {duration ? <p>Duration: {duration}</p> : null}
+                <p>Arrival: {formatDisplayDate(startDate)}</p>
+                <p>Return: {formatDisplayDate(endDate)}</p>
+              </div>
             </div>
           ) : null}
 
@@ -496,41 +582,52 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
 
           {step === "search" ? (
             <>
-              {!showPrice ? (
-                <Button
-                  type="button"
-                  className="h-12 w-full text-base font-semibold"
-                  style={{
-                    backgroundColor: "var(--tenant-action, #1e40af)",
-                    color: "var(--tenant-action-fg, #ffffff)",
-                  }}
-                  disabled={calculatingPrice || !startDate || !endDate}
-                  onClick={() => void handleCheckAvailability()}
-                >
-                  {calculatingPrice ? "Checking…" : "Check availability"}
-                </Button>
-              ) : (
-                <Button
-                  type="button"
-                  className="h-12 w-full text-base font-semibold"
-                  style={{
-                    backgroundColor: "var(--tenant-action, #1e40af)",
-                    color: "var(--tenant-action-fg, #ffffff)",
-                  }}
-                  onClick={() => setStep("details")}
-                >
-                  Continue to book
-                </Button>
-              )}
+              <Button
+                type="button"
+                className="h-12 w-full text-base font-semibold"
+                style={{
+                  backgroundColor: "var(--tenant-action, #1e40af)",
+                  color: "var(--tenant-action-fg, #ffffff)",
+                }}
+                disabled={calculatingPrice || !startDate || !endDate}
+                onClick={() => void handleCheckAvailability()}
+              >
+                {calculatingPrice ? "Checking…" : "Get my price"}
+              </Button>
               <p className="text-center text-sm text-slate-500">
-                No payment is taken until you confirm your details.
+                No contact details needed to see your price.
               </p>
             </>
           ) : null}
 
-          {step === "details" ? (
-            <fieldset className="space-y-4 border-t border-slate-100 pt-5">
-              <legend className="text-base font-semibold text-slate-900">Your details</legend>
+          {step === "price" ? (
+            <>
+              <Button
+                type="button"
+                className="h-12 w-full text-base font-semibold"
+                style={{
+                  backgroundColor: "var(--tenant-action, #1e40af)",
+                  color: "var(--tenant-action-fg, #ffffff)",
+                }}
+                onClick={goToDetails}
+              >
+                Continue to booking
+              </Button>
+              <button
+                type="button"
+                className="w-full text-center text-sm font-medium text-slate-600 hover:text-slate-900"
+                onClick={() => {
+                  setStep("search");
+                }}
+              >
+                Change dates
+              </button>
+            </>
+          ) : null}
+
+          {step === "details" || step === "payment" ? (
+            <fieldset className="space-y-4 border-t border-slate-100 pt-5" disabled={step === "payment"}>
+              <legend className="text-base font-semibold text-slate-900">Customer details</legend>
 
               <div className="space-y-2">
                 <Label htmlFor="customerName" className="text-[15px]">
@@ -623,22 +720,23 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
 
               <Button
                 type="submit"
-                disabled={loading || !calculatedPrice}
+                disabled={loading || !calculatedPrice || step === "payment"}
                 className="h-12 w-full text-base font-semibold"
                 style={{
                   backgroundColor: "var(--tenant-action, #1e40af)",
                   color: "var(--tenant-action-fg, #ffffff)",
                 }}
               >
-                {loading ? "Creating booking…" : "Book now"}
+                {loading || step === "payment" ? "Going to payment…" : "Continue to payment"}
               </Button>
 
               <button
                 type="button"
                 className="w-full text-center text-sm font-medium text-slate-600 hover:text-slate-900"
-                onClick={() => setStep("search")}
+                onClick={() => setStep("price")}
+                disabled={step === "payment"}
               >
-                Change dates
+                Back to price
               </button>
             </fieldset>
           ) : null}
