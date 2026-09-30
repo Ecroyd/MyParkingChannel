@@ -9,7 +9,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Save, Mail, Send } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
-import { normalizeEmailList } from '@/lib/email/tenantNotifyEmail';
+import {
+  normalizeEmailList,
+  partitionBookingNotifyEmails,
+} from '@/lib/email/tenantNotifyEmail';
 
 interface TenantEmailSettings {
   tenant_id: string;
@@ -27,11 +30,10 @@ interface TenantEmailSettingsClientProps {
   tenantId: string;
 }
 
-function initialNotifyText(settings: TenantEmailSettings | null): string {
+function initialNotifyPartition(settings: TenantEmailSettings | null) {
   const fromArray = normalizeEmailList(settings?.booking_notify_emails);
-  if (fromArray.length > 0) return fromArray.join('\n');
-  const legacy = normalizeEmailList(settings?.booking_notify_email);
-  return legacy.join('\n');
+  const raw = fromArray.length > 0 ? fromArray : normalizeEmailList(settings?.booking_notify_email);
+  return partitionBookingNotifyEmails(raw);
 }
 
 export default function TenantEmailSettingsClient({
@@ -39,10 +41,16 @@ export default function TenantEmailSettingsClient({
   tenantName,
   tenantId,
 }: TenantEmailSettingsClientProps) {
+  const initialPartition = useMemo(
+    () => initialNotifyPartition(initialSettings),
+    [initialSettings]
+  );
   const [settings, setSettings] = useState({
     from_name: initialSettings?.from_name || '',
     reply_to: initialSettings?.reply_to || '',
-    booking_notify_emails_text: initialNotifyText(initialSettings),
+    // Strip ingest addresses from the editable field immediately so Save cannot
+    // re-persist bookings@ after someone typed it by mistake.
+    booking_notify_emails_text: initialPartition.allowed.join('\n'),
     sender_domain_mode:
       initialSettings?.sender_domain_mode || ('platform' as 'platform' | 'tenant_domain'),
     tenant_from_email: initialSettings?.tenant_from_email || '',
@@ -53,14 +61,27 @@ export default function TenantEmailSettingsClient({
     kind: 'ok' | 'error';
     message: string;
   } | null>(null);
+  const [strippedIngestNotice, setStrippedIngestNotice] = useState(
+    initialPartition.blocked.length > 0 ? initialPartition.blocked : null
+  );
 
-  const parsedNotifyEmails = useMemo(
-    () => normalizeEmailList(settings.booking_notify_emails_text),
+  const { allowed: parsedNotifyEmails, blocked: blockedIngestEmails } = useMemo(
+    () => partitionBookingNotifyEmails(settings.booking_notify_emails_text),
     [settings.booking_notify_emails_text]
   );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (blockedIngestEmails.length > 0) {
+      toast({
+        title: 'Invalid notification recipient',
+        description: `Do not use ${blockedIngestEmails.join(', ')}. That address is for Cloudflare inbound booking ingest, not staff alerts.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setSaving(true);
 
     try {
@@ -102,6 +123,17 @@ export default function TenantEmailSettingsClient({
   };
 
   const handleSendTest = async () => {
+    if (blockedIngestEmails.length > 0) {
+      const message = `Remove ${blockedIngestEmails.join(', ')} — that is the ingest inbox, not a notification recipient.`;
+      setTestStatus({ kind: 'error', message });
+      toast({
+        title: 'Invalid recipient',
+        description: message,
+        variant: 'destructive',
+      });
+      return;
+    }
+
     if (parsedNotifyEmails.length === 0) {
       const message = 'Enter at least one email under New booking notifications.';
       setTestStatus({ kind: 'error', message });
@@ -169,6 +201,28 @@ export default function TenantEmailSettingsClient({
             <CardTitle>New booking notifications</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            {strippedIngestNotice && (
+              <div
+                role="status"
+                className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950"
+              >
+                <p className="font-medium">Ingest address removed from this list</p>
+                <p className="mt-1">
+                  {strippedIngestNotice.join(', ')} is the Cloudflare inbox for supplier booking
+                  emails (ParkVia, Holiday Extras, etc.). Mail Resend sends there is re-ingested
+                  and will not show as a booking in the app or reach your staff. Enter a real
+                  staff inbox below (for example info@yourparking.com), then Save and Send test
+                  email.
+                </p>
+                <button
+                  type="button"
+                  className="mt-2 text-xs underline"
+                  onClick={() => setStrippedIngestNotice(null)}
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="booking_notify_emails">Notification recipients</Label>
               <Textarea
@@ -181,11 +235,22 @@ export default function TenantEmailSettingsClient({
                 rows={4}
               />
               <p className="text-xs text-gray-500">
-                One or more email addresses (comma or new line separated). Internal “New booking”
+                One or more staff inboxes (comma or new line separated). Internal “New booking”
                 alerts for manual and website bookings are sent directly via Resend to these
                 addresses. Leave empty to disable internal booking alerts (customer confirmations
-                are unchanged).
+                are unchanged). Do not use{' '}
+                <code className="text-[11px]">bookings@myparkingchannel.app</code> — that is the
+                Cloudflare ingest address for supplier booking emails, not a notification
+                mailbox. Mail sent there is re-ingested and will not appear as a booking or reach
+                your staff.
               </p>
+              {blockedIngestEmails.length > 0 && (
+                <p className="text-xs text-red-700">
+                  Remove ingest address
+                  {blockedIngestEmails.length === 1 ? '' : 'es'}:{' '}
+                  {blockedIngestEmails.join(', ')}. Use a real staff email instead.
+                </p>
+              )}
               {parsedNotifyEmails.length > 0 && (
                 <p className="text-xs text-gray-700">
                   {parsedNotifyEmails.length} recipient
@@ -198,7 +263,11 @@ export default function TenantEmailSettingsClient({
               type="button"
               variant="outline"
               onClick={handleSendTest}
-              disabled={testing || parsedNotifyEmails.length === 0}
+              disabled={
+                testing ||
+                parsedNotifyEmails.length === 0 ||
+                blockedIngestEmails.length > 0
+              }
             >
               {testing ? (
                 <>
