@@ -1,11 +1,21 @@
-// Cloudflare Worker: Extract attachments from emails using postal-mime
-// 
-// Setup:
-// 1. Install postal-mime: npm install postal-mime
-// 2. Add to wrangler.toml or deploy via Dashboard
-// 3. Set environment variables: INGEST_URL, INGEST_SECRET, FALLBACK_FORWARD_TO
+// Cloudflare Email Worker → POST /api/ingest/email
+//
+// CRITICAL: Persist raw RFC822 to the app FIRST.
+// Do not call postal-mime / encode attachments before the ingest POST —
+// CDN import hangs and String.fromCharCode(...largeBuffer) stack overflows
+// both drop mail with no row in ingest_emails (looks like "email never arrived").
+//
+// Env: INGEST_URL, INGEST_SECRET, optional FALLBACK_FORWARD_TO, LOG_VERBOSE
 
-import PostalMime from 'postal-mime';
+/** Chunked base64 — never spread a large Uint8Array into fromCharCode. */
+function bytesToBase64(bytes) {
+  const CHUNK = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
 
 export default {
   async fetch() {
@@ -15,63 +25,51 @@ export default {
   async email(message, env, ctx) {
     const safeForward = async () => {
       if (!env.FALLBACK_FORWARD_TO) return;
-      try { 
-        await message.forward(env.FALLBACK_FORWARD_TO); 
+      try {
+        await message.forward(env.FALLBACK_FORWARD_TO);
       } catch (err) {
-        console.log("Forward failed:", err);
+        console.log("Forward failed:", err?.message || String(err));
       }
     };
 
+    let arrayBuffer;
     try {
       const subject = message.headers.get("subject") || "";
       const messageId = message.headers.get("message-id") || "";
-      const now = new Date().toUTCString();
+      arrayBuffer = await new Response(message.raw).arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
 
-      // Step 1: Read the full raw email
-      const rawStream = message.raw;
-      const arrayBuffer = await new Response(rawStream).arrayBuffer();
-      
-      // Step 2: Parse the email with postal-mime
-      const parsed = await PostalMime.parse(arrayBuffer);
+      console.log("EMAIL_RECEIVED", {
+        from: message.from,
+        to: message.to,
+        subject,
+        rawSize: bytes.byteLength,
+      });
 
-      // Step 3: Extract attachments
-      const attachments = [];
-      if (parsed.attachments && parsed.attachments.length > 0) {
-        for (const att of parsed.attachments) {
-          try {
-            // Convert attachment content to base64
-            const contentBase64 = btoa(
-              String.fromCharCode(...new Uint8Array(att.content))
-            );
-            
-            attachments.push({
-              filename: att.filename || "unnamed",
-              content_type: att.contentType || "application/octet-stream",
-              size: att.content.length,
-              data_base64: contentBase64,
-            });
-          } catch (err) {
-            console.log("Failed to process attachment:", att.filename, err);
-          }
-        }
+      if (!env.INGEST_URL || !env.INGEST_SECRET) {
+        console.log("EMAIL_EVENT_ERROR", {
+          message: "Missing INGEST_URL or INGEST_SECRET on worker",
+        });
+        await safeForward();
+        return;
       }
 
-      // Step 4: Create RFC822 representation (full email as base64)
-      const rawEmailBase64 = btoa(
-        String.fromCharCode(...new Uint8Array(arrayBuffer))
-      );
-
+      // 1) Always POST raw email first (server parses MIME + attachments)
+      const rawEmailBase64 = bytesToBase64(bytes);
       const payload = {
         to: message.to,
         from: message.from,
-        subject: subject || parsed.subject || "",
+        subject,
         message_id: messageId,
         received_at: new Date().toISOString(),
         raw_rfc822_base64: rawEmailBase64,
-        attachments: attachments.length > 0 ? attachments : undefined,
       };
 
-      // Step 5: Send to your API
+      console.log("SENDING_PAYLOAD", {
+        rawEmailSize: rawEmailBase64.length,
+        to: message.to,
+      });
+
       const res = await fetch(env.INGEST_URL, {
         method: "POST",
         headers: {
@@ -82,11 +80,10 @@ export default {
       });
 
       const bodyText = await res.text().catch(() => "");
-
       console.log("INGEST_RESULT", {
         status: res.status,
-        attachments: attachments.length,
-        emailSize: arrayBuffer.byteLength,
+        emailSize: bytes.byteLength,
+        bodyPreview: bodyText.slice(0, 300),
       });
 
       if (env.LOG_VERBOSE === "true") {
@@ -94,11 +91,15 @@ export default {
       }
 
       if (!res.ok) {
-        console.log("API call failed, forwarding email");
+        console.log("API call failed, forwarding email", { status: res.status });
         await safeForward();
       }
     } catch (err) {
-      console.log("EMAIL_EVENT_ERROR", err?.message || String(err));
+      console.log("EMAIL_EVENT_ERROR", {
+        message: err?.message || String(err),
+        stack: err?.stack,
+        rawSize: arrayBuffer?.byteLength ?? null,
+      });
       await safeForward();
     }
   },

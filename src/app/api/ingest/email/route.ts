@@ -24,12 +24,22 @@ export async function POST(req: Request) {
   try {
     const secret = req.headers.get("x-ingest-secret") || "";
     if (!process.env.INGEST_SECRET) {
+      console.error("[ingest-email] Missing INGEST_SECRET on server", { requestId });
       return Response.json(
         { ok: false, requestId, error: "Missing INGEST_SECRET on server" },
         { status: 500 }
       );
     }
     if (secret !== process.env.INGEST_SECRET) {
+      // Visible when Cloudflare Worker secret drifts from Vercel — previously silent
+      // from the operator's POV (no ingest_emails row, Worker only forwards).
+      console.error("[ingest-email] Unauthorized: x-ingest-secret mismatch", {
+        requestId,
+        hasHeader: Boolean(secret),
+        headerLen: secret.length,
+        ua: req.headers.get("user-agent"),
+        cfConnectingIp: req.headers.get("cf-connecting-ip"),
+      });
       return Response.json({ ok: false, requestId, error: "Unauthorized" }, { status: 401 });
     }
 
