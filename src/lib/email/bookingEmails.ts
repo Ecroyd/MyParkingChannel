@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/server-admin";
-import { queueEmail } from "@/lib/email/emailService";
+import { queueEmail, sendOutboxEmailsByIds } from "@/lib/email/emailService";
 import { resolvePrimaryCanonicalHost, buildAbsoluteUrl } from "@/lib/seo/canonical";
 import type { DomainCandidate } from "@/lib/seo/canonical";
 import { formatAddressLines } from "@/lib/seo/public-address";
@@ -225,6 +225,7 @@ export async function queueBookingConfirmationEmails(
         }
       } else {
         let anyOk = false;
+        const outboxIds: string[] = [];
         for (const to of tenantRecipients) {
           const tenantDedupe = input.forceResend
             ? `booking:${input.bookingId}:tenant-notify:${to}:resend:${Date.now()}`
@@ -238,13 +239,26 @@ export async function queueBookingConfirmationEmails(
             payload: sharedPayload,
             dedupeKey: tenantDedupe,
           });
-          if (tenantResult.success) {
+          if (tenantResult.success && tenantResult.id) {
+            outboxIds.push(tenantResult.id);
+          } else if (tenantResult.success) {
             anyOk = true;
           } else {
             console.error(
               "[BOOKING EMAIL] Tenant queue failed:",
               to,
               tenantResult.error
+            );
+          }
+        }
+        // Send immediately so New booking alerts don't depend on email-sender cron.
+        if (outboxIds.length > 0) {
+          const flush = await sendOutboxEmailsByIds(outboxIds);
+          anyOk = flush.sent > 0 || anyOk;
+          if (flush.failed > 0) {
+            console.error(
+              "[BOOKING EMAIL] Tenant notify send failures:",
+              flush.errors
             );
           }
         }
@@ -265,13 +279,20 @@ export async function queueBookingConfirmationEmails(
 }
 
 /**
- * Queue a sample "New booking" notification to configured recipients (or an override list).
+ * Queue + immediately send a sample "New booking" notification.
  * Used by Admin → Email & Notifications "Send test email".
+ * Does not wait for the email-sender cron (which may not be scheduled on Vercel).
  */
 export async function queueTenantBookingNotifyTest(opts: {
   tenantId: string;
   recipients?: string[];
-}): Promise<{ queued: string[]; skipped: boolean; error?: string }> {
+}): Promise<{
+  queued: string[];
+  sent: string[];
+  failed: Array<{ to: string; error: string }>;
+  skipped: boolean;
+  error?: string;
+}> {
   try {
     const ctx = await resolveTenantNotifyContext(opts.tenantId);
     const recipients =
@@ -282,6 +303,8 @@ export async function queueTenantBookingNotifyTest(opts: {
     if (recipients.length === 0) {
       return {
         queued: [],
+        sent: [],
+        failed: [],
         skipped: true,
         error:
           "No booking notification emails configured. Add at least one address and save first.",
@@ -313,6 +336,9 @@ export async function queueTenantBookingNotifyTest(opts: {
     };
 
     const queued: string[] = [];
+    const outboxIds: string[] = [];
+    const queueFailures: Array<{ to: string; error: string }> = [];
+
     for (const to of recipients) {
       const result = await queueEmail({
         tenantId: opts.tenantId,
@@ -323,25 +349,66 @@ export async function queueTenantBookingNotifyTest(opts: {
         payload,
         dedupeKey: `booking:test-notify:${opts.tenantId}:${to}:${Date.now()}`,
       });
-      if (result.success) {
+      if (result.success && result.id) {
+        queued.push(to);
+        outboxIds.push(result.id);
+      } else if (result.success) {
+        // Dedupe hit without id — still count as queued but cannot flush by id
         queued.push(to);
       } else {
-        console.error("[BOOKING EMAIL] Test notify failed:", to, result.error);
+        queueFailures.push({
+          to,
+          error: result.error || "Failed to queue",
+        });
       }
     }
 
-    if (queued.length === 0) {
+    if (outboxIds.length === 0) {
       return {
-        queued: [],
+        queued,
+        sent: [],
+        failed: queueFailures,
         skipped: false,
-        error: "Failed to queue test notification",
+        error:
+          queueFailures[0]?.error ||
+          "Failed to queue test notification (check email provider settings)",
       };
     }
 
-    return { queued, skipped: false };
+    const flush = await sendOutboxEmailsByIds(outboxIds);
+    const sent: string[] = [];
+    const failed = [...queueFailures];
+
+    for (const r of flush.results) {
+      if (r.ok && r.to) {
+        sent.push(r.to);
+      } else if (!r.ok) {
+        failed.push({
+          to: r.to || "unknown",
+          error: r.error || "Send failed",
+        });
+      }
+    }
+
+    if (sent.length === 0) {
+      return {
+        queued,
+        sent,
+        failed,
+        skipped: false,
+        error:
+          failed[0]?.error ||
+          flush.errors[0] ||
+          "Resend did not accept the test email",
+      };
+    }
+
+    return { queued, sent, failed, skipped: false };
   } catch (err) {
     return {
       queued: [],
+      sent: [],
+      failed: [],
       skipped: false,
       error: err instanceof Error ? err.message : "Failed to send test email",
     };

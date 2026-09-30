@@ -122,7 +122,7 @@ export default function TenantEmailSettingsClient({
         throw new Error(result.error || 'Failed to send test email');
       }
       toast({
-        title: 'Test queued',
+        title: 'Test sent',
         description: result.message || `Sent to ${parsedNotifyEmails.join(', ')}`,
       });
     } catch (error: any) {

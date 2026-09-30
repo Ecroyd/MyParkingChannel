@@ -169,6 +169,116 @@ export async function queueEmail(params: QueueEmailParams): Promise<{ success: b
 }
 
 /**
+ * Send specific outbox rows immediately (by id). Used for test sends and
+ * canary-style flush without waiting for the email-sender cron.
+ */
+export async function sendOutboxEmailsByIds(
+  ids: string[]
+): Promise<{ sent: number; failed: number; errors: string[]; results: Array<{ id: string; to?: string; ok: boolean; error?: string }> }> {
+  const supabase = createAdminClient();
+  const errors: string[] = [];
+  const results: Array<{ id: string; to?: string; ok: boolean; error?: string }> = [];
+  let sent = 0;
+  let failed = 0;
+
+  const uniqueIds = [...new Set(ids.filter(Boolean))];
+  if (uniqueIds.length === 0) {
+    return { sent: 0, failed: 0, errors: [], results: [] };
+  }
+
+  const { data: emails, error: fetchError } = await supabase
+    .from('email_outbox')
+    .select('*')
+    .in('id', uniqueIds);
+
+  if (fetchError) {
+    return {
+      sent: 0,
+      failed: uniqueIds.length,
+      errors: [fetchError.message],
+      results: uniqueIds.map((id) => ({ id, ok: false, error: fetchError.message })),
+    };
+  }
+
+  for (const email of emails ?? []) {
+    try {
+      if (email.status === 'sent') {
+        results.push({ id: email.id, to: email.to_email, ok: true });
+        sent++;
+        continue;
+      }
+
+      await supabase
+        .from('email_outbox')
+        .update({ status: 'sending', updated_at: new Date().toISOString() })
+        .eq('id', email.id);
+
+      const settings = await getEmailSettings(email.tenant_id);
+      if (!settings) {
+        throw new Error('Email service not configured');
+      }
+
+      const html = renderTemplate(email.template_key, email.payload);
+      const resend = new Resend(settings.apiKey);
+      const result = await resend.emails.send({
+        from: `${email.from_name} <${email.from_email}>`,
+        to: email.to_email,
+        subject: email.subject,
+        html,
+        replyTo: email.reply_to || undefined,
+      });
+
+      if (result.error) {
+        throw new Error(result.error.message || 'Resend API error');
+      }
+
+      await supabase
+        .from('email_outbox')
+        .update({
+          status: 'sent',
+          provider_message_id: result.data?.id || null,
+          attempts: (email.attempts ?? 0) + 1,
+          last_error: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', email.id);
+
+      results.push({ id: email.id, to: email.to_email, ok: true });
+      sent++;
+    } catch (error: any) {
+      const message = error?.message || 'Unknown error';
+      console.error(`[EMAIL SERVICE] Failed to send email ${email.id}:`, error);
+      const backoffMinutes = Math.min(Math.pow(2, email.attempts ?? 0), 24 * 60);
+      await supabase
+        .from('email_outbox')
+        .update({
+          status: 'failed',
+          attempts: (email.attempts ?? 0) + 1,
+          next_attempt_at: new Date(Date.now() + backoffMinutes * 60 * 1000).toISOString(),
+          last_error: message,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', email.id);
+      results.push({ id: email.id, to: email.to_email, ok: false, error: message });
+      failed++;
+      errors.push(`Email ${email.id}: ${message}`);
+    }
+  }
+
+  // Any requested ids that were not found
+  const found = new Set((emails ?? []).map((e) => e.id));
+  for (const id of uniqueIds) {
+    if (!found.has(id)) {
+      results.push({ id, ok: false, error: 'Outbox row not found' });
+      failed++;
+      errors.push(`Email ${id}: Outbox row not found`);
+    }
+  }
+
+  return { sent, failed, errors, results };
+}
+
+/**
  * Send due emails from the queue
  */
 export async function sendDueEmails(limit: number = 20): Promise<{ sent: number; failed: number; errors: string[] }> {

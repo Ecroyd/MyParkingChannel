@@ -5,8 +5,7 @@ import { normalizeEmailList } from '@/lib/email/tenantNotifyEmail';
 import { queueTenantBookingNotifyTest } from '@/lib/email/bookingEmails';
 
 /**
- * Queue a sample "New booking" notification to the tenant's configured recipients
- * (or an optional override list from the unsaved form).
+ * Queue + immediately send a sample "New booking" notification via Resend.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -39,17 +38,30 @@ export async function POST(req: NextRequest) {
       recipients: override.length > 0 ? override : undefined,
     });
 
-    if (result.error && result.queued.length === 0) {
+    if (result.sent.length === 0) {
       return NextResponse.json(
-        { success: false, error: result.error, skipped: result.skipped },
-        { status: result.skipped ? 400 : 500 }
+        {
+          success: false,
+          error: result.error || 'Test email was not delivered',
+          skipped: result.skipped,
+          queued: result.queued,
+          failed: result.failed,
+        },
+        { status: result.skipped ? 400 : 502 }
       );
     }
 
+    const failNote =
+      result.failed.length > 0
+        ? ` (${result.failed.length} failed: ${result.failed.map((f) => f.to).join(', ')})`
+        : '';
+
     return NextResponse.json({
       success: true,
+      sent: result.sent,
       queued: result.queued,
-      message: `Test notification queued to ${result.queued.join(', ')}`,
+      failed: result.failed,
+      message: `Test notification sent to ${result.sent.join(', ')}${failNote}`,
     });
   } catch (error: any) {
     console.error('[BOOKING NOTIFY TEST]', error);
