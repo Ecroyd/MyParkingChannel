@@ -461,4 +461,49 @@ Total Cost: £137.99
     expect(payload.return_flight_number).toBe("TOM6129");
     expect(payload).not.toHaveProperty("supplier_status");
   });
+
+  it("accepts numeric-only labelled vehicle registration (ref 41294 / 72960)", () => {
+    // Real client failure: plate was present as "Vehicle registration: 72960" but
+    // normalizeUkPlate rejected it (not a strict UK VRM), so ingest failed missing vehicle_reg.
+    const subject = "FW: Flyparks Payment Successful";
+    const body = `
+From: Flyparks Exeter Ltd Website
+Sent: 25 September 2026 18:57
+To: smhpahestates@gmail.com
+Subject: Flyparks Payment Successful
+
+Booking Confirmation - BOOKING RECEIPT
+Thank you for your booking with Flyparks
+Your transaction has been completed. This email is your booking receipt and confirmation of your booking.
+Your details: pete hendy smhpahestates@gmail.com 07850255287
+Departure date: 26/09/2026
+Arrival time: 12:00
+Return date: 04/10/2026
+Return time: 21:00
+Return flight number: GR730
+Vehicle model: honda jazz
+Vehicle colour: blue
+Vehicle registration: 72960
+Reference: 41294
+Days: 9
+Parking Cost: £143.00
+Product: PARKING WITH LATE RETURN COVER FOR UP TO 48 HOURS
+Product Base Cost: £1.99
+Total Cost: £144.99
+If any of these details are incorrect or change, please email info@flyparksexeter.co.uk
+`;
+
+    expect(looksLikeFlyparksDirectEmail(subject, body)).toBe(true);
+    const staging = flyparksTextToStaging(body);
+    expect(staging.reference).toBe("41294");
+    expect(staging.vehicle_reg).toBe("72960");
+    expect(staging.customer_name).toBe("pete hendy");
+    expect(staging.customer_email).toBe("smhpahestates@gmail.com");
+    expect(staging.customer_phone).toBe("07850255287");
+    expect(staging.start_at).toBe("2026-09-26T12:00:00");
+    expect(staging.end_at).toBe("2026-10-04T21:00:00");
+    expect(staging.total_price).toBe(144.99);
+    expect(getFlyparksRequiredMissing(staging)).toEqual([]);
+    expect(guessFlyparksFields(body).plate).toBe("72960");
+  });
 });

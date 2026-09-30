@@ -4,7 +4,7 @@ import {
   normalizePhoneDigits,
   resolveCustomerContactDetails,
 } from '@/lib/ingest/customerContactDetails';
-import { normalizeUkPlate } from '@/lib/ingest/plateGuess';
+import { normalizeLabeledPlate, normalizeUkPlate } from '@/lib/ingest/plateGuess';
 export type FlyparksStaging = {
   reference: string | null;
   customer_name: string | null;
@@ -396,7 +396,7 @@ export function flyparksTextToStaging(rawText: string): FlyparksStaging {
   const vehicleModel = splitModel.model ?? vehicleModelRaw ?? vehicleDetails.model;
   const vehicleColour = pickLabel(text, ["Vehicle colour", "Vehicle Colour"]) ?? vehicleDetails.colour;
   const vehicleRegistration =
-    normalizeUkPlate(pickLabel(text, ["Vehicle registration", "Vehicle Registration"])) ??
+    normalizeLabeledPlate(pickLabel(text, ["Vehicle registration", "Vehicle Registration"])) ??
     vehicleDetails.registration;
   
   // Prefer Total Cost, fall back to Car Parking

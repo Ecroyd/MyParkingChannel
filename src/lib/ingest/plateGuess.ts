@@ -37,6 +37,25 @@ export function normalizeUkPlate(value: string | null | undefined): string | nul
   return isPlausibleUkVrm(norm) ? norm : null;
 }
 
+/**
+ * Normalise a plate taken from an explicit "Vehicle registration" (or similar) label.
+ * Prefers standard UK VRMs, but still accepts customer-entered values that are not
+ * strict UK format (numeric-only / incomplete / foreign) so bookings are not dropped.
+ */
+export function normalizeLabeledPlate(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const strict = normalizeUkPlate(value);
+  if (strict) return strict;
+
+  // First whitespace-delimited token after the label (ignore trailing junk)
+  const token = String(value).trim().split(/\s+/)[0] ?? "";
+  const norm = token.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (norm.length < 3 || norm.length > 8) return null;
+  if (PLATE_BLOCKLIST.has(norm)) return null;
+  if (!/^[A-Z0-9]+$/.test(norm)) return null;
+  return norm;
+}
+
 const LABEL_PATTERNS: RegExp[] = [
   /Vehicle\s+Details:\s*[^\n]*/i,
   /Vehicle\s+Registration:\s*([^\n]+)/i,
@@ -57,13 +76,13 @@ export function guessPlateFromEmailText(text: string): string | null {
       const line = m[0].replace(/^Vehicle\s+Details:\s*/i, "").trim();
       const tokens = line.split(/\s+/).filter(Boolean);
       for (let i = tokens.length - 1; i >= 0; i--) {
-        const plate = normalizeUkPlate(tokens[i]);
+        const plate = normalizeUkPlate(tokens[i]) ?? normalizeLabeledPlate(tokens[i]);
         if (plate) return plate;
       }
       continue;
     }
 
-    const plate = normalizeUkPlate(m[1]);
+    const plate = normalizeLabeledPlate(m[1]);
     if (plate) return plate;
   }
 

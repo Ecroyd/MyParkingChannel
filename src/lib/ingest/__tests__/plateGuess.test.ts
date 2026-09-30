@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { guessFlyparksFields } from "@/lib/email/flyparksForward";
-import { guessPlateFromEmailText } from "@/lib/ingest/plateGuess";
+import {
+  guessPlateFromEmailText,
+  normalizeLabeledPlate,
+  normalizeUkPlate,
+} from "@/lib/ingest/plateGuess";
 
 describe("guessPlateFromEmailText", () => {
   it("ignores BOOKING RECEIPT words and returns null when no plate", () => {
@@ -17,5 +21,13 @@ describe("guessPlateFromEmailText", () => {
   it("extracts standard UK plate from registration label", () => {
     const text = "Vehicle registration: AB12 CDE";
     expect(guessPlateFromEmailText(text)).toBe("AB12CDE");
+  });
+
+  it("extracts numeric-only labelled registration (customer-entered incomplete plate)", () => {
+    expect(normalizeUkPlate("72960")).toBeNull();
+    expect(normalizeLabeledPlate("72960")).toBe("72960");
+    expect(guessPlateFromEmailText("Vehicle registration: 72960\nReference: 41294")).toBe(
+      "72960"
+    );
   });
 });
