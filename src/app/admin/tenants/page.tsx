@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/server-admin';
+import { requirePlatformAdmin } from '@/lib/guards';
 import CreateTenantModal from './CreateTenantModal';
 import AssignOwnerModal from './AssignOwnerModal';
 import OrphansPanel from './OrphansPanel';
@@ -6,6 +7,7 @@ import TenantsClient from './TenantsClient';
 import Link from 'next/link';
 
 export default async function AdminTenantsPage() {
+  await requirePlatformAdmin();
   const sb = await createAdminClient();
 
   const { data: tenants } = await sb

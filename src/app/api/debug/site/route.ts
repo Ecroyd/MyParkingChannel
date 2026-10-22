@@ -2,8 +2,11 @@ export const runtime = 'nodejs'; // <— forces Node, so supabase-js is allowed
 
 import { NextResponse } from 'next/server'
 import { createServerClient, createAdminClient } from '@/lib/supabase/server'
+import { requirePlatformAdminApi } from '@/lib/auth/apiGuards';
 
 export async function GET(req: Request) {
+  const guard = await requirePlatformAdminApi();
+  if (guard.response) return guard.response;
   if (process.env.NEXT_PUBLIC_DEBUG_SITE !== '1') {
     return new NextResponse('Not Found', { status: 404 })
   }

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { getCavuConfigForTenant } from '@/lib/suppliers/getTenantSupplierConfig';
 import { getBookingDetails } from '@/lib/suppliers/cavu';
+import { requireCronOrTenantMemberApi } from '@/lib/auth/apiGuards';
 
 const SUPPLIER_CODE = 'cavu';
 const BOOKING_SOURCE = 'cavu';
@@ -20,6 +21,8 @@ function formatUpsertError(tableName: string, reference: string, error: { messag
 
 export async function POST(req: NextRequest) {
   const tenantId = req.nextUrl.searchParams.get('tenantId');
+  const guard = await requireCronOrTenantMemberApi(req, tenantId, ['owner', 'admin', 'ops']);
+  if (guard.response) return guard.response;
   const reference = req.nextUrl.searchParams.get('reference');
 
   if (!tenantId || !reference) {

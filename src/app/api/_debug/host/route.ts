@@ -1,5 +1,6 @@
 // src/app/api/_debug/host/route.ts
 import { NextResponse } from "next/server";
+import { requirePlatformAdminApi } from '@/lib/auth/apiGuards';
 
 function getTenantSlugFromHost(hostname: string): string | null {
   const host = (hostname || "").toLowerCase().split(":")[0];
@@ -18,6 +19,8 @@ function getTenantSlugFromHost(hostname: string): string | null {
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  const guard = await requirePlatformAdminApi();
+  if (guard.response) return guard.response;
   const url = new URL(req.url);
   const host = url.host;
   const slug = getTenantSlugFromHost(host);

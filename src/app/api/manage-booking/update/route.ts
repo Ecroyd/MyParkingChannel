@@ -3,9 +3,9 @@ import { cookies } from 'next/headers';
 import { jwtVerify } from 'jose';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { createServerClientDirect } from '@/lib/supabase/server-direct';
+import { getBookingSessionSecret } from '@/lib/manageBooking/sessionSecret';
 
 const COOKIE_NAME = 'booking_session';
-const secret = new TextEncoder().encode(process.env.BOOKING_SESSION_SECRET || 'change-me-in-env');
 
 // whitelist keys customers are allowed to change
 // Note: start_at and end_at are only allowed for direct/manual bookings (checked in handler)
@@ -29,7 +29,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ message: 'Not authenticated.' }, { status: 401 });
     }
 
-    const { payload } = await jwtVerify(cookie, secret);
+    const { payload } = await jwtVerify(cookie, getBookingSessionSecret());
     const booking_id = payload['booking_id'] as string;
     const tenant_id = payload['tenant_id'] as string;
     const reference = payload['reference'] as string;

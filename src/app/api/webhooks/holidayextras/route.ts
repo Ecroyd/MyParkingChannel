@@ -10,15 +10,18 @@ export async function POST(request: Request) {
   const signature = headersList.get('x-holidayextras-signature')
   const body = await request.text()
   
-  // TODO: Implement signature verification
-  // const expectedSignature = crypto
-  //   .createHmac('sha256', process.env.HOLIDAYEXTRAS_WEBHOOK_SECRET!)
-  //   .update(body)
-  //   .digest('hex')
-  
-  // if (signature !== expectedSignature) {
-  //   return Response.json({ error: 'Invalid signature' }, { status: 401 })
-  // }
+  // Fail closed: this endpoint writes bookings for the tenant named in the payload,
+  // so it must not accept unsigned requests.
+  const secret = process.env.HOLIDAYEXTRAS_WEBHOOK_SECRET?.trim()
+  if (!secret) {
+    return Response.json({ error: 'Webhook not configured' }, { status: 503 })
+  }
+  const expectedSignature = crypto.createHmac('sha256', secret).update(body).digest('hex')
+  const provided = Buffer.from(signature ?? '', 'utf8')
+  const expected = Buffer.from(expectedSignature, 'utf8')
+  if (provided.length !== expected.length || !crypto.timingSafeEqual(provided, expected)) {
+    return Response.json({ error: 'Invalid signature' }, { status: 401 })
+  }
 
   try {
     const payload = JSON.parse(body)

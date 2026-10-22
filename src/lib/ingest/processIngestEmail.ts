@@ -90,12 +90,22 @@ async function resolveTenantFromInbox(
 
 async function parseFilesAsync(fileIds: string[], tenantId: string) {
   const { parseEmailFile } = await import("@/lib/ingest/parseEmailFile");
+  const failures: string[] = [];
+  let succeeded = 0;
   for (const fileId of fileIds) {
     try {
       await parseEmailFile(fileId, tenantId);
+      succeeded++;
     } catch (err: unknown) {
       console.error(`[process-ingest] auto-parse error for file ${fileId}:`, err);
+      failures.push(err instanceof Error ? err.message : String(err));
     }
+  }
+  // Every attachment failed: surface it (email marked failed + alert via the caller's catch)
+  // instead of leaving the email looking fine with no bookings created. When at least one
+  // file parsed, other failures are typically non-booking attachments, so stay quiet.
+  if (failures.length > 0 && succeeded === 0) {
+    throw new Error(`All ${failures.length} attachment(s) failed to parse: ${failures.join(" | ").slice(0, 1000)}`);
   }
 }
 

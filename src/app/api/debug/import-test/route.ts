@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/server';
+import { requirePlatformAdminApi } from '@/lib/auth/apiGuards';
 
 export async function GET() {
+  const guard = await requirePlatformAdminApi();
+  if (guard.response) return guard.response;
   try {
     const admin = supabaseAdmin();
     

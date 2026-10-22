@@ -1,6 +1,7 @@
 // src/app/api/admin/provision-tenant/route.ts
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
+import { requirePlatformAdminApi } from '@/lib/auth/apiGuards';
 
 interface ProvisionRequest {
   tenant: {
@@ -19,6 +20,8 @@ interface ProvisionRequest {
 }
 
 export async function POST(req: Request) {
+  const guard = await requirePlatformAdminApi();
+  if (guard.response) return guard.response;
   try {
     const body: ProvisionRequest = await req.json();
     const { tenant, user, site } = body;

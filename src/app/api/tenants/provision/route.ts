@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { createServerClientDirect } from "@/lib/supabase/server-direct";
+import { requirePlatformAdminApi } from '@/lib/auth/apiGuards';
 
 export const dynamic = "force-dynamic";
 
 /** Body: { tenantId?: string, slug?: string, name?: string } */
 export async function POST(req: Request) {
+  const guard = await requirePlatformAdminApi();
+  if (guard.response) return guard.response;
   const body = await req.json().catch(() => ({} as any));
   const { tenantId, slug, name } = body || {};
   if (!tenantId && !slug) {

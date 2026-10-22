@@ -4,6 +4,7 @@ import Stripe from 'stripe';
 import { stripe } from '@/lib/stripe';
 import { headers } from 'next/headers';
 import { createClient } from '@supabase/supabase-js';
+import { getTempBooking } from '@/lib/bookings/tempBookingStore';
 
 export async function POST(req: Request) {
   const body = await req.text();
@@ -31,28 +32,39 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
   }
 
-  // Handle the event
-  switch (event.type) {
-    case 'checkout.session.completed':
-      await handleCheckoutSessionCompleted(event.data.object);
-      break;
-    
-    case 'payment_intent.succeeded':
-      await handlePaymentIntentSucceeded(event.data.object);
-      break;
-    
-    case 'payment_intent.payment_failed':
-      await handlePaymentIntentFailed(event.data.object);
-      break;
-    
-    case 'account.updated':
-      const account = event.data.object;
-      console.log('Account updated:', account.id);
-      // TODO: Update account status in your database
-      break;
-    
-    default:
-      console.log(`Unhandled event type: ${event.type}`);
+  // Direct charges live on the tenant's connected account; Stripe sets event.account for those.
+  const connectedAccount = event.account ?? undefined;
+
+  // Handle the event. Handlers throw on failures that a retry could fix; we then return 500
+  // so Stripe redelivers the event instead of the booking being silently lost.
+  try {
+    switch (event.type) {
+      case 'checkout.session.completed':
+      case 'checkout.session.async_payment_succeeded':
+        await handleCheckoutSessionCompleted(event.data.object, connectedAccount);
+        break;
+
+      case 'payment_intent.succeeded':
+        await handlePaymentIntentSucceeded(event.data.object);
+        break;
+
+      case 'payment_intent.payment_failed':
+        await handlePaymentIntentFailed(event.data.object);
+        break;
+
+      case 'account.updated': {
+        const account = event.data.object;
+        console.log('Account updated:', account.id);
+        // TODO: Update account status in your database
+        break;
+      }
+
+      default:
+        console.log(`Unhandled event type: ${event.type}`);
+    }
+  } catch (err) {
+    console.error(`[STRIPE WEBHOOK] ${event.type} ${event.id} failed; returning 500 so Stripe retries:`, err);
+    return NextResponse.json({ error: 'Webhook handler failed' }, { status: 500 });
   }
 
   return NextResponse.json({ received: true });
@@ -61,8 +73,8 @@ export async function POST(req: Request) {
 // Webhook handler functions
 // We read tenant_id, temp_booking_id, reference from session.metadata only (never from success URL).
 // Checkout routes set metadata + payment_intent_data.metadata so we never need to scrape URLs.
-async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) {
-  try {
+async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session, connectedAccount?: string) {
+  {
     const admin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -77,6 +89,13 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
       return;
     }
 
+    // Delayed payment methods complete the session before the money arrives; the booking is
+    // created on checkout.session.async_payment_succeeded instead.
+    if (session.payment_status === 'unpaid') {
+      console.log('Checkout session completed but unpaid; waiting for async payment', session.id);
+      return;
+    }
+
     const paymentIntentId = typeof session.payment_intent === 'string'
       ? session.payment_intent
       : session.payment_intent?.id;
@@ -85,7 +104,11 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
       return;
     }
 
-    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    const paymentIntent = await stripe.paymentIntents.retrieve(
+      paymentIntentId,
+      undefined,
+      connectedAccount ? { stripeAccount: connectedAccount } : undefined
+    );
     const piMetadata = paymentIntent.metadata || {};
 
     // Extension payment: update booking_extensions, do not create a booking
@@ -101,7 +124,7 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
         .eq('tenant_id', tenantId)
         .eq('booking_id', tempId)
         .eq('stripe_payment_status', 'pending');
-      if (extError) console.error('Failed to update booking_extensions:', extError);
+      if (extError) throw new Error(`Failed to update booking_extensions: ${extError.message}`);
       return;
     }
 
@@ -122,16 +145,8 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
     const customerEmail = session.customer_email || session.customer_details?.email || '';
     const customerPhone = session.customer_details?.phone || null;
 
-    let storedBookingData: Record<string, unknown> | null = null;
-    try {
-      const tempBookingResponse = await fetch(`${process.env.NEXT_PUBLIC_ROOT_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3002'}/api/bookings/temp-store?tenantId=${tenantId}&reference=${reference}`);
-      if (tempBookingResponse.ok) {
-        const tempData = await tempBookingResponse.json();
-        storedBookingData = tempData.data ?? null;
-      }
-    } catch (error) {
-      console.error('Failed to retrieve stored booking data:', error);
-    }
+    // Read directly from the DB (throws on DB errors so the event is retried).
+    const storedBookingData = (await getTempBooking(tenantId, reference)) as Record<string, unknown> | null;
 
     const plate = (storedBookingData?.plate as string) || piMetadata.plate || 'UNKNOWN';
     const flightNumber = (storedBookingData?.flightNumber as string) || (piMetadata.flight_number as string) || null;
@@ -166,7 +181,15 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
       .single();
 
     if (error) {
-      console.error('Failed to create booking:', error);
+      // A concurrent delivery of the same event may have inserted it first.
+      const { data: raced } = await admin
+        .from('bookings')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .eq('stripe_payment_intent_id', paymentIntentId)
+        .maybeSingle();
+      if (raced) return;
+      throw new Error(`Failed to create booking ${reference} for paid ${paymentIntentId}: ${error.message}`);
     } else {
       console.log('Booking created successfully:', booking?.reference);
       
@@ -197,8 +220,6 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
         }
       }
     }
-  } catch (error) {
-    console.error('Error handling checkout session completed:', error);
   }
 }
 
@@ -207,7 +228,7 @@ async function handlePaymentIntentSucceeded(paymentIntent: any) {
 }
 
 async function handlePaymentIntentFailed(paymentIntent: Stripe.PaymentIntent) {
-  try {
+  {
     const admin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -229,12 +250,13 @@ async function handlePaymentIntentFailed(paymentIntent: Stripe.PaymentIntent) {
         updated_at: new Date().toISOString()
       })
       .eq('tenant_id', tenantId)
-      .eq('reference', reference);
+      .eq('reference', reference)
+      // Only the booking this PaymentIntent paid for. Extension payments reuse the parent
+      // booking's reference, and a declined extension must not cancel the original booking.
+      .eq('stripe_payment_intent_id', paymentIntent.id);
 
     if (error) {
-      console.error('Failed to update booking status for failed payment:', error);
+      throw new Error(`Failed to update booking status for failed payment: ${error.message}`);
     }
-  } catch (error) {
-    console.error('Error handling payment intent failed:', error);
   }
 }

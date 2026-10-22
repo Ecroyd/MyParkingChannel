@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
+import { requireTenantMemberApi } from '@/lib/auth/apiGuards';
 
 export async function POST(req: Request) {
   try {
     const { tenantId } = await req.json();
+    const guard = await requireTenantMemberApi(tenantId, ['owner', 'admin']);
+    if (guard.response) return guard.response;
 
     if (!tenantId) {
       return NextResponse.json({ error: 'Tenant ID is required' }, { status: 400 });

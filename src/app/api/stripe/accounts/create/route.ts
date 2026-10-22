@@ -1,8 +1,11 @@
 // app/api/stripe/accounts/create/route.ts
 import { NextResponse } from 'next/server';
 import { stripe, ROOT_URL } from '@/lib/stripe';
+import { requirePlatformAdminApi } from '@/lib/auth/apiGuards';
 
 export async function POST() {
+  const guard = await requirePlatformAdminApi();
+  if (guard.response) return guard.response;
   // Create a controller-based connected account (no top-level type!)
   // See: the instructions you pasted.
   const account = await stripe.accounts.create({

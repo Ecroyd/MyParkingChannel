@@ -1,6 +1,8 @@
 import OrphansClient from '../OrphansClient';
+import { requirePlatformAdmin } from '@/lib/guards';
 
-export default function OrphansPage() {
+export default async function OrphansPage() {
+  await requirePlatformAdmin();
   return (
     <div className="space-y-6">
       <div>

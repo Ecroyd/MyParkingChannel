@@ -2,9 +2,12 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import { mapStagingToBookings } from "@/lib/imports/mapToBookings";
 import { toBookingInsertPayload } from "@/lib/ingest/safeBookingUpsertPayload";
+import { requireTenantMemberApi } from '@/lib/auth/apiGuards';
 
 export async function POST(req: Request) {
   const { tenantId, runId } = await req.json();
+  const guard = await requireTenantMemberApi(tenantId, ['owner', 'admin', 'ops']);
+  if (guard.response) return guard.response;
   
   if (!tenantId || !runId) {
     return NextResponse.json({ error: "tenantId and runId required" }, { status: 400 });

@@ -2,8 +2,11 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
 import { seedDefaultChannels } from '@/lib/channels/seed';
+import { requirePlatformAdminApi } from '@/lib/auth/apiGuards';
 
 export async function POST(req: Request) {
+  const guard = await requirePlatformAdminApi();
+  if (guard.response) return guard.response;
   try {
     const payload = await req.json();
     

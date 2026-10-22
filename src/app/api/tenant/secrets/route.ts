@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSupabase } from '@/lib/supabase/server';
 import { getServiceSupabase } from '@/lib/supabase/service';
 import { createAdminClient } from '@/lib/supabase/server';
+import { requireTenantMemberApi } from "@/lib/auth/apiGuards";
 
 export async function GET(req: NextRequest) {
   try {
@@ -71,28 +72,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "MISSING_TENANT_ID" }, { status: 400 });
     }
 
-    // Verify user has access to this tenant
-    const { data: userTenant, error: accessError } = await supabase
-      .from("user_tenants")
-      .select("tenant_id")
-      .eq("tenant_id", tenantId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    if (!userTenant || accessError) {
-      // Fallback: Use admin client to check if user_tenants record exists
-      const adminClient = await createAdminClient();
-      const { data: adminUserTenant, error: adminAccessError } = await adminClient
-        .from("user_tenants")
-        .select("tenant_id")
-        .eq("tenant_id", tenantId)
-        .eq("user_id", user.id)
-        .maybeSingle();
-      
-      if (!adminUserTenant || adminAccessError) {
-        return NextResponse.json({ ok: false, error: "TENANT_ACCESS_DENIED" }, { status: 403 });
-      }
-    }
+    // Only owners/admins (or platform admins) may change payment keys
+    const guard = await requireTenantMemberApi(tenantId, ["owner", "admin"]);
+    if (guard.response) return guard.response;
 
     // Save tenant secrets (admin client to bypass RLS)
     const admin = createAdminClient();

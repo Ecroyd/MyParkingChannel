@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { createServerClientDirect } from "@/lib/supabase/server-direct";
+import { requirePlatformAdminApi } from '@/lib/auth/apiGuards';
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const guard = await requirePlatformAdminApi();
+  if (guard.response) return guard.response;
   let urlHost = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
   try { urlHost = new URL(urlHost).host; } catch {}
 

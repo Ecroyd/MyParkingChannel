@@ -1,8 +1,11 @@
 // src/app/api/admin/tenants/orphans/delete/route.ts
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
+import { requirePlatformAdminApi } from '@/lib/auth/apiGuards';
 
 export async function POST(req: Request) {
+  const guard = await requirePlatformAdminApi();
+  if (guard.response) return guard.response;
   try {
     const { slug } = await req.json();
     if (!slug) return NextResponse.json({ error:{code:'BAD_REQ', message:'slug required'}}, { status: 400 });

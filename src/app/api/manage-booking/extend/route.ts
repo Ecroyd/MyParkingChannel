@@ -3,9 +3,9 @@ import { cookies } from 'next/headers';
 import { jwtVerify } from 'jose';
 import { createServerClientDirect } from '@/lib/supabase/server-direct';
 import { quoteExtensionCents } from '@/lib/pricing/quoteExtension';
+import { getBookingSessionSecret } from '@/lib/manageBooking/sessionSecret';
 
 const COOKIE_NAME = 'booking_session';
-const secret = new TextEncoder().encode(process.env.BOOKING_SESSION_SECRET || 'change-me-in-env');
 
 export async function POST(req: Request) {
   try {
@@ -16,7 +16,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ message: 'Not authenticated.' }, { status: 401 });
     }
 
-    const { payload } = await jwtVerify(cookie, secret);
+    const { payload } = await jwtVerify(cookie, getBookingSessionSecret());
     const booking_id = payload['booking_id'] as string;
     const tenant_id = payload['tenant_id'] as string;
     const reference = payload['reference'] as string;

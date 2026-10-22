@@ -1,8 +1,11 @@
 import { getServiceSupabase } from "@/lib/supabase/service";
 import { NextResponse } from "next/server";
 import { isBookingCapableFile } from "@/lib/ingest/fileTypeUtils";
+import { requireCronOrPlatformAdminApi } from '@/lib/auth/apiGuards';
 
 export async function GET(req: Request) {
+  const guard = await requireCronOrPlatformAdminApi(req);
+  if (guard.response) return guard.response;
   try {
     const { searchParams } = new URL(req.url);
     const limit = parseInt(searchParams.get("limit") || "50");

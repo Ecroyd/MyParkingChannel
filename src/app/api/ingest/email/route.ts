@@ -82,9 +82,15 @@ export async function POST(req: Request) {
         msg.includes("ingest_emails_message_id_uidx") ||
         msg.includes("ingest_emails_sha256_uidx");
 
+      // Only a duplicate is a success. Any other insert failure (DB down, schema error) must be
+      // a non-2xx so the Cloudflare worker forwards the email to the fallback inbox instead of
+      // it being lost.
+      if (!isDup) {
+        console.error("[ingest/email] insert failed (not a duplicate)", { requestId, msg });
+      }
       return Response.json(
         {
-          ok: true,
+          ok: isDup,
           requestId,
           inserted: false,
           deduped: isDup,
@@ -92,7 +98,7 @@ export async function POST(req: Request) {
           messageId: body.message_id || null,
           insertError: msg,
         },
-        { status: 200 }
+        { status: isDup ? 200 : 500 }
       );
     }
 

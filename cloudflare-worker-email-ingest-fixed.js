@@ -3,6 +3,18 @@
 // This version works around postal-mime import issues by using a CDN import
 // or manual MIME parsing fallback
 
+// Chunked base64: spreading a large Uint8Array into String.fromCharCode(...) throws
+// "Maximum call stack size exceeded" on big emails (e.g. with PDF/XLSX attachments),
+// which silently dropped them.
+function bytesToBase64(bytes) {
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
 export default {
   async fetch() {
     return new Response("ok", { status: 200 });
@@ -52,9 +64,7 @@ export default {
           for (const att of parsed.attachments) {
             try {
               // Convert attachment content to base64
-              const contentBase64 = btoa(
-                String.fromCharCode(...new Uint8Array(att.content))
-              );
+              const contentBase64 = bytesToBase64(new Uint8Array(att.content));
               
               attachments.push({
                 filename: att.filename || "unnamed",
@@ -80,9 +90,7 @@ export default {
       }
 
       // Step 4: Create RFC822 representation (full email as base64)
-      const rawEmailBase64 = btoa(
-        String.fromCharCode(...new Uint8Array(arrayBuffer))
-      );
+      const rawEmailBase64 = bytesToBase64(new Uint8Array(arrayBuffer));
 
       const payload = {
         to: message.to,

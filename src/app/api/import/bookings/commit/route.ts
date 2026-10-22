@@ -8,6 +8,7 @@ import {
   normalizeSupplierStatus,
 } from "@/lib/ingest/importStatusMapping";
 import { resolveBookingTimesToUtc, sanitizeSupplierDateTimeInput } from "@/lib/datetime/parse";
+import { requireTenantMemberApi } from '@/lib/auth/apiGuards';
 
 type InRow = {
   source:string; reference:string;
@@ -182,6 +183,8 @@ async function logImportError(params: {
 
 export async function POST(req: Request) {
   const { tenantId, rows, profileName, overwriteDuplicates, sourceMapping } = await req.json();
+  const guard = await requireTenantMemberApi(tenantId, ['owner', 'admin', 'ops']);
+  if (guard.response) return guard.response;
   
   console.log("🔍 API Debug Info:");
   console.log("Received tenantId:", tenantId);

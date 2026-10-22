@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server'
 import { mapCsvRowToBooking } from '@/lib/csv/normalise'
+import { requirePlatformAdminApi } from '@/lib/auth/apiGuards';
 
 export async function POST(req: Request) {
+  const guard = await requirePlatformAdminApi();
+  if (guard.response) return guard.response;
   try {
     const { testRow } = await req.json()
     

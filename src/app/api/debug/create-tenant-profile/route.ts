@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
+import { requirePlatformAdminApi } from '@/lib/auth/apiGuards';
 
 export async function POST(req: NextRequest) {
+  const guard = await requirePlatformAdminApi();
+  if (guard.response) return guard.response;
   try {
     const { tenantId } = await req.json()
     

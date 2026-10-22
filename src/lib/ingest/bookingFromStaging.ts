@@ -569,6 +569,12 @@ export async function upsertBookingFromStagingRow(
   const updatePayload = { ...payload };
   delete updatePayload.tenant_id;
   delete updatePayload.reference;
+  // Gate/ops/ANPR state is owned by the ops board once a booking exists. A resent or amended
+  // supplier email must not reset a car that has already arrived back to "reserved".
+  // Cancellations still go through so the gate stops letting the car in.
+  if (updatePayload.gate_status !== "cancelled") delete updatePayload.gate_status;
+  if (updatePayload.ops_status !== "cancelled") delete updatePayload.ops_status;
+  if (updatePayload.anpr_status !== "cancelled") delete updatePayload.anpr_status;
 
   if (existing.row) {
     const updateResult = await updateBookingWithVariants(

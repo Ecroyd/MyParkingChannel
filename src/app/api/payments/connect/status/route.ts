@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { stripe, ROOT_URL } from '@/lib/stripe';
 import { getAuthedUserTenantId, getTenantStripeAccountId, setTenantStripeAccountId, getServerSupabase } from '@/lib/supabase-server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireTenantMemberApi } from '@/lib/auth/apiGuards';
 
 function resolveConnectMode(requestedMode: string | undefined): 'test' | 'live' {
   // Explicit platform force-test always wins
@@ -34,6 +35,15 @@ export async function GET(req: Request) {
       const [tenantId, requestedMode] = state.split(':');
       if (!tenantId) {
         throw new Error('Invalid state parameter - missing tenant_id');
+      }
+
+      // The state comes back from the browser, so it proves nothing on its own. Only an
+      // owner/admin of that tenant (signed in, returning from Stripe) may link an account,
+      // otherwise anyone could attach their own Stripe account to another tenant's payouts.
+      const connectGuard = await requireTenantMemberApi(tenantId, ['owner', 'admin']);
+      if (connectGuard.response) {
+        console.warn('[PAYMENTS] Rejected Stripe Connect callback: caller is not an owner/admin of tenant', tenantId);
+        return NextResponse.redirect(`${ROOT_URL}/admin/payments?error=not_authorized`);
       }
 
       const connectMode = resolveConnectMode(requestedMode);

@@ -1,8 +1,11 @@
 // src/app/api/admin/tenants/orphans/route.ts
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
+import { requirePlatformAdminApi } from '@/lib/auth/apiGuards';
 
 export async function GET() {
+  const guard = await requirePlatformAdminApi();
+  if (guard.response) return guard.response;
   try {
     const sb = await createAdminClient();
     const { data, error } = await sb.rpc('list_orphan_tenants');

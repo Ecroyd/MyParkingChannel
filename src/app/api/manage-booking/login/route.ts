@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import { checkRateLimit } from '@/lib/rate-limit';
 import { SignJWT, jwtVerify } from 'jose';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { createServerClientDirect } from '@/lib/supabase/server-direct';
+import { getBookingSessionSecret } from '@/lib/manageBooking/sessionSecret';
 
 const COOKIE_NAME = 'booking_session';
 const TTL_MINUTES = 30; // session for editing
-const secret = new TextEncoder().encode(process.env.BOOKING_SESSION_SECRET || 'change-me-in-env');
 
 function normalizeLastName(s: string) {
   return s.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -16,7 +17,12 @@ export async function POST(req: Request) {
   try {
     const { tenantSlug, lookupMethod, reference, plate, lastName } = await req.json();
 
-    console.log('Manage booking login attempt:', { tenantSlug, lookupMethod, reference, plate, lastName });
+    // Basic brute-force brake (per instance; Vercel runs several, so this is a floor, not a guarantee).
+    const ip = (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || 'unknown';
+    const rl = checkRateLimit(`manage-login:${tenantSlug}:${ip}`, { windowMs: 10 * 60 * 1000, maxRequests: 10 });
+    if (!rl.allowed) {
+      return NextResponse.json({ message: 'Too many attempts. Please try again in a few minutes.' }, { status: 429 });
+    }
 
     if (!tenantSlug) {
       return NextResponse.json({ message: 'Missing tenant slug.' }, { status: 400 });
@@ -28,8 +34,9 @@ export async function POST(req: Request) {
         return NextResponse.json({ message: 'Missing fields. Reference and last name are required.' }, { status: 400 });
       }
     } else if (lookupMethod === 'plate') {
-      if (!plate) {
-        return NextResponse.json({ message: 'Missing fields. Registration plate is required.' }, { status: 400 });
+      // A number plate is visible on the car, so it is not enough to open a booking on its own.
+      if (!plate || !lastName) {
+        return NextResponse.json({ message: 'Missing fields. Registration plate and last name are required.' }, { status: 400 });
       }
     } else {
       return NextResponse.json({ message: 'Invalid lookup method. Use "reference" or "plate".' }, { status: 400 });
@@ -45,7 +52,6 @@ export async function POST(req: Request) {
       .eq('slug', tenantSlug)
       .maybeSingle();
 
-    console.log('Tenant lookup result:', { tenant, error: terr });
 
     if (terr || !tenant) {
       return NextResponse.json({ message: 'Unknown site.' }, { status: 404 });
@@ -62,12 +68,11 @@ export async function POST(req: Request) {
     } else {
       // Normalize plate: uppercase and remove spaces
       const normalizedPlate = plate.toUpperCase().replace(/\s+/g, '');
-      query = query.eq('plate', normalizedPlate);
+      // Repeat customers have several bookings on one plate; open the latest-starting one.
+      query = query.eq('plate', normalizedPlate).order('start_at', { ascending: false }).limit(1);
     }
 
     const { data: booking, error: berr } = await query.maybeSingle();
-
-    console.log('Booking lookup result:', { booking, error: berr });
 
     if (berr || !booking) {
       return NextResponse.json({ message: 'Booking not found.' }, { status: 404 });
@@ -85,9 +90,8 @@ export async function POST(req: Request) {
             : 'Name and registration plate do not match.' 
         }, { status: 401 });
       }
-    } else if (lookupMethod === 'reference') {
-      // Last name is required for reference lookup
-      return NextResponse.json({ message: 'Last name is required for reference lookup.' }, { status: 400 });
+    } else {
+      return NextResponse.json({ message: 'Last name is required.' }, { status: 400 });
     }
 
     // issue short-lived booking session (cookie)
@@ -99,7 +103,7 @@ export async function POST(req: Request) {
       .setProtectedHeader({ alg: 'HS256' })
       .setExpirationTime(`${TTL_MINUTES}m`)
       .setIssuedAt()
-      .sign(secret);
+      .sign(getBookingSessionSecret());
 
     const cookieStore = await cookies();
     cookieStore.set(COOKIE_NAME, jwt, {

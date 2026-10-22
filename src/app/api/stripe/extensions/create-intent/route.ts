@@ -1,11 +1,22 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin, getServerSupabase } from '@/lib/supabase/server';
 import { getTenantStripeClient, getTenantStripeKeys } from '@/lib/stripe/getTenantStripe';
+import { requireTenantMemberApi } from '@/lib/auth/apiGuards';
 
 export async function POST(req: Request) {
   const { bookingId, tenantId, prevEndAt, newEndAt, note, manualAmountCents } = await req.json();
+  const guard = await requireTenantMemberApi(tenantId, ['owner', 'admin', 'ops']);
+  if (guard.response) return guard.response;
 
   const sbAdmin = supabaseAdmin();
+  const { data: ownedBooking } = await sbAdmin
+    .from('bookings')
+    .select('id')
+    .eq('id', bookingId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle();
+  if (!ownedBooking) return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+
   const stripe = await getTenantStripeClient(tenantId);
   const { publishableKey } = await getTenantStripeKeys(tenantId);
 

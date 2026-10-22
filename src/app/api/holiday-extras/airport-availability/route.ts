@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getHolidayExtrasConfig } from "@/lib/tenantSecrets/holidayExtras";
 import { HolidayExtrasClient } from "@/lib/holidayExtrasClient";
 import { resolveTenantIdOrThrow } from "@/lib/tenant/resolve";
+import { requireTenantMemberApi } from '@/lib/auth/apiGuards';
 
 export async function GET(req: NextRequest) {
   try {
@@ -20,6 +21,8 @@ export async function GET(req: NextRequest) {
     }
 
     const tenantId = await resolveTenantIdOrThrow(new URL(req.url));
+    const guard = await requireTenantMemberApi(tenantId);
+    if (guard.response) return guard.response;
     if (!tenantId) {
       return NextResponse.json({ error: "Tenant not found" }, { status: 400 });
     }

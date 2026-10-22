@@ -2,10 +2,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCavuConfigForTenant } from '@/lib/suppliers/getTenantSupplierConfig';
 import { getEventsByAge } from '@/lib/suppliers/cavu';
+import { requireCronOrTenantMemberApi } from '@/lib/auth/apiGuards';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const tenantId = searchParams.get('tenantId');
+  const guard = await requireCronOrTenantMemberApi(req, tenantId, ['owner', 'admin']);
+  if (guard.response) return guard.response;
   const hoursParam = searchParams.get('hours');
   const limitParam = searchParams.get('limit');
 

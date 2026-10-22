@@ -288,11 +288,15 @@ export async function sendDueEmails(limit: number = 20): Promise<{ sent: number;
   let failed = 0;
 
   try {
+    // Rows left in 'sending' by a crashed/timed-out run are picked up again after 15 minutes.
+    const staleSendingBefore = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const claimableFilter = `status.in.(queued,failed),and(status.eq.sending,updated_at.lt.${staleSendingBefore})`;
+
     // Select emails that are due for sending
-    const { data: dueEmails, error: fetchError } = await supabase
+    const { data: candidateEmails, error: fetchError } = await supabase
       .from('email_outbox')
       .select('*')
-      .in('status', ['queued', 'failed'])
+      .or(claimableFilter)
       .lte('next_attempt_at', new Date().toISOString())
       .lt('attempts', 10) // Max 10 attempts
       .order('created_at', { ascending: true })
@@ -303,22 +307,27 @@ export async function sendDueEmails(limit: number = 20): Promise<{ sent: number;
       return { sent: 0, failed: 0, errors: [fetchError.message] };
     }
 
-    if (!dueEmails || dueEmails.length === 0) {
+    if (!candidateEmails || candidateEmails.length === 0) {
       return { sent: 0, failed: 0, errors: [] };
     }
 
-    // Mark as sending (atomic update)
-    const emailIds = dueEmails.map(e => e.id);
-    const { error: updateError } = await supabase
+    // Claim (conditional update). Only rows this run actually flipped to 'sending' are sent,
+    // so two overlapping runs (cron + immediate flush) cannot both send the same email.
+    const emailIds = candidateEmails.map(e => e.id);
+    const { data: claimedRows, error: updateError } = await supabase
       .from('email_outbox')
       .update({ status: 'sending', updated_at: new Date().toISOString() })
       .in('id', emailIds)
-      .in('status', ['queued', 'failed']); // Only update if still queued/failed
+      .or(claimableFilter)
+      .select('id');
 
     if (updateError) {
       console.error('[EMAIL SERVICE] Failed to mark emails as sending:', updateError);
       return { sent: 0, failed: 0, errors: [updateError.message] };
     }
+
+    const claimedIds = new Set((claimedRows ?? []).map(r => r.id));
+    const dueEmails = candidateEmails.filter(e => claimedIds.has(e.id));
 
     // Process each email
     for (const email of dueEmails) {

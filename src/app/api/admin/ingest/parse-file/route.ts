@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { reprocessIngestEmailFile } from "@/lib/ingest/reprocessIngestEmailFile";
+import { requireCronOrTenantMemberApi } from '@/lib/auth/apiGuards';
 
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   try {
     const { fileId, tenantId } = await req.json();
+    const guard = await requireCronOrTenantMemberApi(req, tenantId, ['owner', 'admin', 'ops']);
+    if (guard.response) return guard.response;
 
     if (!fileId) {
       return NextResponse.json({ error: "fileId required" }, { status: 400 });

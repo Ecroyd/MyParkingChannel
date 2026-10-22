@@ -3,6 +3,10 @@ import { NextResponse } from 'next/server';
 import { stripe, useConnected, ROOT_URL } from '@/lib/stripe';
 import { getServerSupabase, getTenantStripeAccountId } from '@/lib/supabase-server';
 import { siteUrlForTenantSlug } from '@/lib/sites/domain';
+import { randomBytes } from 'crypto';
+import { storeTempBooking } from '@/lib/bookings/tempBookingStore';
+
+const PLATFORM_FEE_RATE = 0.1;
 
 /**
  * POST body:
@@ -13,8 +17,6 @@ import { siteUrlForTenantSlug } from '@/lib/sites/domain';
  *   customer_email?: string,         // customer email for Stripe checkout
  *   customer_phone?: string,         // customer phone number
  *   plate?: string,                 // vehicle registration
- *   reference?: string,                 // optional, displayed in product name
- *   application_fee_cents?: number      // optional platform fee; default 0
  * }
  */
 export async function POST(req: Request) {
@@ -29,8 +31,6 @@ export async function POST(req: Request) {
       customer_phone,
       plate,
       flight_number,
-      reference,
-      application_fee_cents = 0,
     } = body;
 
     // Comprehensive validation
@@ -102,41 +102,53 @@ export async function POST(req: Request) {
 
     if (amount_cents <= 0) return NextResponse.json({ error: 'Invalid amount' }, { status: 400 });
 
+    // Capacity is counted and exhausted for at least one day of the stay.
+    // ('closed' is not blocked here: it is also returned when capacity rows are missing.)
+    if (availability.availability_status === 'sold_out') {
+      return NextResponse.json(
+        { error: 'Sorry, there are no spaces left for these dates.' },
+        { status: 409 }
+      );
+    }
+
+    // Platform fee is fixed server-side (10%, matching what the booking widget used to send),
+    // never taken from the request body.
+    const platformFeeCents = Math.round(amount_cents * PLATFORM_FEE_RATE);
+
     // Generate a unique reference for the booking
     const generateReference = () => {
       const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      const bytes = randomBytes(6);
       let result = '';
       for (let i = 0; i < 6; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
+        result += chars.charAt(bytes[i] % chars.length);
       }
       return result;
     };
 
-    const bookingReference = reference || generateReference();
+    // Always generate the reference server-side: a client-chosen reference could
+    // overwrite another customer's temp booking or collide with an existing booking.
+    const bookingReference = generateReference();
     const tempBookingId = `${tenant_id}_${bookingReference}`;
     const productName = `Parking (${bookingReference})`;
     const descName = customer_name ? `Customer: ${customer_name}` : undefined;
 
     // Store booking data temporarily before creating Stripe session
-    const tempBookingResponse = await fetch(`${ROOT_URL}/api/bookings/temp-store`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tenantId: tenant_id,
-        reference: bookingReference,
-        customerName: customer_name,
-        customerEmail: customer_email,
-        customerPhone: customer_phone,
-        plate: plate,
-        flightNumber: flight_number,
-        startAt: start_at,
-        endAt: end_at,
-        amount: amount_cents / 100
-      })
+    const tempStored = await storeTempBooking({
+      tenantId: tenant_id,
+      reference: bookingReference,
+      customerName: customer_name,
+      customerEmail: customer_email,
+      customerPhone: customer_phone,
+      plate,
+      flightNumber: flight_number,
+      startAt: start_at,
+      endAt: end_at,
+      amount: amount_cents / 100,
     });
 
-    if (!tempBookingResponse.ok) {
-      console.error('Failed to store temp booking data');
+    if (!tempStored.ok) {
+      console.error('Failed to store temp booking data', tempStored.error);
     }
 
     const session = await stripe.checkout.sessions.create(
@@ -157,7 +169,7 @@ export async function POST(req: Request) {
           reference: bookingReference,
         },
         payment_intent_data: {
-          application_fee_amount: Number(application_fee_cents) || 0,
+          application_fee_amount: platformFeeCents,
           metadata: {
             tenant_id: tenant_id,
             temp_booking_id: tempBookingId,

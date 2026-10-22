@@ -1,8 +1,11 @@
 // src/app/api/admin/tenants/orphans/adopt/route.ts
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
+import { requirePlatformAdminApi } from '@/lib/auth/apiGuards';
 
 export async function POST(req: Request) {
+  const guard = await requirePlatformAdminApi();
+  if (guard.response) return guard.response;
   try {
     const { tenantId, ownerEmail } = await req.json();
     console.log('Adopt orphan request:', { tenantId, ownerEmail });

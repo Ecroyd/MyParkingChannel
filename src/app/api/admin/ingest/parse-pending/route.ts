@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { reprocessIngestEmailFile } from "@/lib/ingest/reprocessIngestEmailFile";
 import { getServiceSupabase } from "@/lib/supabase/service";
+import { requireCronOrPlatformAdminApi } from '@/lib/auth/apiGuards';
 
 export const runtime = "nodejs";
 
@@ -24,6 +26,8 @@ function detectTenantFromEmail(email: any): string | null {
 }
 
 export async function POST(req: Request) {
+  const guard = await requireCronOrPlatformAdminApi(req);
+  if (guard.response) return guard.response;
   try {
     const { tenantId, limit = 10 } = await req.json();
 
@@ -82,20 +86,9 @@ export async function POST(req: Request) {
       }
 
       try {
-        // Call the parse-file endpoint
-        const parseResponse = await fetch(
-          `${process.env.NEXT_PUBLIC_ROOT_URL || "http://localhost:3002"}/api/admin/ingest/parse-file`,
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              fileId: file.id,
-              tenantId: fileTenantId,
-            }),
-          }
-        );
-
-        const parseResult = await parseResponse.json();
+        // Parse in-process (previously an unauthenticated HTTP hop to /api/admin/ingest/parse-file)
+        const parseResult = await reprocessIngestEmailFile(file.id, fileTenantId);
+        const parseResponse = { ok: (parseResult as { ok?: boolean })?.ok !== false };
 
         results.push({
           fileId: file.id,

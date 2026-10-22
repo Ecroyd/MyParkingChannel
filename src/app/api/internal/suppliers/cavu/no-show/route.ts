@@ -3,11 +3,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { getCavuConfigForTenant } from '@/lib/suppliers/getTenantSupplierConfig';
 import { registerNoShow } from '@/lib/suppliers/cavu';
+import { requireCronOrTenantMemberApi } from '@/lib/auth/apiGuards';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { tenantId, bookingReference } = body;
+    const guard = await requireCronOrTenantMemberApi(req, tenantId, ['owner', 'admin', 'ops']);
+    if (guard.response) return guard.response;
 
     if (!tenantId || !bookingReference) {
       return NextResponse.json(

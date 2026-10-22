@@ -97,10 +97,12 @@ export default function ManageBookingPage() {
           return;
         }
         body.plate = registrationPlate.trim().toUpperCase().replace(/\s+/g, '');
-        // Last name is optional when using plate lookup
-        if (lastName.trim()) {
-          body.lastName = lastName.trim();
+        if (!lastName.trim()) {
+          setErr('Please enter your last name');
+          setLoading(false);
+          return;
         }
+        body.lastName = lastName.trim();
       }
 
       const res = await fetch('/api/manage-booking/login', {
@@ -383,17 +385,15 @@ export default function ManageBookingPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="lastName">Last name (optional)</Label>
+                      <Label htmlFor="lastName">Last name</Label>
                       <Input
                         id="lastName"
                         value={lastName}
                         onChange={(e) => setLastName(e.target.value)}
                         placeholder="e.g. Smith"
+                        required
                         disabled={disabled}
                       />
-                      <p className="text-xs text-slate-500">
-                        Optional: Enter your last name for additional security verification
-                      </p>
                     </div>
                   </>
                 )}

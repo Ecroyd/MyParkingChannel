@@ -1,11 +1,21 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server-admin";
+import { requireTenantMemberApi } from "@/lib/auth/apiGuards";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state") || "";
   if (!code) return NextResponse.json({ error: "Missing code" }, { status: 400 });
+
+  // The state comes back from the browser, so only an owner/admin of that tenant may link
+  // a Stripe account to it (prevents attaching someone else's account to a tenant's payouts).
+  const stateTenantId = state.split(":")[0] || "";
+  const connectGuard = await requireTenantMemberApi(stateTenantId, ["owner", "admin"]);
+  if (connectGuard.response) {
+    const host = req.headers.get("host") || "myparkingchannel.app";
+    return NextResponse.redirect(`https://${host}/admin/payments?error=not_authorized`);
+  }
 
   try {
     // Determine mode from state (e.g., "tenantId:test" or "tenantId:live")

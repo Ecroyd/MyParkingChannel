@@ -45,12 +45,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Payment intent mismatch' }, { status: 400 });
     }
 
+    // amount is in pence (see BookingDetailsModal); money_charged is in pounds
+    const amountPence = Number(amount);
+    const chargedPence = Math.round(Number(booking.money_charged || 0) * 100);
+    if (!Number.isInteger(amountPence) || amountPence <= 0 || (chargedPence > 0 && amountPence > chargedPence)) {
+      return NextResponse.json({ error: 'Refund amount must be between 1 and the amount charged (in pence)' }, { status: 400 });
+    }
+
     // Process refund using tenant's Stripe Connect account
     const refund = await createTenantRefund({
       tenantId,
       paymentIntentId,
-      amount,
-      reason
+      amount: amountPence,
+      reason,
+      // Same booking + amount within a minute = a double click, not a second refund.
+      idempotencyKey: `refund:${bookingId}:${amountPence}:${Math.floor(Date.now() / 60000)}`,
     });
 
     // Update booking to reflect refund
@@ -58,7 +67,6 @@ export async function POST(req: NextRequest) {
       .from('bookings')
       .update({
         payment_status: 'refunded',
-        money_received: false,
         updated_at: new Date().toISOString()
       })
       .eq('id', bookingId);

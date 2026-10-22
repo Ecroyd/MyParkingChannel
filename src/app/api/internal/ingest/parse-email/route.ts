@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServiceSupabase } from "@/lib/supabase/service";
 import { guessPlateFromEmailText } from "@/lib/ingest/plateGuess";
+import { requireCronOrPlatformAdminApi } from '@/lib/auth/apiGuards';
 
 /**
  * Extract the *useful* receipt content from a forwarded email.
@@ -48,6 +49,8 @@ function guessReference(text: string) {
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
+  const guard = await requireCronOrPlatformAdminApi(req);
+  if (guard.response) return guard.response;
   try {
     const url = new URL(req.url);
     const id = url.searchParams.get("id");

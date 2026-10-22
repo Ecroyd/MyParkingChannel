@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServerClient, createAdminClient } from '@/lib/supabase/server'
 import { requireUser } from '@/lib/auth/requireUser'
+import { requireTenantMemberApi } from '@/lib/auth/apiGuards'
 
 export async function POST(req: Request) {
   try {
@@ -12,6 +13,9 @@ export async function POST(req: Request) {
     if (!tenant_id || typeof site_published !== 'boolean') {
       return NextResponse.json({ error: 'tenant_id and site_published required' }, { status: 400 })
     }
+
+    const guard = await requireTenantMemberApi(tenant_id, ['owner', 'admin'])
+    if (guard.response) return guard.response
 
     const sb = createAdminClient()
     const { data, error } = await sb

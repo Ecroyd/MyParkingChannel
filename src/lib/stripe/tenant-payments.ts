@@ -1,5 +1,7 @@
 import Stripe from 'stripe';
 import { createAdminClient } from '@/lib/supabase/server-admin';
+import { stripe as platformStripe } from '@/lib/stripe';
+import { getTenantStripeAccountId } from '@/lib/supabase-server';
 
 interface CreatePaymentIntentParams {
   tenantId: string;
@@ -96,14 +98,26 @@ export async function createTenantRefund({
   paymentIntentId,
   amount,
   reason,
+  idempotencyKey,
 }: {
   tenantId: string;
   paymentIntentId: string;
   amount?: number;
   reason?: string;
+  idempotencyKey?: string;
 }) {
   try {
-    // Get tenant's secret key
+    // Connect tenants: direct charges live on the connected account, so refund there
+    // with the platform key (see getTenantStripe.ts rule set).
+    const { accountId, connected } = await getTenantStripeAccountId(tenantId);
+    if (connected && accountId) {
+      return await platformStripe.refunds.create(
+        { payment_intent: paymentIntentId, amount, reason: reason as any },
+        { stripeAccount: accountId, ...(idempotencyKey ? { idempotencyKey } : {}) }
+      );
+    }
+
+    // Legacy: tenant's own secret key
     const adminClient = await createAdminClient();
     const { data: secretData, error: secretError } = await adminClient
       .from('tenant_secrets')
@@ -122,11 +136,14 @@ export async function createTenantRefund({
     });
 
     // Create refund
-    const refund = await stripe.refunds.create({
-      payment_intent: paymentIntentId,
-      amount,
-      reason: reason as any,
-    });
+    const refund = await stripe.refunds.create(
+      {
+        payment_intent: paymentIntentId,
+        amount,
+        reason: reason as any,
+      },
+      idempotencyKey ? { idempotencyKey } : undefined
+    );
 
     return refund;
   } catch (error: any) {

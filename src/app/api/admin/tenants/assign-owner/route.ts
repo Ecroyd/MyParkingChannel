@@ -2,8 +2,11 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
 import { assignOwnerSchema, type AssignOwnerInput } from '@/lib/validation/provisioning';
+import { requirePlatformAdminApi } from '@/lib/auth/apiGuards';
 
 export async function POST(req: Request) {
+  const guard = await requirePlatformAdminApi();
+  if (guard.response) return guard.response;
   try {
     const raw = await req.json().catch(() => ({}));
     let input: AssignOwnerInput;

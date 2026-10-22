@@ -49,7 +49,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .maybeSingle();
     
     const isDevelopment = process.env.NODE_ENV === 'development';
-    const isDevTestPayment = paymentMethodId === "dev_test_payment_method";
+    // Simulated payments are only allowed in local development, never in production.
+    const isDevTestPayment = isDevelopment && paymentMethodId === "dev_test_payment_method";
     
     if (!secrets?.stripe_secret_key && !isDevTestPayment) {
       return NextResponse.json({ ok: false, error: "STRIPE_NOT_CONFIGURED" }, { status: 400 });

@@ -1,6 +1,7 @@
 // app/api/stripe/accounts/[id]/products/route.ts
 import { NextResponse } from 'next/server';
 import { stripe, useConnected } from '@/lib/stripe';
+import { requirePlatformAdminApi } from '@/lib/auth/apiGuards';
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -22,6 +23,8 @@ export async function GET(_: Request, { params }: Params) {
 
 // Create a product (name/description/price/currency)
 export async function POST(req: Request, { params }: Params) {
+  const guard = await requirePlatformAdminApi();
+  if (guard.response) return guard.response;
   const { id } = await params;
   const body = await req.json().catch(() => ({}));
   const { name, description, priceInCents, currency } = body || {};

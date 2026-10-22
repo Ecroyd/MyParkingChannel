@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
 import { getServerSupabase } from '@/lib/supabase/server';
+import { requireTenantMemberApi } from '@/lib/auth/apiGuards';
 
 export async function POST(req: Request) {
   try {
     const { bookingIds, tenantId } = await req.json();
+    const guard = await requireTenantMemberApi(tenantId, ['owner', 'admin', 'ops']);
+    if (guard.response) return guard.response;
 
     if (!bookingIds || !Array.isArray(bookingIds) || bookingIds.length === 0) {
       return NextResponse.json({ error: 'No booking IDs provided' }, { status: 400 });

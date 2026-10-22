@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requirePlatformAdminApi } from '@/lib/auth/apiGuards';
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +9,8 @@ function tail(s?: string | null) {
 }
 
 export async function GET() {
+  const guard = await requirePlatformAdminApi();
+  if (guard.response) return guard.response;
   let urlHost = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
   try { urlHost = new URL(urlHost).host; } catch {}
   return NextResponse.json({

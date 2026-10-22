@@ -3,6 +3,18 @@
 // This is the SIMPLEST version - just sends the full raw email
 // Your server can parse it using a Node.js email parser
 
+// Chunked base64: spreading a large Uint8Array into String.fromCharCode(...) throws
+// "Maximum call stack size exceeded" on big emails (e.g. with PDF/XLSX attachments),
+// which silently dropped them.
+function bytesToBase64(bytes) {
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
 export default {
   async fetch() {
     return new Response("ok", { status: 200 });
@@ -34,9 +46,7 @@ export default {
       });
 
       // Convert full email to base64
-      const rawEmailBase64 = btoa(
-        String.fromCharCode(...new Uint8Array(arrayBuffer))
-      );
+      const rawEmailBase64 = bytesToBase64(new Uint8Array(arrayBuffer));
 
       const payload = {
         to: message.to,

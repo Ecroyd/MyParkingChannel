@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSiteContext } from '@/lib/site'
+import { requirePlatformAdminApi } from '@/lib/auth/apiGuards';
 
 export async function GET(req: NextRequest) {
+  const guard = await requirePlatformAdminApi();
+  if (guard.response) return guard.response;
   try {
     const { searchParams } = new URL(req.url)
     const slug = searchParams.get('slug')
