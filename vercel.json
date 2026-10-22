@@ -6,9 +6,7 @@
   "devCommand": "npm run dev",
   "crons": [
     { "path": "/api/internal/cron/email-sender", "schedule": "* * * * *" },
-    { "path": "/api/internal/cron/ingest-canary", "schedule": "*/15 * * * *" },
-    { "path": "/api/internal/cron/parse-received", "schedule": "*/10 * * * *" },
-    { "path": "/api/internal/cron/ingest-retry", "schedule": "7,22,37,52 * * * *" },
+    { "path": "/api/internal/cron/ingest-maintenance", "schedule": "*/15 * * * *" },
     { "path": "/api/internal/suppliers/cavu/cron", "schedule": "*/15 * * * *" },
     { "path": "/api/admin/jobs/aph/export", "schedule": "0 4 * * *" }
   ]
