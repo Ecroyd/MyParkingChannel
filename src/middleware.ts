@@ -47,6 +47,12 @@ function isPlatformHost(rawHost: string | null, normalizedHost: string): boolean
   return false;
 }
 
+function withoutTenantId(source: Headers): Headers {
+  const headers = new Headers(source);
+  headers.delete("x-tenant-id");
+  return headers;
+}
+
 export const config = {
   matcher: [
     // match everything except static files & public assets
@@ -136,9 +142,21 @@ export async function middleware(req: NextRequest) {
     decodedPath.includes("file.svg") ||
     decodedPath.includes("parking") && decodedPath.includes("favicon")
   ) {
+    // x-tenant-id is trusted by resolveTenantIdOrThrow() as a pre-resolved tenant id; middleware never
+    // sets it, so on API calls it can only be client-supplied → strip it. x-tenant-slug is kept: a slug
+    // is public and resolve.ts already accepts the same hint via ?tenant=<slug>.
+    const isApi = url.pathname.startsWith("/api");
+    const spoofedTenantId = isApi && req.headers.has("x-tenant-id");
+
     // Still refresh auth cookies on admin API calls so PWA sessions stay alive.
     if (url.pathname.startsWith("/api/admin") || url.pathname.startsWith("/api/auth")) {
-      return updateSession(req);
+      if (!spoofedTenantId) return updateSession(req);
+      const sessionResponse = await updateSession(req);
+      // Built after updateSession so refreshed request cookies are forwarded too.
+      return copyAuthCookies(sessionResponse, NextResponse.next({ request: { headers: withoutTenantId(req.headers) } }));
+    }
+    if (spoofedTenantId) {
+      return NextResponse.next({ request: { headers: withoutTenantId(req.headers) } });
     }
     return NextResponse.next();
   }

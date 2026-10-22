@@ -55,7 +55,9 @@ describe("CAVU hourly duplicate dedupe + retry finalize", () => {
     expect(rows).toHaveLength(1);
     expect(duplicateDedupeKeys).toBe(1);
     expect(duplicateRowsCollapsed).toBe(1);
-    expect(rows[0].start_at).toBe("2026-06-06T03:00:00.000Z");
+    // Last row in file wins (03:00). Supplier datetimes are car-park local time
+    // with an erroneous "Z" (see sanitizeSupplierDateTimeInput), so 03:00 BST = 02:00Z.
+    expect(rows[0].start_at).toBe("2026-06-06T02:00:00.000Z");
   });
 
   it("builds parse_reason with duplicate_dedupe_keys after successful retry", () => {
@@ -134,26 +136,31 @@ describe("CAVU hourly duplicate dedupe + retry finalize", () => {
   });
 
   it("health banner only lists parse_status=failed files", () => {
+    // parse_outcome is passed to prove it is ignored; the helper only types parse_status.
+    const isFailed = isFileParseFailedForBanner as (file: {
+      parse_status?: string | null;
+      parse_outcome?: string | null;
+    }) => boolean;
     expect(
-      isFileParseFailedForBanner({
+      isFailed({
         parse_status: "failed",
         parse_outcome: "failed",
       })
     ).toBe(true);
     expect(
-      isFileParseFailedForBanner({
+      isFailed({
         parse_status: "parsed",
         parse_outcome: "failed",
       })
     ).toBe(false);
     expect(
-      isFileParseFailedForBanner({
+      isFailed({
         parse_status: "parsed",
         parse_outcome: "parsed",
       })
     ).toBe(false);
     expect(
-      isFileParseFailedForBanner({
+      isFailed({
         parse_status: "pending",
         parse_outcome: null,
       })

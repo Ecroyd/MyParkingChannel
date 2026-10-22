@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/server";
+import { requireTenantMemberApi } from "@/lib/auth/apiGuards";
+import {
+  buildAnprWebhookUrl,
+  generateWebhookToken,
+  hashWebhookToken,
+  loadWebhookTokenHash,
+  saveWebhookTokenHash,
+} from "@/lib/anpr/webhookToken";
 
 export async function GET(req: NextRequest) {
   try {
@@ -75,12 +83,21 @@ export async function GET(req: NextRequest) {
     // Construct webhook URL
     const webhookUrl = `${req.nextUrl.origin}/api/anpr/webhook?tenantId=${tenantId}`;
 
+    // Whether the tenant has opted in to a webhook token (raw token is never stored/returned here)
+    let webhookTokenConfigured = false;
+    try {
+      webhookTokenConfigured = Boolean(await loadWebhookTokenHash(tenantId));
+    } catch (err) {
+      console.warn("Could not read ANPR webhook token status:", err);
+    }
+
     return NextResponse.json({
       success: true,
       data: {
         anpr_provider: settingsData?.anpr_provider || null,
         anpr_api_base_url: baseUrl,
         webhook_url: webhookUrl,
+        webhook_token_configured: webhookTokenConfigured,
       },
     });
   } catch (error: any) {
@@ -89,3 +106,50 @@ export async function GET(req: NextRequest) {
   }
 }
 
+
+/**
+ * POST /api/admin/settings/integrations?tenantId=…  body: { action?: "rotate_webhook_token" | "clear_webhook_token" }
+ * Owner/admin only. "rotate_webhook_token" (default) generates a new ANPR webhook token, stores its
+ * sha256 hash in tenant_secrets (scope 'anpr', key 'anpr_webhook_token_hash') and returns the raw
+ * token + full webhook URL ONCE. From then on /api/anpr/webhook and /api/anpr/events require it for
+ * this tenant. "clear_webhook_token" removes it (back to unauthenticated, deprecated mode).
+ */
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json().catch(() => ({} as any));
+    const tenantId: string | null = req.nextUrl.searchParams.get("tenantId") || body?.tenantId || null;
+
+    const guard = await requireTenantMemberApi(tenantId, ["owner", "admin"]);
+    if (guard.response) return guard.response;
+    const tid = tenantId as string;
+
+    const action = body?.action ?? "rotate_webhook_token";
+
+    if (action === "clear_webhook_token") {
+      await saveWebhookTokenHash(tid, null);
+      return NextResponse.json({
+        success: true,
+        data: { webhook_url: buildAnprWebhookUrl(req.nextUrl.origin, tid), webhook_token_configured: false },
+      });
+    }
+
+    if (action !== "rotate_webhook_token") {
+      return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+    }
+
+    const token = generateWebhookToken();
+    await saveWebhookTokenHash(tid, hashWebhookToken(token));
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        webhook_token: token,
+        webhook_url: buildAnprWebhookUrl(req.nextUrl.origin, tid, token),
+        webhook_token_configured: true,
+      },
+    });
+  } catch (error: any) {
+    console.error("Error rotating ANPR webhook token:", error);
+    return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 });
+  }
+}

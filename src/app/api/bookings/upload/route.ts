@@ -28,7 +28,7 @@ export const POST = withTenant(async (tenant: TenantContext, request: Request) =
       
       try {
         // Parse dates using Postgres function (handles all formats, converts to UTC)
-        const tz = 'Europe/London'; // per-tenant later if needed
+        const tz = tenant.timezone || 'Europe/London'; // tenant-local, fallback London
         const startRaw = row[mapping.start_at];
         const endRaw = row[mapping.end_at];
 

@@ -17,6 +17,7 @@ function stagingRow(
     status,
     external_status: externalStatus ?? null,
     raw_json: { external_status: externalStatus ?? null },
+    customer_name: null as string | null,
   };
 }
 

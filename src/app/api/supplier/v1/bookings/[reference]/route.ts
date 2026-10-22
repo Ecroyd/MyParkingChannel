@@ -6,6 +6,7 @@ import {
 } from '@/lib/supplier/auth';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { calculateAvailability } from '@/lib/availability/engine';
+import { normalizeSupplierTimestamp } from '@/lib/supplier/time';
 
 type BookingPatchBody = {
   start_at?: string;
@@ -202,8 +203,15 @@ export async function PATCH(
     const update: any = {};
 
     // Track whether dates are changing
-    const newStart = json.start_at ?? existing.start_at;
-    const newEnd = json.end_at ?? existing.end_at;
+    // Offset-less timestamps are car-park local (Europe/London); Z/offset unchanged.
+    const newStart =
+      typeof json.start_at === 'string'
+        ? normalizeSupplierTimestamp(json.start_at)
+        : json.start_at ?? existing.start_at;
+    const newEnd =
+      typeof json.end_at === 'string'
+        ? normalizeSupplierTimestamp(json.end_at)
+        : json.end_at ?? existing.end_at;
 
     // If either start_at or end_at provided, we will treat as a date change.
     const isDateChange =

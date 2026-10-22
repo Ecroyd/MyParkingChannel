@@ -1,5 +1,6 @@
 // src/lib/tenantSecrets/holidayExtras.ts
 import { supabaseAdmin } from "@/lib/supabase/server";
+import { decryptSecret as decryptStoredSecret } from "@/lib/crypto/secrets";
 
 export type HolidayExtrasEnv = "sandbox" | "live";
 
@@ -13,11 +14,9 @@ export interface HolidayExtrasConfig {
   lang: string;   // 'en', 'de', etc.
 }
 
-// Simple decryption helper (matches pattern from cron files)
+// value_ciphertext: `enc:v1:` (AES-256-GCM, ENCRYPTION_KEY) or legacy base64.
 function decryptSecret(encryptedValue: string): string {
-  // TODO: Implement proper decryption using ENCRYPTION_KEY
-  // For now, using base64 decode (matches existing pattern)
-  return Buffer.from(encryptedValue, 'base64').toString();
+  return decryptStoredSecret(encryptedValue, 'base64');
 }
 
 export async function getHolidayExtrasConfig(

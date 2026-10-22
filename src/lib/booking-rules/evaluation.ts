@@ -1,4 +1,5 @@
 import { BookingRule, RuleEvaluationResult, BookingDates } from '@/lib/validation/booking-rules'
+import { utcToZonedTime } from 'date-fns-tz'
 
 /**
  * Evaluate booking rules against specific booking dates
@@ -6,9 +7,16 @@ import { BookingRule, RuleEvaluationResult, BookingDates } from '@/lib/validatio
  * @param dates Booking start and end dates
  * @returns Evaluation result with blocking status and surcharge amount
  */
-export function evaluateBookingRules(rules: BookingRule[], dates: BookingDates): RuleEvaluationResult {
-  const startDate = new Date(dates.start_at)
-  const endDate = new Date(dates.end_at)
+export function evaluateBookingRules(
+  rules: BookingRule[],
+  dates: BookingDates,
+  timeZone: string = 'Europe/London'
+): RuleEvaluationResult {
+  // Day-of-week, month and arrival-time rules are about the car park's local calendar.
+  // Read them in the car park's timezone, not the server's (UTC on Vercel), otherwise an
+  // arrival just after midnight BST is judged against the previous day.
+  const startDate = utcToZonedTime(new Date(dates.start_at), timeZone)
+  const endDate = utcToZonedTime(new Date(dates.end_at), timeZone)
   
   const arrivalDay = startDate.getDay() // 0 = Sunday, 6 = Saturday
   const arrivalMonth = startDate.getMonth() + 1 // 1-12

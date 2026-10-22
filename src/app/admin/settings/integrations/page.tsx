@@ -16,6 +16,9 @@ export default function IntegrationsPage() {
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookTokenConfigured, setWebhookTokenConfigured] = useState(false);
+  const [webhookTokenShown, setWebhookTokenShown] = useState(false);
+  const [rotatingToken, setRotatingToken] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -35,12 +38,44 @@ export default function IntegrationsPage() {
         setProvider(json.data.anpr_provider || "");
         setBaseUrl(json.data.anpr_api_base_url || "");
         setWebhookUrl(json.data.webhook_url || "");
+        setWebhookTokenConfigured(Boolean(json.data.webhook_token_configured));
         // Don't load API key for security
       }
     } catch (err) {
       console.error("Failed to load settings:", err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function rotateWebhookToken() {
+    if (!tenantId) return;
+    if (
+      webhookTokenConfigured &&
+      !window.confirm("Rotating the token stops the old webhook URL working. Update your ANPR vendor with the new URL. Continue?")
+    ) {
+      return;
+    }
+    setRotatingToken(true);
+    try {
+      const res = await fetch(`/api/admin/settings/integrations?tenantId=${tenantId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "rotate_webhook_token" }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || "Failed to generate token");
+      setWebhookUrl(json.data.webhook_url);
+      setWebhookTokenConfigured(true);
+      setWebhookTokenShown(true);
+      toast({
+        title: "Webhook token generated",
+        description: "Copy the new URL now - the token is only shown once.",
+      });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message || "Failed to generate token", variant: "destructive" });
+    } finally {
+      setRotatingToken(false);
     }
   }
 
@@ -161,7 +196,7 @@ export default function IntegrationsPage() {
                   type="button"
                   variant="outline"
                   onClick={() => {
-                    const url = `${window.location.origin}/api/anpr/webhook?tenantId=${tenantId}`;
+                    const url = webhookUrl || `${window.location.origin}/api/anpr/webhook?tenantId=${tenantId}`;
                     navigator.clipboard.writeText(url);
                     toast({
                       title: "Copied",
@@ -175,6 +210,19 @@ export default function IntegrationsPage() {
               <p className="text-xs text-gray-500">
                 Provide this URL to your ANPR vendor to receive events
               </p>
+              <div className="flex items-center gap-2 pt-1">
+                <Button type="button" variant="outline" size="sm" onClick={rotateWebhookToken} disabled={rotatingToken}>
+                  {rotatingToken ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  {webhookTokenConfigured ? "Rotate webhook token" : "Generate webhook token"}
+                </Button>
+                <span className="text-xs text-gray-500">
+                  {webhookTokenShown
+                    ? "Token included in the URL above. It is only shown once - copy it now."
+                    : webhookTokenConfigured
+                    ? "Token required: calls without it are rejected. The token is not shown again; rotate to get a new URL."
+                    : "No token set: the webhook accepts unauthenticated calls (deprecated)."}
+                </span>
+              </div>
             </div>
 
             <Button type="submit" disabled={saving} className="w-full">

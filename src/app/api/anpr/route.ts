@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { headers } from 'next/headers'
+import { findActiveGateDeviceByApiKey } from '@/lib/anpr/gateDeviceLookup'
 import { zonedTimeToUtc } from 'date-fns-tz'
 import { parseISO } from 'date-fns'
 import { applyBookingOccupancyAction } from '@/lib/ops/occupancyAction'
@@ -14,17 +15,18 @@ export async function POST(request: Request) {
   }
 
   // Find device by API key
-  const { data: device, error: deviceError } = await supabase
-    .from('gate_devices')
-    .select(`
+  // Hashed key (api_key_hash) first, then legacy plain-text api_key
+  const device = await findActiveGateDeviceByApiKey<any>(
+    supabase,
+    apiKey,
+    `
       *,
       tenants!inner(id, slug, timezone)
-    `)
-    .eq('api_key', apiKey)
-    .eq('status', 'active')
-    .single()
+    `,
+    'ANPR'
+  )
 
-  if (deviceError || !device) {
+  if (!device) {
     return Response.json({ error: 'Invalid API key' }, { status: 401 })
   }
 

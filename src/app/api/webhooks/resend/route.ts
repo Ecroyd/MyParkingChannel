@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server-admin';
-import crypto from 'crypto';
+import { readSvixHeaders, verifySvixSignature } from '@/lib/crypto/svix';
 
 /**
  * Resend webhook handler
@@ -9,23 +9,19 @@ import crypto from 'crypto';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.text();
-    const signature = req.headers.get('resend-signature');
 
-    // Verify webhook signature if secret is configured
-    const webhookSecret = process.env.RESEND_WEBHOOK_SECRET;
-    if (webhookSecret && signature) {
-      const expectedSignature = crypto
-        .createHmac('sha256', webhookSecret)
-        .update(body)
-        .digest('hex');
-
-      if (signature !== expectedSignature) {
-        console.error('[RESEND WEBHOOK] Invalid signature');
-        return NextResponse.json(
-          { error: 'Invalid signature' },
-          { status: 401 }
-        );
+    // Resend signs webhooks with Svix (svix-id / svix-timestamp / svix-signature).
+    // RESEND_WEBHOOK_SECRET (whsec_…) set   → a valid signature is required.
+    // RESEND_WEBHOOK_SECRET unset           → accepted unverified (deprecated; warning logged).
+    const webhookSecret = process.env.RESEND_WEBHOOK_SECRET?.trim();
+    if (webhookSecret) {
+      const result = verifySvixSignature(webhookSecret, readSvixHeaders(req.headers), body);
+      if (!result.ok) {
+        console.error(`[RESEND WEBHOOK] Signature verification failed: ${result.reason}`);
+        return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
       }
+    } else {
+      console.warn('[RESEND WEBHOOK] RESEND_WEBHOOK_SECRET not set - accepting unverified webhook (set it to the whsec_ signing secret from Resend)');
     }
 
     const payload = JSON.parse(body);

@@ -11,6 +11,8 @@ import {
   BookingCreateResponse,
 } from '@/lib/supplier/types';
 import { makeDedupeKey, checkDuplicateBooking } from '@/lib/bookings/dedupe';
+import { normalizeSupplierTimestamp } from '@/lib/supplier/time';
+import crypto from 'crypto';
 
 const DAY_MS = 1000 * 60 * 60 * 24;
 
@@ -96,6 +98,41 @@ function bookingTouchesDate(booking: { start_at: string; end_at: string }, dateS
 }
 
 /**
+ * Idempotency-Key header → bookings.dedupe_key (existing column, also used by
+ * checkDuplicateBooking). Namespaced per partner; tenant scoping comes from the lookup.
+ */
+const IDEMPOTENCY_KEY_RE = /^[\x21-\x7E]{1,255}$/;
+function makeIdempotencyDedupeKey(partnerNameLower: string, key: string): string {
+  const hash = crypto
+    .createHash('sha256')
+    .update(`${partnerNameLower}|${key}`)
+    .digest('hex')
+    .slice(0, 32);
+  return `idem:${hash}`;
+}
+
+/**
+ * Count bookings per stay date (same rule as the pre-insert capacity check).
+ */
+function countOccupancyByDate(
+  bookings: { start_at: string; end_at: string }[],
+  stayDates: string[]
+): Record<string, number> {
+  const occupancyByDate: Record<string, number> = {};
+  for (const dateStr of stayDates) {
+    occupancyByDate[dateStr] = 0;
+  }
+  bookings.forEach((booking) => {
+    for (const dateStr of stayDates) {
+      if (bookingTouchesDate(booking, dateStr)) {
+        occupancyByDate[dateStr] += 1;
+      }
+    }
+  });
+  return occupancyByDate;
+}
+
+/**
  * Check if a booking overlaps with a time range, accounting for a 1-hour buffer after the booking ends.
  * A booking occupies space from start_at to (end_at + 1 hour).
  */
@@ -161,7 +198,35 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const body = validationResult.data;
+    // Offset-less timestamps are car-park local (Europe/London), not server UTC.
+    // Timestamps with Z / an explicit offset are passed through unchanged.
+    const body = {
+      ...validationResult.data,
+      start_at: normalizeSupplierTimestamp(validationResult.data.start_at),
+      end_at: normalizeSupplierTimestamp(validationResult.data.end_at),
+    };
+
+    // Optional Idempotency-Key header (works with or without external_reference)
+    const idempotencyKeyRaw = req.headers.get('idempotency-key');
+    let idempotencyDedupeKey: string | null = null;
+    if (idempotencyKeyRaw !== null) {
+      const idempotencyKey = idempotencyKeyRaw.trim();
+      if (!IDEMPOTENCY_KEY_RE.test(idempotencyKey)) {
+        return NextResponse.json(
+          {
+            error: {
+              code: 'INVALID_REQUEST',
+              message: 'Idempotency-Key must be 1-255 printable ASCII characters without spaces.',
+            },
+          },
+          { status: 400 }
+        );
+      }
+      idempotencyDedupeKey = makeIdempotencyDedupeKey(
+        auth.partnerName.toLowerCase(),
+        idempotencyKey
+      );
+    }
 
     // Validate date formats and range
     const startDate = new Date(body.start_at);
@@ -195,9 +260,24 @@ export async function POST(req: NextRequest) {
     const partnerNameLower = auth.partnerName.toLowerCase();
     const supabase = createAdminClient();
 
-    // Enforce idempotency via external_reference
+    // Enforce idempotency via external_reference. It is stored as the booking's reference
+    // (dedupe_key is never set to it), so look it up there, scoped to supplier-API bookings.
     if (externalRef) {
-      const existing = await checkDuplicateBooking(supabase, auth.tenantId, externalRef);
+      const existing = await findPartnerBookingByReference(supabase, auth.tenantId, externalRef);
+      if (existing) {
+        const resp: BookingCreateResponse = {
+          reference: existing.reference,
+          status: existing.status === 'reserved' ? 'confirmed' : (existing.status as any),
+          source: partnerNameLower,
+          created_at: existing.created_at,
+        };
+        return NextResponse.json(resp, { status: 200 });
+      }
+    }
+
+    // Enforce idempotency via Idempotency-Key header (replays return the original booking)
+    if (idempotencyDedupeKey) {
+      const existing = await checkDuplicateBooking(supabase, auth.tenantId, idempotencyDedupeKey);
       if (existing) {
         const resp: BookingCreateResponse = {
           reference: existing.reference,
@@ -328,18 +408,7 @@ export async function POST(req: NextRequest) {
     });
 
     // Count overlapping bookings per date for capacity checking
-    const occupancyByDate: Record<string, number> = {};
-    for (const dateStr of stayDates) {
-      occupancyByDate[dateStr] = 0;
-    }
-
-    overlappingBookings.forEach((booking: any) => {
-      for (const dateStr of stayDates) {
-        if (bookingTouchesDate(booking, dateStr)) {
-          occupancyByDate[dateStr] += 1;
-        }
-      }
-    });
+    const occupancyByDate = countOccupancyByDate(overlappingBookings, stayDates);
 
     // Check if there's capacity
     for (const dateStr of stayDates) {
@@ -427,6 +496,8 @@ export async function POST(req: NextRequest) {
       notes: `Supplier API booking from ${partnerName} (product_id=${rawBody.product_id ?? 'n/a'}, external_ref=${
         rawBody.external_reference ?? 'n/a'
       })`,
+      // Only set when an Idempotency-Key header was sent (unchanged payload otherwise)
+      ...(idempotencyDedupeKey ? { dedupe_key: idempotencyDedupeKey } : {}),
     };
 
     const { data, error } = await supabase
@@ -449,9 +520,23 @@ export async function POST(req: NextRequest) {
           source: auth.partnerName,
         });
 
+        // Concurrent retry with the same Idempotency-Key
+        if (idempotencyDedupeKey) {
+          const existing = await checkDuplicateBooking(supabase, auth.tenantId, idempotencyDedupeKey);
+          if (existing) {
+            const resp: BookingCreateResponse = {
+              reference: existing.reference,
+              status: existing.status === 'reserved' ? 'confirmed' : (existing.status as any),
+              source: partnerNameLower,
+              created_at: existing.created_at,
+            };
+            return NextResponse.json(resp, { status: 200 });
+          }
+        }
+
         // Try to find existing booking by external_reference if provided
         if (externalRef) {
-          const existing = await checkDuplicateBooking(supabase, auth.tenantId, externalRef);
+          const existing = await findPartnerBookingByReference(supabase, auth.tenantId, externalRef);
           if (existing) {
             const resp: BookingCreateResponse = {
               reference: existing.reference,
@@ -542,6 +627,77 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // 5) Post-insert capacity re-check (no DB lock is available here).
+    // Count overlapping bookings created before this one (created_at, then id as
+    // tie-break) plus this booking. If a concurrent request filled the last space
+    // first, roll this booking back so only the later racer loses. When capacity
+    // was fine this is identical to the pre-check and changes nothing.
+    {
+      const { data: recheckRows, error: recheckError } = await supabase
+        .from('bookings')
+        .select('id, created_at, start_at, end_at, status')
+        .eq('tenant_id', auth.tenantId)
+        .eq('product_id', body.product_id)
+        .in('status', ['reserved', 'confirmed', 'checked_in'])
+        .lt('start_at', body.end_at)
+        .gt('end_at', body.start_at);
+
+      if (!recheckError) {
+        const ownCreated = new Date(data.created_at).getTime();
+        const earlierOverlapping = (recheckRows ?? []).filter((b: any) => {
+          if (b.id === data.id) return false;
+          if (!bookingOverlapsTimeRange(b, body.start_at, body.end_at)) return false;
+          const t = new Date(b.created_at).getTime();
+          return t < ownCreated || (t === ownCreated && String(b.id) < String(data.id));
+        });
+        const recount = countOccupancyByDate(
+          [...earlierOverlapping, { start_at: body.start_at, end_at: body.end_at }],
+          stayDates
+        );
+        const overbookedDate = stayDates.find((dateStr) => {
+          const capacity = capacityByDate[dateStr];
+          return capacity !== null && (recount[dateStr] ?? 0) > capacity;
+        });
+
+        if (overbookedDate) {
+          console.warn('[SUPPLIER_BOOKING] Capacity race lost; rolling back booking', {
+            bookingId: data.id,
+            tenantId: auth.tenantId,
+            productId: body.product_id,
+            date: overbookedDate,
+          });
+          const { error: deleteError } = await supabase
+            .from('bookings')
+            .delete()
+            .eq('id', data.id)
+            .eq('tenant_id', auth.tenantId);
+          if (deleteError) {
+            // Fall back to cancelling so it does not hold a space
+            await supabase
+              .from('bookings')
+              .update({ status: 'cancelled' })
+              .eq('id', data.id)
+              .eq('tenant_id', auth.tenantId);
+          }
+          return NextResponse.json(
+            {
+              error: {
+                code: 'NO_AVAILABILITY',
+                message: `No capacity available for date ${overbookedDate}`,
+              },
+            },
+            { status: 409 }
+          );
+        }
+      } else {
+        console.warn('[SUPPLIER_BOOKING] Capacity re-check query failed', {
+          code: recheckError.code,
+          message: recheckError.message,
+          bookingId: data.id,
+        });
+      }
+    }
+
     return NextResponse.json(
       {
         reference: data.reference,
@@ -576,4 +732,25 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+
+/** A supplier-API booking already created with this external_reference (stored as reference). */
+async function findPartnerBookingByReference(
+  supabase: ReturnType<typeof createAdminClient>,
+  tenantId: string,
+  reference: string
+): Promise<{ id: string; reference: string; status: string; created_at: string; source?: string } | null> {
+  const { data, error } = await supabase
+    .from('bookings')
+    .select('id, reference, status, created_at, source')
+    .eq('tenant_id', tenantId)
+    .eq('reference', reference)
+    .eq('source', 'supplier_api')
+    .maybeSingle();
+  if (error) {
+    console.error('[SUPPLIER_BOOKING] external_reference lookup failed', error.message);
+    return null;
+  }
+  return data ?? null;
 }

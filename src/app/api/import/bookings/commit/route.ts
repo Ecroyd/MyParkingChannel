@@ -217,7 +217,13 @@ export async function POST(req: Request) {
   const errors: Array<{ rowIndex: number; reason: string; rowData: any }> = [];
   let successCount = 0;
   let skippedCount = 0;
-  const tz = 'Europe/London';
+  // Tenant-local timezone for naive supplier times (fallback Europe/London)
+  const { data: tenantTzRow } = await supabaseAdmin()
+    .from("tenants")
+    .select("timezone")
+    .eq("id", tenantId)
+    .maybeSingle();
+  const tz: string = tenantTzRow?.timezone || 'Europe/London';
   const importFileId = null; // We use import_run_id instead
 
   console.log(`[IMPORT] Starting to process ${rows.length} rows for tenant ${tenantId}`);

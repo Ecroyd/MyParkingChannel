@@ -91,7 +91,7 @@ describe("EXTZ10 file detection and midnight override", () => {
       expect(isExtz10File("EXT1180126.txt")).toBe(false);
       expect(isExtz10File("SOMEOTHER.txt")).toBe(false);
       expect(isExtz10File("aph-booking.csv")).toBe(false);
-      expect(isExtz10File("EXTZ10260126")).toBe(false); // No .txt extension but should still match prefix
+      expect(isExtz10File("EXTZ10260126")).toBe(true); // No .txt extension but should still match prefix
     });
 
     test("handles edge cases", () => {

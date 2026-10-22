@@ -9,7 +9,8 @@ const mockRules: BookingRule[] = [
     type: 'return',
     rule_kind: 'blackout',
     applies_to_days: [6, 0], // Saturday and Sunday
-    month_range: [4, 10], // April to October
+    date_range_start: '2024-04-01', // April to October
+    date_range_end: '2024-10-31',
     specific_date: null,
     surcharge_amount: null,
     notes: 'No weekend returns Apr-Oct',
@@ -21,7 +22,8 @@ const mockRules: BookingRule[] = [
     type: 'arrival',
     rule_kind: 'surcharge',
     applies_to_days: [5], // Friday
-    month_range: [8, 8], // August only
+    date_range_start: '2024-08-01', // August only
+    date_range_end: '2024-08-31',
     specific_date: null,
     surcharge_amount: 15,
     notes: 'Peak Friday arrivals in August',
@@ -33,7 +35,6 @@ const mockRules: BookingRule[] = [
     type: 'both',
     rule_kind: 'blackout',
     applies_to_days: null,
-    month_range: null,
     specific_date: '2024-12-25',
     surcharge_amount: null,
     notes: 'Christmas Day closed',
@@ -45,8 +46,8 @@ describe('Booking Rules Evaluation', () => {
   test('should block weekend returns in summer', () => {
     // Saturday return in June (should be blocked)
     const result = evaluateBookingRules(mockRules, {
-      start_at: '2024-06-15T10:00:00Z', // Friday arrival
-      end_at: '2024-06-16T18:00:00Z'    // Saturday return
+      start_at: '2024-06-15T10:00:00Z', // Saturday arrival
+      end_at: '2024-06-16T18:00:00Z'    // Sunday return
     })
 
     expect(result.isBlocked).toBe(true)
@@ -59,7 +60,7 @@ describe('Booking Rules Evaluation', () => {
     // Friday arrival in August (should have surcharge)
     const result = evaluateBookingRules(mockRules, {
       start_at: '2024-08-16T10:00:00Z', // Friday arrival
-      end_at: '2024-08-18T18:00:00Z'    // Sunday return
+      end_at: '2024-08-20T18:00:00Z'    // Tuesday return (avoids weekend-return blackout)
     })
 
     expect(result.isBlocked).toBe(false)
@@ -115,7 +116,8 @@ describe('Booking Rules Evaluation', () => {
         type: 'arrival',
         rule_kind: 'surcharge',
         applies_to_days: [5], // Friday
-        month_range: [8, 8], // August
+        date_range_start: '2024-08-01', // August
+        date_range_end: '2024-08-31',
         specific_date: null,
         surcharge_amount: 10,
         notes: 'Additional Friday surcharge',
@@ -126,7 +128,7 @@ describe('Booking Rules Evaluation', () => {
     // Friday arrival in August (should have both surcharges)
     const result = evaluateBookingRules(additionalRules, {
       start_at: '2024-08-16T10:00:00Z', // Friday arrival
-      end_at: '2024-08-18T18:00:00Z'    // Sunday return
+      end_at: '2024-08-20T18:00:00Z'    // Tuesday return (avoids weekend-return blackout)
     })
 
     expect(result.isBlocked).toBe(false)
@@ -144,7 +146,8 @@ export const exampleUsage = `
   type: 'return',
   rule_kind: 'blackout',
   applies_to_days: [6, 0], // Saturday+Sunday
-  month_range: [4, 10],    // April–October
+  date_range_start: '2025-04-01', // April–October
+  date_range_end: '2025-10-31',
   notes: 'No Sat/Sun returns Apr–Oct'
 }
 
@@ -161,8 +164,41 @@ export const exampleUsage = `
   type: 'arrival',
   rule_kind: 'surcharge',
   applies_to_days: [5],    // Friday
-  month_range: [8, 8],     // August
+  date_range_start: '2025-08-01', // August
+  date_range_end: '2025-08-31',
   surcharge_amount: 15,
   notes: 'Peak Friday arrivals in August'
 }
 `
+
+describe('timezone handling', () => {
+  const saturdayArrivalSurcharge: BookingRule = {
+    id: 'tz-1',
+    tenant_id: 'tenant-1',
+    type: 'arrival',
+    rule_kind: 'surcharge',
+    applies_to_days: [6],
+    date_range_start: null,
+    date_range_end: null,
+    specific_date: null,
+    surcharge_amount: 10,
+    notes: 'Saturday arrivals',
+    created_at: '2024-01-01T00:00:00Z',
+  } as unknown as BookingRule
+
+  it('judges the day in UK time, not server UTC (00:30 BST Saturday = 23:30Z Friday)', () => {
+    const result = evaluateBookingRules([saturdayArrivalSurcharge], {
+      start_at: '2024-08-02T23:30:00Z',
+      end_at: '2024-08-06T10:00:00Z',
+    })
+    expect(result.surchargeAmount).toBe(10)
+  })
+
+  it('does not match a Friday evening arrival in UK time', () => {
+    const result = evaluateBookingRules([saturdayArrivalSurcharge], {
+      start_at: '2024-08-02T21:30:00Z',
+      end_at: '2024-08-06T10:00:00Z',
+    })
+    expect(result.surchargeAmount).toBe(0)
+  })
+})

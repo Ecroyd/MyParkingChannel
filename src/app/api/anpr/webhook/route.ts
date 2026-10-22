@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
+import { authorizeAnprWebhook } from "@/lib/anpr/webhookToken";
 
-// Vendors should include ?tenantId=... or a header for routing
+// Vendors should include ?tenantId=... or a header for routing.
+// Auth: if the tenant has generated a webhook token (Admin → Settings → Integrations), the call must
+// carry it as `x-anpr-token` header or `?token=`. Tenants without a token are accepted (deprecated).
 export async function POST(req: NextRequest) {
   try {
     const tenantId = req.nextUrl.searchParams.get("tenantId");
     if (!tenantId) {
       return NextResponse.json({ error: "tenantId required" }, { status: 400 });
     }
+
+    const denied = await authorizeAnprWebhook(req, tenantId, "ANPR WEBHOOK");
+    if (denied) return denied;
 
     const payload = await req.json().catch(() => ({}));
 

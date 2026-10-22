@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createServerClient, createAdminClient } from "@/lib/supabase/server";
 import { quoteExtensionCents } from "@/lib/pricing/quoteExtension";
+import { decryptSecret } from "@/lib/crypto/secrets";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -58,7 +59,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     let stripe: Stripe | null = null;
     if (secrets?.stripe_secret_key) {
-      stripe = new Stripe(secrets.stripe_secret_key, { apiVersion: "2025-08-27.basil" });
+      // enc:v1 (ENCRYPTION_KEY) or legacy plain text, see src/lib/crypto/secrets.ts
+      stripe = new Stripe(decryptSecret(secrets.stripe_secret_key, "plain"), { apiVersion: "2025-08-27.basil" });
     }
 
     let intent: any = null;

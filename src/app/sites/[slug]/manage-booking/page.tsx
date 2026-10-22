@@ -28,6 +28,14 @@ type Booking = {
   status?: string;
 };
 
+// datetime-local values on this page are rendered from (and read back as) UTC ISO strings.
+function toInputValue(iso: string | null | undefined): string {
+  return iso ? new Date(iso).toISOString().slice(0, 16) : '';
+}
+function fromInputValue(value: string): string {
+  return new Date(`${value}:00Z`).toISOString();
+}
+
 export default function ManageBookingPage() {
   const params = useParams();
   const tenantSlug = params.slug as string;
@@ -61,6 +69,19 @@ export default function ManageBookingPage() {
     start_at: '',
     end_at: '',
   });
+
+  // Returning from Stripe Checkout for a paid extension (the webhook applies it once paid).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const qs = new URLSearchParams(window.location.search);
+    if (qs.get('extended') === '1') {
+      setSuccess(
+        'Thank you - your payment has been received. Your extension is confirmed as soon as the payment completes (usually within a minute). Find your booking again below to see your new pick-up time.'
+      );
+    } else if (qs.get('extend_cancelled') === '1') {
+      setErr('Payment was cancelled, so your booking has not been extended.');
+    }
+  }, []);
 
   // Determine if booking is direct/manual (full features) or channel (limited)
   const isDirectBooking = booking ? (booking.source === 'direct' || booking.source === 'manual') : false;
@@ -154,13 +175,14 @@ export default function ManageBookingPage() {
         flight_number: form.flight_number.trim() || null,
       };
 
-      // Only allow date changes for direct/manual bookings
+      // Only allow date changes for direct/manual bookings, and only send them when edited.
+      // The inputs are filled from UTC ISO strings, so read them back as UTC.
       if (isDirectBooking) {
-        if (form.start_at) {
-          changes.start_at = new Date(form.start_at).toISOString();
+        if (form.start_at && form.start_at !== toInputValue(booking.start_at)) {
+          changes.start_at = fromInputValue(form.start_at);
         }
-        if (form.end_at) {
-          changes.end_at = new Date(form.end_at).toISOString();
+        if (form.end_at && form.end_at !== toInputValue(booking.end_at)) {
+          changes.end_at = fromInputValue(form.end_at);
         }
       }
 
@@ -174,6 +196,14 @@ export default function ManageBookingPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
+        if (data?.dateChangeRefused) {
+          // Put the date inputs back to the booking's current dates.
+          setForm((prev) => ({
+            ...prev,
+            start_at: toInputValue(booking.start_at),
+            end_at: toInputValue(booking.end_at),
+          }));
+        }
         throw new Error(data?.message || 'Unable to save changes.');
       }
 
@@ -215,8 +245,8 @@ export default function ManageBookingPage() {
     setLoading(true);
 
     try {
-      const newEndAt = new Date(extendEndDate).toISOString();
-      
+      const newEndAt = fromInputValue(extendEndDate);
+
       const res = await fetch('/api/manage-booking/extend', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -230,12 +260,21 @@ export default function ManageBookingPage() {
         throw new Error(data?.message || 'Unable to extend booking.');
       }
 
-      const data = (await res.json()) as { booking: Booking };
-      setBooking(data.booking);
-      setExtendEndDate(data.booking.end_at ? new Date(data.booking.end_at).toISOString().slice(0, 16) : '');
+      const data = (await res.json()) as { booking?: Booking; checkoutUrl?: string };
+
+      // Extra nights cost more: pay on Stripe first; the booking is updated once payment completes.
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+        return;
+      }
+      if (!data.booking) throw new Error('Unable to extend booking.');
+      const extended = data.booking;
+
+      setBooking(extended);
+      setExtendEndDate(extended.end_at ? new Date(extended.end_at).toISOString().slice(0, 16) : '');
       setForm(prev => ({
         ...prev,
-        end_at: data.booking.end_at ? new Date(data.booking.end_at).toISOString().slice(0, 16) : '',
+        end_at: extended.end_at ? new Date(extended.end_at).toISOString().slice(0, 16) : '',
       }));
       setStep('edit');
       setSuccess('Booking extended successfully! ✅');
@@ -613,6 +652,10 @@ export default function ManageBookingPage() {
                     disabled={disabled}
                     required
                   />
+                  <p className="text-xs text-slate-500">
+                    If the extra time costs more, you&apos;ll be taken to secure payment and your booking is
+                    extended once payment completes.
+                  </p>
                   <p className="text-xs text-slate-500">
                     Current pick-up: {new Date(booking.end_at).toLocaleString('en-GB', { 
                       day: '2-digit',

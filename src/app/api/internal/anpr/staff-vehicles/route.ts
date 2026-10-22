@@ -1,29 +1,9 @@
 // GET /api/internal/anpr/staff-vehicles - Get staff vehicles for a tenant
-// Authenticated via Bearer token (tenant relay token from tenant_secrets)
+// Authenticated via relay token (see src/lib/anpr/relayTokenAuth.ts)
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import crypto from 'crypto';
-
-/**
- * Simple decryption helper (matches pattern from other integrations)
- * TODO: Implement proper decryption using ENCRYPTION_KEY
- */
-function decryptSecret(encryptedValue: string): string {
-  return Buffer.from(encryptedValue, 'base64').toString();
-}
-
-/**
- * Timing-safe comparison to prevent timing attacks
- */
-function timingSafeEqual(a: string, b: string): boolean {
-  const aBuf = Buffer.from(a, 'utf8');
-  const bBuf = Buffer.from(b, 'utf8');
-  if (aBuf.length !== bBuf.length) {
-    return false;
-  }
-  return crypto.timingSafeEqual(aBuf, bBuf);
-}
+import { getRelayTokenFromRequest, verifyRelayToken } from '@/lib/anpr/relayTokenAuth';
 
 export async function GET(req: NextRequest) {
   try {
@@ -38,53 +18,16 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Authenticate via Bearer token
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    // Authenticate relay token (Bearer / x-relay-token / ?token=). Accepts the tenant_secrets
+    // relay token, the anpr_sites hash (rotate-token) or the legacy env token.
+    const relayAuth = await verifyRelayToken(tenantId, getRelayTokenFromRequest(req));
+    if (!relayAuth.ok) {
       return NextResponse.json(
-        { error: 'Missing or invalid Authorization header. Expected: Bearer <token>' },
-        { status: 401 }
+        { error: relayAuth.status === 401 ? 'Invalid relay token' : relayAuth.error },
+        { status: relayAuth.status }
       );
     }
-
-    const providedToken = authHeader.substring(7); // Remove "Bearer " prefix
     const supabase = createAdminClient();
-
-    // Fetch relay token from tenant_secrets
-    const { data: secret, error: secretError } = await supabase
-      .from('tenant_secrets')
-      .select('value_ciphertext')
-      .eq('tenant_id', tenantId)
-      .eq('scope', 'anpr')
-      .eq('key', 'anpr_relay_token')
-      .maybeSingle();
-
-    if (secretError || !secret || !secret.value_ciphertext) {
-      return NextResponse.json(
-        { error: 'Invalid relay token' },
-        { status: 401 }
-      );
-    }
-
-    // Decrypt the stored token
-    let storedToken: string;
-    try {
-      storedToken = decryptSecret(secret.value_ciphertext);
-    } catch (error) {
-      console.error('[ANPR Staff Vehicles] Error decrypting relay token:', error);
-      return NextResponse.json(
-        { error: 'Invalid relay token' },
-        { status: 401 }
-      );
-    }
-
-    // Timing-safe comparison
-    if (!timingSafeEqual(providedToken, storedToken)) {
-      return NextResponse.json(
-        { error: 'Invalid relay token' },
-        { status: 401 }
-      );
-    }
 
     // Fetch active staff vehicles for this tenant
     const { data: vehicles, error: fetchError } = await supabase

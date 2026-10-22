@@ -4,6 +4,7 @@ import { getServerSupabase } from '@/lib/supabase/server';
 import { getServiceSupabase } from '@/lib/supabase/service';
 import { createAdminClient } from '@/lib/supabase/server';
 import { requireTenantMemberApi } from "@/lib/auth/apiGuards";
+import { encryptSecret } from "@/lib/crypto/secrets";
 
 export async function GET(req: NextRequest) {
   try {
@@ -83,7 +84,9 @@ export async function POST(req: NextRequest) {
       .upsert({
         tenant_id: tenantId,
         stripe_publishable_key: stripePublishableKey || null,
-        stripe_secret_key: stripeSecretKey || null,
+        // AES-256-GCM (`enc:v1:`) when ENCRYPTION_KEY is set, otherwise plain text as before.
+        // Readers must use decryptSecret(value, 'plain') from @/lib/crypto/secrets.
+        stripe_secret_key: stripeSecretKey ? encryptSecret(stripeSecretKey, "plain") : null,
         updated_at: new Date().toISOString()
       });
 

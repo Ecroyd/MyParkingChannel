@@ -8,7 +8,6 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { startOfDay } from 'date-fns';
 import { utcToZonedTime, zonedTimeToUtc } from 'date-fns-tz';
-import path from 'path';
 
 export const DEFAULT_TENANT_TIMEZONE = 'Europe/London';
 
@@ -319,6 +318,8 @@ export function overrideStartToMidnight(
 }
 
 export function isExtz10File(filename: string): boolean {
-  const basename = path.basename(filename);
+  // Split on both POSIX and Windows separators: path.basename on the server
+  // (POSIX) does not treat '\\' as a separator, so "C:\\data\\EXTZ10..." was missed.
+  const basename = filename.split(/[\\/]/).pop() ?? '';
   return basename.toUpperCase().startsWith('EXTZ10');
 }

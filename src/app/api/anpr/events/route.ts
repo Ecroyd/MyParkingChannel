@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/server-admin";
+import { authorizeAnprWebhook } from "@/lib/anpr/webhookToken";
 
 const EventSchema = z
   .object({
@@ -74,6 +75,15 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+  }
+
+  // Per-tenant opt-in token (x-anpr-token / ?token=), same rules as /api/anpr/webhook.
+  const tenantIds = Array.from(
+    new Set(events.map((e: any) => String(e.tenant_id ?? e.tenantId)))
+  ) as string[];
+  for (const tid of tenantIds) {
+    const denied = await authorizeAnprWebhook(req, tid, "ANPR EVENTS");
+    if (denied) return denied;
   }
 
   const rows = events.map((e: any) => {
