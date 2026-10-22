@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sendDueEmails } from '@/lib/email/emailService';
 import { alertEmailFailures, checkBounceRate } from '@/lib/email/alerting';
+import { isCronRequest } from '@/lib/auth/apiGuards';
+
+// Parsing/sync can take a while; allow up to 5 minutes (Vercel Pro).
+export const maxDuration = 300;
 
 /**
  * Internal cron job to send queued emails
@@ -9,22 +13,9 @@ import { alertEmailFailures, checkBounceRate } from '@/lib/email/alerting';
 export async function POST(req: NextRequest) {
   try {
     // Verify internal auth
-    const authHeader = req.headers.get('authorization');
-    const cronKey = process.env.INTERNAL_CRON_KEY;
-    
-    if (!cronKey) {
-      console.error('[EMAIL CRON] INTERNAL_CRON_KEY not configured');
-      return NextResponse.json(
-        { error: 'Cron key not configured' },
-        { status: 500 }
-      );
-    }
-
-    if (!authHeader || authHeader !== `Bearer ${cronKey}`) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+    // Accepts Bearer INTERNAL_CRON_KEY (external schedulers) or Bearer CRON_SECRET (Vercel Cron).
+    if (!isCronRequest(req)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     // Get limit from query or body (default 50)

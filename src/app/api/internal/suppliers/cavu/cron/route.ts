@@ -7,6 +7,9 @@ import { deliverAlert } from '@/lib/suppliers/alertDelivery';
 import { logRequestAttribution, validateCronAuth } from '@/lib/jobSecret';
 import { writeCavuHealthForTenant } from '@/lib/health/cavuWrite';
 
+// Parsing/sync can take a while; allow up to 5 minutes (Vercel Pro).
+export const maxDuration = 300;
+
 const SUPPLIER_CODE = 'cavu';
 const BOOKING_SOURCE = 'cavu';
 const BOOKING_CONFLICT_TARGET = 'tenant_id,source,reference';
@@ -345,9 +348,11 @@ async function runCavuCron(req?: NextRequest) {
         }
       }
 
-      // Update last_synced_at only after successful run (eventsSeen >= 0 means we tried)
-      // Consider it successful if we processed events OR healed some bookings
-      const wasSuccessful = result.eventsSeen > 0 || healedCount > 0 || result.errors.length === 0;
+      // Only move the cursor when every event was applied. If some failed, the next run
+      // re-fetches the same window (upserts on tenant/source/reference are idempotent), so
+      // failed events are retried instead of being skipped for good. The window is capped at
+      // 168h above, so a permanently bad event stops being re-fetched after a week.
+      const wasSuccessful = result.errors.length === 0;
       if (wasSuccessful) {
         await updateLastSyncedAt(tenantId, supabase);
       }

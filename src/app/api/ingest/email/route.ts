@@ -5,6 +5,9 @@ import {
   type IngestAttachment,
 } from "@/lib/ingest/processIngestEmail";
 
+// Parsing/sync can take a while; allow up to 5 minutes (Vercel Pro).
+export const maxDuration = 300;
+
 export const runtime = "nodejs";
 
 type IngestPayload = {

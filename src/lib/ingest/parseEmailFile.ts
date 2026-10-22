@@ -447,11 +447,30 @@ export async function parseEmailFile(fileId: string, tenantId: string) {
     };
   });
 
+  // Rows with no booking reference used to all get reference "UNKNOWN", share one dedupe key
+  // and collapse into a single booking that each row overwrote. Skip and report them instead.
+  const rowsMissingReference = parsedData.rows.filter(
+    (raw) => !String(raw.external_reference || raw.reference || "").trim()
+  ).length;
+  if (rowsMissingReference > 0) {
+    console.warn(
+      `[parseEmailFile] Skipping ${rowsMissingReference} row(s) with no booking reference in ${file.filename}`
+    );
+  }
+  if (rowsMissingReference > 0 && rowsMissingReference === parsedData.rows.length) {
+    throw new Error(`All ${rowsMissingReference} row(s) in ${file.filename} have no booking reference`);
+  }
+
   const {
     rows: stagingInserts,
     duplicateDedupeKeys,
     duplicateRowsCollapsed,
-  } = dedupeStagingRowsByKey(stagingInsertsRaw);
+  } = dedupeStagingRowsByKey(
+    stagingInsertsRaw.filter((_, idx) => {
+      const raw = parsedData.rows[idx];
+      return !!String(raw.external_reference || raw.reference || "").trim();
+    })
+  );
 
   if (duplicateRowsCollapsed > 0) {
     console.log(

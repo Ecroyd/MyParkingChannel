@@ -4,6 +4,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { runAphExportForChannel } from '@/lib/integrations/aph/job';
+import { isCronRequest } from '@/lib/auth/apiGuards';
+
+// Parsing/sync can take a while; allow up to 5 minutes (Vercel Pro).
+export const maxDuration = 300;
 
 export const runtime = 'nodejs'; // ensure Node runtime
 
@@ -15,7 +19,8 @@ export async function GET(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
   const headerSecret = req.headers.get('x-cron-secret');
 
-  if (!cronSecret || headerSecret !== cronSecret) {
+  // x-cron-secret (legacy scheduler) or any cron credential incl. Vercel Cron's Bearer CRON_SECRET
+  if (!(cronSecret && headerSecret === cronSecret) && !isCronRequest(req)) {
     return new NextResponse('Unauthorized', { status: 401 });
   }
 

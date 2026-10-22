@@ -354,7 +354,8 @@ async function findExistingBookingForStaging(
   supabase: SupabaseClient,
   tenantId: string,
   reference: string,
-  source: unknown
+  source: unknown,
+  plate?: unknown
 ): Promise<ExistingBookingMatch> {
   const sourceText = source == null ? null : String(source);
   if (sourceText) {
@@ -378,7 +379,7 @@ async function findExistingBookingForStaging(
 
   const { data: referenceRows, error: referenceErr } = await supabase
     .from("bookings")
-    .select("id, status, source")
+    .select("id, status, source, plate")
     .eq("tenant_id", tenantId)
     .eq("reference", reference);
 
@@ -387,7 +388,28 @@ async function findExistingBookingForStaging(
   }
 
   if (!referenceRows || referenceRows.length === 0) return { ok: true, row: null };
-  if (referenceRows.length === 1) return { ok: true, row: referenceRows[0] };
+  if (referenceRows.length === 1) {
+    const only = referenceRows[0] as { id: string; status?: string | null; source?: string | null; plate?: string | null };
+    // Two channels can issue the same reference. Don't let channel B's row overwrite channel A's
+    // booking for a different car; surface it as an import error instead.
+    const otherSource = String(only.source ?? "").toLowerCase();
+    const isLegacySource = otherSource === "" || otherSource === "other" || otherSource === "direct";
+    const normPlate = (v: unknown) => String(v ?? "").toUpperCase().replace(/\s+/g, "");
+    if (
+      sourceText &&
+      !isLegacySource &&
+      otherSource !== sourceText.toLowerCase() &&
+      normPlate(only.plate) &&
+      normPlate(plate) &&
+      normPlate(only.plate) !== normPlate(plate)
+    ) {
+      return {
+        ok: false,
+        reason: `reference ${reference} already belongs to a ${only.source} booking for a different vehicle; not overwritten`,
+      };
+    }
+    return { ok: true, row: { id: only.id, status: only.status, source: only.source } };
+  }
 
   const legacyRows = referenceRows.filter((r) => {
     const s = String((r as { source?: string | null }).source ?? "").toLowerCase();
@@ -551,7 +573,8 @@ export async function upsertBookingFromStagingRow(
     supabase,
     tenantId,
     reference,
-    payload.source
+    payload.source,
+    payload.plate
   );
 
   if (!existing.ok) {

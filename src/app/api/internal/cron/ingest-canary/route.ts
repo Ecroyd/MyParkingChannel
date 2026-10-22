@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { createAdminClient } from '@/lib/supabase/server';
 import { queueEmail, sendDueEmails } from '@/lib/email/emailService';
-import { logRequestAttribution, validateJobSecret } from '@/lib/jobSecret';
+import { logRequestAttribution } from '@/lib/jobSecret';
 import { getCanaryHealth } from '@/lib/health/canary';
 import { writeHealthStatus } from '@/lib/health/writeHealthStatus';
+import { isCronRequest } from '@/lib/auth/apiGuards';
+
+// Parsing/sync can take a while; allow up to 5 minutes (Vercel Pro).
+export const maxDuration = 300;
 
 const CANARY_TO_EMAIL = 'canary-bookings@myparkingchannel.app';
 const STALE_MINUTES = 10;
@@ -15,14 +19,9 @@ const TOKEN_RANDOM_BYTES = 4; // 6 chars base64url
  */
 export async function GET(req: NextRequest) {
   logRequestAttribution(req, '/api/internal/cron/ingest-canary');
-  if (!validateJobSecret(req)) {
-    return new NextResponse('Forbidden', { status: 403 });
-  }
-  console.log('[INGEST CANARY] GET /api/internal/cron/ingest-canary called');
-  return NextResponse.json({
-    ok: true,
-    note: 'use POST for real runs',
-  });
+  // Vercel Cron calls GET with Authorization: Bearer CRON_SECRET: run the real job.
+  if (isCronRequest(req)) return POST(req);
+  return new NextResponse('Forbidden', { status: 403 });
 }
 
 /**
@@ -33,26 +32,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   logRequestAttribution(req, '/api/internal/cron/ingest-canary');
   try {
-    const envKey = process.env.INTERNAL_CRON_KEY?.trim();
-    const auth = req.headers.get('authorization') ?? '';
-    const xKey = req.headers.get('x-internal-cron-key')?.trim() ?? '';
-    const jobSecretValid = validateJobSecret(req);
-
-    if (jobSecretValid) {
-      // x-job-secret matches JOB_SECRET
-    } else if (envKey) {
-      let bearerToken = '';
-      const m = auth.match(/^Bearer\s+(.+)$/i);
-      if (m) bearerToken = m[1].trim();
-      const valid = bearerToken === envKey || xKey === envKey;
-      if (!valid) {
-        return NextResponse.json(
-          { ok: false, reason: 'invalid token', hasAuth: !!auth, hasXInternal: !!xKey },
-          { status: 401 }
-        );
-      }
-    } else {
-      return NextResponse.json({ ok: false, error: 'Cron key not configured' }, { status: 500 });
+    // Accepts JOB_SECRET, Bearer INTERNAL_CRON_KEY / CRON_SECRET (Vercel Cron), or x-internal-cron-key.
+    if (!isCronRequest(req)) {
+      return NextResponse.json({ ok: false, reason: 'invalid token' }, { status: 401 });
     }
 
     console.log('[INGEST CANARY] POST /api/internal/cron/ingest-canary called');

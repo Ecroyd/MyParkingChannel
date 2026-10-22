@@ -26,6 +26,7 @@ import {
   parkViaEmailBodyToStaging,
 } from "@/lib/ingest/parkviaEmailBodyToStaging";
 import { safeStagingUpsertPayload } from "@/lib/ingest/safeStagingUpsertPayload";
+import { isCancellationSubject, cancelBookingFromEmail } from "@/lib/ingest/emailCancellation";
 
 export type IngestAttachment = {
   filename: string;
@@ -86,6 +87,12 @@ async function resolveTenantFromInbox(
     return null;
   }
   return inboxRow?.tenant_id ?? null;
+}
+
+/** Subject suggests a booking notification (not the ingest canary or general mail). */
+function looksLikeBookingEmail(subject: string | null | undefined): boolean {
+  if (!subject || subject.includes("[CANARY]")) return false;
+  return /\b(booking|reservation|cancel(?:led|lation)?|amend(?:ed|ment)?)\b/i.test(subject);
 }
 
 async function parseFilesAsync(fileIds: string[], tenantId: string) {
@@ -267,6 +274,17 @@ export async function processIngestEmail(
           );
         }
 
+        if (isCancellationSubject(parsedForReceipt.subject)) {
+          const cancelled = await cancelBookingFromEmail(supabase, {
+            tenantId,
+            reference,
+            sources: ["direct"],
+          });
+          if (!cancelled.ok) throw new Error(`Flyparks cancellation: ${cancelled.error}`);
+          textPromoted = true;
+          bookingId = cancelled.bookingId;
+          parseSuccessPatch = { ...parseSuccessPatch, booking_reference_guess: reference };
+        } else {
         if (missingFields.length > 0) {
           throw new Error(
             `Flyparks text-only: missing required fields ${missingFields.join(",")}; reference=${reference}; extracted=${JSON.stringify(staging.raw_json?.extracted ?? {})}; body_preview=${bodyPreview}`
@@ -329,6 +347,7 @@ export async function processIngestEmail(
           booking_plate_guess: staging.vehicle_reg ?? plateGuess,
           booking_reference_guess: reference,
         };
+        }
       } else if (!bookingFilePresent && looksLikeParkVia) {
         const tenantId =
           tenantIdFromInbox ??
@@ -347,6 +366,17 @@ export async function processIngestEmail(
         const { promoteStagingRowToBooking } = await import("@/lib/ingest/promoteStagingToBooking");
         const staging = parkViaEmailBodyToStaging(forwarded_text ?? parsedForReceipt.text ?? "");
         const reference = staging.reference;
+        if (reference && isCancellationSubject(parsedForReceipt.subject)) {
+          const cancelled = await cancelBookingFromEmail(supabase, {
+            tenantId,
+            reference,
+            sources: ["parkvia"],
+          });
+          if (!cancelled.ok) throw new Error(`ParkVia cancellation: ${cancelled.error}`);
+          textPromoted = true;
+          bookingId = cancelled.bookingId;
+          parseSuccessPatch = { ...parseSuccessPatch, booking_reference_guess: reference };
+        } else {
         const missingFields = [
           !reference ? "reference" : null,
           !staging.start_at ? "start_at" : null,
@@ -420,6 +450,7 @@ export async function processIngestEmail(
         };
         textPromoted = true;
         bookingId = promoteResult.bookingId ?? null;
+        }
       }
     } else if (parseFailure) {
       throw new Error(parseFailure);
@@ -583,6 +614,12 @@ export async function processIngestEmail(
 
     if (textPromoted || bookingId) {
       await markIngestSuccess(supabase, emailId, parseSuccessPatch);
+    } else if (fileIds.length === 0 && looksLikeBookingEmail(parsedForReceipt?.subject ?? bodySubject)) {
+      // Nothing was recognised in an email that looks booking-related (e.g. a supplier changed
+      // their template). Previously it stayed "received" with no signal; surface it instead.
+      throw new Error(
+        "Booking-related email not recognised by any parser (no booking created). Check the sender's template."
+      );
     }
 
     return {

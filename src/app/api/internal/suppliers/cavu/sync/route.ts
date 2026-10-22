@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { getCavuConfigForTenant } from '@/lib/suppliers/getTenantSupplierConfig';
 import { getRecentEvents, getBookingDetails } from '@/lib/suppliers/cavu';
+import { isCronRequest } from '@/lib/auth/apiGuards';
 
 const SUPPLIER_CODE = 'cavu';
 const BOOKING_SOURCE = 'cavu';
@@ -60,11 +61,9 @@ const DEFAULT_HOURS = 4;
 
 // Simple auth – you might already have internal auth middleware, reuse that instead
 async function requireInternalAuth(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader || authHeader !== `Bearer ${process.env.INTERNAL_CRON_KEY}`) {
-    return false;
-  }
-  return true;
+  // Previously compared against `Bearer ${INTERNAL_CRON_KEY}`, which matched "Bearer undefined"
+  // when the env var was unset.
+  return isCronRequest(req);
 }
 
 export async function GET(req: NextRequest) {

@@ -68,7 +68,7 @@ export async function requireTenantMemberApi(
 }
 
 /** Cron/job secrets from jobSecret.ts, plus the `x-internal-cron-key` header used by /api/internal/cron/*. */
-function isCronRequest(req: Request): boolean {
+export function isCronRequest(req: Request): boolean {
   if (validateCronAuth(req)) return true;
   const internalKey = process.env.INTERNAL_CRON_KEY?.trim();
   const headerKey = req.headers.get('x-internal-cron-key')?.trim();

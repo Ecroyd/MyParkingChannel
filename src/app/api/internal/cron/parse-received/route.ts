@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runParseReceived } from "@/lib/ingest/runParseReceived";
+import { isCronRequest } from "@/lib/auth/apiGuards";
+
+// Parsing/sync can take a while; allow up to 5 minutes (Vercel Pro).
+export const maxDuration = 300;
 
 export const runtime = "nodejs";
 
@@ -17,26 +21,9 @@ export async function POST(req: NextRequest) {
 }
 
 async function handleCron(req: NextRequest) {
-  const envKey = process.env.INTERNAL_CRON_KEY?.trim();
-  const auth = req.headers.get("authorization") ?? "";
-  const xKey = req.headers.get("x-internal-cron-key")?.trim() ?? "";
-
-  if (!envKey) {
-    return NextResponse.json(
-      { ok: false, error: "INTERNAL_CRON_KEY not configured" },
-      { status: 500 }
-    );
-  }
-
-  let bearerToken = "";
-  const m = auth.match(/^Bearer\s+(.+)$/i);
-  if (m) bearerToken = m[1].trim();
-  const valid = bearerToken === envKey || xKey === envKey;
-  if (!valid) {
-    return NextResponse.json(
-      { ok: false, reason: "invalid token", hasAuth: !!auth, hasXInternal: !!xKey },
-      { status: 401 }
-    );
+  // Accepts Bearer INTERNAL_CRON_KEY / CRON_SECRET (Vercel Cron), x-internal-cron-key or JOB_SECRET.
+  if (!isCronRequest(req)) {
+    return NextResponse.json({ ok: false, reason: "invalid token" }, { status: 401 });
   }
 
   const limit = Math.min(

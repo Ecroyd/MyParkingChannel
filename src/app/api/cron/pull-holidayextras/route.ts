@@ -178,8 +178,9 @@ async function pullHolidayExtrasData(supabase: any, account: any) {
       }
     }
 
-    // Update sync cursor
+    // Only advance the cursor when every reservation synced; otherwise the next run retries them.
     const newCursor = new Date().toISOString()
+    if (errors === 0) {
     await supabase
       .from('tenant_secrets')
       .upsert({
@@ -189,6 +190,7 @@ async function pullHolidayExtrasData(supabase: any, account: any) {
         value_ciphertext: encryptSecret(newCursor),
         updated_at: new Date().toISOString()
       })
+    }
 
     return {
       account_id: account.id,
@@ -270,7 +272,7 @@ async function mapToLocalBooking(supabase: any, tenantId: string, booking: any) 
     return newBooking
   } catch (error) {
     console.error('Failed to map to local booking:', error)
-    return null
+    throw error
   }
 }
 
