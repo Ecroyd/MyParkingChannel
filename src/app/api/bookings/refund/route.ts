@@ -62,11 +62,18 @@ export async function POST(req: NextRequest) {
       idempotencyKey: `refund:${bookingId}:${amountPence}:${Math.floor(Date.now() / 60000)}`,
     });
 
-    // Update booking to reflect refund
+    // Record the refund on the booking. (bookings has no payment_status column, so the old
+    // update always failed silently; append to notes so staff can see it.)
+    const { data: current } = await supabase
+      .from('bookings')
+      .select('notes')
+      .eq('id', bookingId)
+      .maybeSingle();
+    const refundNote = `Refunded £${(amountPence / 100).toFixed(2)} via Stripe (${refund.id}) on ${new Date().toISOString().slice(0, 10)}`;
     const { error: updateError } = await supabase
       .from('bookings')
       .update({
-        payment_status: 'refunded',
+        notes: [current?.notes, refundNote].filter(Boolean).join('\n'),
         updated_at: new Date().toISOString()
       })
       .eq('id', bookingId);

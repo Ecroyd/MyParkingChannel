@@ -134,7 +134,7 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session, 
           stripe_payment_intent_id: paymentIntentId,
           stripe_payment_status: 'succeeded',
           charged_amount_cents: paymentIntent.amount,
-          updated_at: new Date().toISOString(),
+          // booking_extensions has no updated_at column (checked against the live schema)
         })
         .eq('tenant_id', tenantId)
         .eq('booking_id', tempId)
@@ -323,7 +323,8 @@ async function applyPaidCustomerExtension(
       stripe_payment_intent_id: paymentIntentId,
       stripe_payment_status: 'succeeded',
       charged_amount_cents: amountCents,
-      updated_at: new Date().toISOString(),
+      // No updated_at: booking_extensions has no such column. Flipping to 'succeeded' fires the
+      // live trg_apply_booking_extension trigger, which extends end_at and adds the money.
     })
     .eq('id', extensionId)
     .eq('tenant_id', tenantId)
@@ -337,7 +338,7 @@ async function applyPaidCustomerExtension(
 
   const releaseClaim = async () => {
     await admin.from('booking_extensions')
-      .update({ stripe_payment_status: 'pending', updated_at: new Date().toISOString() })
+      .update({ stripe_payment_status: 'pending' })
       .eq('id', extensionId)
       .eq('stripe_payment_status', 'succeeded');
   };

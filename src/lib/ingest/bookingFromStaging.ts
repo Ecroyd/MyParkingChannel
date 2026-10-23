@@ -390,8 +390,9 @@ async function findExistingBookingForStaging(
   if (!referenceRows || referenceRows.length === 0) return { ok: true, row: null };
   if (referenceRows.length === 1) {
     const only = referenceRows[0] as { id: string; status?: string | null; source?: string | null; plate?: string | null };
-    // Two channels can issue the same reference. Don't let channel B's row overwrite channel A's
-    // booking for a different car; surface it as an import error instead.
+    // Two channels can issue the same reference (the live unique index is
+    // tenant_id+source+reference). Don't let channel B's row overwrite channel A's booking for a
+    // different car: treat it as a new booking under its own source.
     const otherSource = String(only.source ?? "").toLowerCase();
     const isLegacySource = otherSource === "" || otherSource === "other" || otherSource === "direct";
     const normPlate = (v: unknown) => String(v ?? "").toUpperCase().replace(/\s+/g, "");
@@ -403,10 +404,10 @@ async function findExistingBookingForStaging(
       normPlate(plate) &&
       normPlate(only.plate) !== normPlate(plate)
     ) {
-      return {
-        ok: false,
-        reason: `reference ${reference} already belongs to a ${only.source} booking for a different vehicle; not overwritten`,
-      };
+      console.warn(
+        `[bookingFromStaging] reference ${reference} exists as a ${only.source} booking for a different vehicle; creating a separate ${sourceText} booking`
+      );
+      return { ok: true, row: null };
     }
     return { ok: true, row: { id: only.id, status: only.status, source: only.source } };
   }
@@ -646,7 +647,7 @@ async function tryPostgrestUpsert(
   const { data: upserted, error: upsertErr } = await supabase
     .from("bookings")
     .upsert(payload, {
-      onConflict: "tenant_id,reference",
+      onConflict: "tenant_id,source,reference", // matches live unique index bookings_tenant_source_reference_uniq
       ignoreDuplicates: false,
     })
     .select("id")

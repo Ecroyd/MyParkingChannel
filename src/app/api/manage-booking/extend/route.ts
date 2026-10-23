@@ -202,7 +202,7 @@ export async function POST(req: Request) {
       console.error('[manage-booking/extend] checkout session failed:', e?.message || e);
       await supabase
         .from('booking_extensions')
-        .update({ stripe_payment_status: 'failed', updated_at: new Date().toISOString() })
+        .update({ stripe_payment_status: 'failed' })
         .eq('id', extensionId)
         .eq('stripe_payment_status', 'pending');
       return NextResponse.json({ message: 'Unable to start the extension payment. Please try again.' }, { status: 500 });

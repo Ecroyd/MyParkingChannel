@@ -3,7 +3,7 @@
 // Opt-in per-tenant token for the vendor ANPR webhooks (/api/anpr/webhook, /api/anpr/events).
 //
 // Storage: tenant_secrets key-value row (tenant_id, scope='anpr', key='anpr_webhook_token_hash',
-// value=<sha256 hex of token>). Only the hash is stored; the raw token is shown once on rotation.
+// value_ciphertext=<sha256 hex of token>; the live table has no `value` column). Only the hash is stored; the raw token is shown once on rotation.
 //
 // Behaviour:
 // - Tenant has a token hash  → request must carry the token (`x-anpr-token` header or `?token=`).
@@ -49,13 +49,13 @@ export async function loadWebhookTokenHash(tenantId: string): Promise<string | n
   const admin = createAdminClient();
   const { data, error } = await admin
     .from('tenant_secrets')
-    .select('value')
+    .select('value_ciphertext')
     .eq('tenant_id', tenantId)
     .eq('scope', ANPR_WEBHOOK_TOKEN_SCOPE)
     .eq('key', ANPR_WEBHOOK_TOKEN_KEY)
     .maybeSingle();
   if (error) throw error;
-  return (data as { value?: string | null } | null)?.value ?? null;
+  return (data as { value_ciphertext?: string | null } | null)?.value_ciphertext ?? null;
 }
 
 export async function saveWebhookTokenHash(tenantId: string, hash: string | null): Promise<void> {
@@ -75,7 +75,7 @@ export async function saveWebhookTokenHash(tenantId: string, hash: string | null
       tenant_id: tenantId,
       scope: ANPR_WEBHOOK_TOKEN_SCOPE,
       key: ANPR_WEBHOOK_TOKEN_KEY,
-      value: hash,
+      value_ciphertext: hash,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'tenant_id,scope,key' }
