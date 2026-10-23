@@ -95,7 +95,7 @@ function looksLikeBookingEmail(subject: string | null | undefined): boolean {
   return /\b(booking|reservation|cancel(?:led|lation)?|amend(?:ed|ment)?)\b/i.test(subject);
 }
 
-async function parseFilesAsync(fileIds: string[], tenantId: string) {
+async function parseFilesAsync(fileIds: string[], tenantId: string, bookingAlreadyCreated = false) {
   const { parseEmailFile } = await import("@/lib/ingest/parseEmailFile");
   const failures: string[] = [];
   let succeeded = 0;
@@ -111,7 +111,7 @@ async function parseFilesAsync(fileIds: string[], tenantId: string) {
   // Every attachment failed: surface it (email marked failed + alert via the caller's catch)
   // instead of leaving the email looking fine with no bookings created. When at least one
   // file parsed, other failures are typically non-booking attachments, so stay quiet.
-  if (failures.length > 0 && succeeded === 0) {
+  if (failures.length > 0 && succeeded === 0 && !bookingAlreadyCreated) {
     throw new Error(`All ${failures.length} attachment(s) failed to parse: ${failures.join(" | ").slice(0, 1000)}`);
   }
 }
@@ -597,7 +597,9 @@ export async function processIngestEmail(
     let autoParseTriggered = false;
     if (fileIds.length > 0 && tenantIdForFiles) {
       autoParseTriggered = true;
-      await parseFilesAsync(fileIds, tenantIdForFiles);
+      // If the booking already came from the email body (e.g. a Flyparks receipt with a T&Cs
+      // PDF attached), a failing non-booking attachment must not mark the email failed.
+      await parseFilesAsync(fileIds, tenantIdForFiles, textPromoted || !!bookingId);
     } else if (fileIds.length > 0 && !tenantIdForFiles) {
       const noTenantParseError = "Attachment received but tenant could not be resolved for parsing";
       await supabase

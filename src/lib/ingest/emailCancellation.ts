@@ -8,8 +8,18 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export function isCancellationSubject(subject: string | null | undefined): boolean {
   if (!subject) return false;
   const s = subject.toLowerCase();
-  if (/\bnot\s+cancel/.test(s) || /\bcancellation\s+polic/.test(s)) return false;
-  return /\bcancel(?:led|ed|lation|s)?\b/.test(s) || /\bcanx\b/.test(s);
+  // Questions ("can I cancel?") and confirmations that mention cancellation terms are not
+  // cancellations. A false positive is worse than a miss here: it cancels a live booking.
+  if (s.includes("?")) return false;
+  if (
+    /\bnot\s+(?:been\s+)?cancel/.test(s) ||
+    /\bfree\s+cancel/.test(s) ||
+    /\bcancel+ation\s+(?:polic|terms|cover|insurance|protection|guarantee)/.test(s) ||
+    /\b(?:how\s+to|can\s+i|want\s+to|wish\s+to|request(?:ing)?\s+to)\s+cancel/.test(s)
+  ) {
+    return false;
+  }
+  return /\bcancel+(?:ed|ation)\b/.test(s) || /\bcanx\b/.test(s) || /\bbooking\s+cancel/.test(s);
 }
 
 export type EmailCancellationResult =
