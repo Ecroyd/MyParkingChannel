@@ -17,29 +17,18 @@ export async function writeHealthStatus(
     updated_at: new Date().toISOString(),
   };
 
-  if (tenantId !== null) {
-    const { error } = await supabase.from('system_health_status').upsert(row, {
-      onConflict: 'tenant_id,key',
-    });
-    if (error) console.error('[HEALTH WRITE]', key, tenantId, error);
-    return;
-  }
-
-  // Platform (tenant_id IS NULL): partial unique is on (key). Update existing or insert.
-  const { data: existing } = await supabase
-    .from('system_health_status')
-    .select('id')
-    .is('tenant_id', null)
-    .eq('key', key)
-    .limit(1)
-    .maybeSingle();
+  // Update existing or insert. (An upsert on tenant_id,key failed in production with 42P10:
+  // the live table has no unique constraint matching it, so per-tenant health never saved.)
+  let lookup = supabase.from('system_health_status').select('id').eq('key', key);
+  lookup = tenantId === null ? lookup.is('tenant_id', null) : lookup.eq('tenant_id', tenantId);
+  const { data: existing } = await lookup.limit(1).maybeSingle();
 
   if (existing) {
     const { error } = await supabase
       .from('system_health_status')
       .update({ payload, updated_at: row.updated_at })
       .eq('id', existing.id);
-    if (error) console.error('[HEALTH WRITE]', key, error);
+    if (error) console.error('[HEALTH WRITE]', key, tenantId, error);
   } else {
     const { error } = await supabase.from('system_health_status').insert(row);
     if (error) console.error('[HEALTH WRITE]', key, error);

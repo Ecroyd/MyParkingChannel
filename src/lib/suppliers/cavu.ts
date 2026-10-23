@@ -64,7 +64,8 @@ async function cavuFetch<T>(
   }
 
   const url = buildUrl(path, config);
-  console.log('[CAVU DEBUG] Fetching:', url);
+  // Never log the query string: it carries the CAVU API key.
+  console.log('[CAVU DEBUG] Fetching:', url.split('?')[0]);
   console.log('[CAVU DEBUG] Headers:', {
     'Ocp-Apim-Subscription-Key': config.subscription_key ? '***present***' : 'MISSING',
     Accept: 'application/json',
