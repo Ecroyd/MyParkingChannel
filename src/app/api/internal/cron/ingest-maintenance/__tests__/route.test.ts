@@ -2,12 +2,6 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
 const calls: string[] = [];
-vi.mock("../../ingest-canary/route", () => ({
-  GET: async () => {
-    calls.push("canary");
-    return Response.json({ ok: true });
-  },
-}));
 vi.mock("../../parse-received/route", () => ({
   GET: async () => {
     calls.push("parse");
@@ -36,18 +30,18 @@ describe("ingest-maintenance cron", () => {
     expect(calls).toEqual([]);
   });
 
-  it("runs every step in order even when one throws, and reports failure", async () => {
+  it("runs parse + retry in order even when one throws, and reports failure", async () => {
     vi.stubEnv("CRON_SECRET", "s3cret");
     const res = await GET(
       new NextRequest("https://x/api/internal/cron/ingest-maintenance", {
         headers: { authorization: "Bearer s3cret" },
       })
     );
-    expect(calls).toEqual(["canary", "parse", "retry"]);
+    expect(calls).toEqual(["parse", "retry"]);
     expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.results["ingest-canary"].status).toBe(200);
     expect(body.results["parse-received"].error).toBe("boom");
     expect(body.results["ingest-retry"].status).toBe(200);
+    expect(body.results["ingest-canary"]).toBeUndefined();
   });
 });

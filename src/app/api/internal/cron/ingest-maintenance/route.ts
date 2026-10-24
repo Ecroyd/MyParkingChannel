@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isCronRequest } from "@/lib/auth/apiGuards";
-import { GET as runIngestCanary } from "../ingest-canary/route";
 import { GET as runParseReceived } from "../parse-received/route";
 import { GET as runIngestRetry } from "../ingest-retry/route";
 
@@ -9,15 +8,14 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * One Vercel Cron entry for the email-ingest housekeeping jobs, run in sequence:
- *   1. ingest-canary   – check the last canary arrived, send the next one
- *   2. parse-received  – backfill parse previews for received emails
- *   3. ingest-retry    – re-run emails whose processing never finished
- * Each step is isolated: one failing does not stop the others. The individual routes
- * still exist for manual runs and for any external scheduler during migration.
+ * Vercel Cron entry for email-ingest housekeeping (every 15 minutes):
+ *   1. parse-received  – backfill parse previews for received emails
+ *   2. ingest-retry    – re-run emails whose processing never finished
+ * Ingest canary is a separate cron (twice daily) so it does not burn Resend
+ * quota every 15 minutes. Each step is isolated; individual routes still exist
+ * for manual runs.
  */
 const STEPS = [
-  ["ingest-canary", runIngestCanary],
   ["parse-received", runParseReceived],
   ["ingest-retry", runIngestRetry],
 ] as const;
