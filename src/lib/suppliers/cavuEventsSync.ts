@@ -1,7 +1,6 @@
 // src/lib/suppliers/cavuEventsSync.ts
 import 'server-only';
 import { createAdminClient } from '@/lib/supabase/server';
-import { parseSupplierDateTimeToUtc } from '@/lib/datetime/parse';
 import { getCavuConfigForTenant } from './getTenantSupplierConfig';
 import {
   getEventsByAge,
@@ -9,10 +8,8 @@ import {
   CavuBooking,
   CavuEvent,
 } from './cavu';
-
-const SUPPLIER_CODE = 'cavu';
-const BOOKING_SOURCE = 'cavu';
-const BOOKING_CONFLICT_TARGET = 'tenant_id,source,reference';
+import { cancelCavuBooking, getTenantTimezone, writeCavuBooking } from './cavuBookingWrite';
+import { CavuEventOutcome, classifyCavuError } from './cavuCursor';
 
 export type CavuEventsSyncOptions = {
   hours?: number; // how far back to look
@@ -25,6 +22,14 @@ export type CavuEventsSyncResult = {
   bookingsUpserted: number;
   bookingsCancelled: number;
   errors: string[];
+  /** False when the event list could not be fetched or was not an array: don't move the cursor. */
+  fetchOk: boolean;
+  /** When the event list request was made (the cursor moves to here when everything is done). */
+  fetchStartedAt: string;
+  /** One entry per event; 'transient' ones (and any not reached) must be retried. */
+  outcomes: CavuEventOutcome[];
+  /** Tenant timezone used for time conversion. */
+  timezone: string;
 };
 
 /**
@@ -65,15 +70,6 @@ function getCavuEventReference(event: any): string | null {
   return null;
 }
 
-function formatUpsertError(tableName: string, reference: string, error: { message?: string } | null) {
-  return [
-    `supplier_code=${SUPPLIER_CODE}`,
-    `reference=${reference}`,
-    `table=${tableName}`,
-    `conflict_target=${BOOKING_CONFLICT_TARGET}`,
-    `postgres_error=${error?.message ?? 'Unknown Postgres error'}`,
-  ].join(' ');
-}
 
 export async function syncCavuEventsForTenant(
   tenantId: string,
@@ -87,233 +83,113 @@ export async function syncCavuEventsForTenant(
   }
 
   const supabase = createAdminClient();
+  const timezone = await getTenantTimezone(supabase, tenantId);
   const errors: string[] = [];
+  const outcomes: CavuEventOutcome[] = [];
 
-  let eventsSeen = 0;
   let bookingsUpserted = 0;
   let bookingsCancelled = 0;
 
-  let events: CavuEvent[] = [];
+  const fetchStartedAt = new Date().toISOString();
+  const base = { tenantId, hours, fetchStartedAt, timezone };
 
   // 1) Fetch events for the last X hours (single API call)
+  let raw: unknown;
   try {
-    events = await getEventsByAge(config, hours);
+    raw = await getEventsByAge(config, hours);
   } catch (err: any) {
-    errors.push(
-      `GetEventsByAge failed for last ${hours} hours: ${
-        err?.message ?? String(err)
-      }`
-    );
-    return {
-      tenantId,
-      hours,
-      eventsSeen: 0,
-      bookingsUpserted: 0,
-      bookingsCancelled: 0,
-      errors,
-    };
+    errors.push(`GetEventsByAge failed for last ${hours} hours: ${err?.message ?? String(err)}`);
+    return { ...base, eventsSeen: 0, bookingsUpserted: 0, bookingsCancelled: 0, errors, fetchOk: false, outcomes };
   }
 
-  if (!Array.isArray(events) || events.length === 0) {
-    return {
-      tenantId,
-      hours,
-      eventsSeen: 0,
-      bookingsUpserted: 0,
-      bookingsCancelled: 0,
-      errors,
-    };
+  // A 200 whose body isn't a list is not "no events": treat it as a failed fetch so the cursor
+  // stays put and the window is re-read next run.
+  if (!Array.isArray(raw)) {
+    const kind = raw === null ? 'null' : typeof raw;
+    errors.push(`GetEventsByAge returned an unexpected body (${kind}, not an array) for last ${hours} hours`);
+    return { ...base, eventsSeen: 0, bookingsUpserted: 0, bookingsCancelled: 0, errors, fetchOk: false, outcomes };
   }
 
-  eventsSeen = events.length;
-
+  const events = raw as CavuEvent[];
+  const eventsSeen = events.length;
   const seenRefs = new Set<string>();
+  let stopReason: string | null = null;
 
   for (const ev of events) {
-    // TEMP: Log first event structure for debugging
-    if (seenRefs.size === 0) {
-      console.log('[CAVU SYNC DEBUG] First event keys:', Object.keys(ev));
-      console.log('[CAVU SYNC DEBUG] First event full structure:', JSON.stringify(ev, null, 2));
-    }
-
+    const eventDate = typeof (ev as any)?.EventDate === 'string' ? (ev as any).EventDate : null;
     const ref = getCavuEventReference(ev);
-    if (!ref) {
-      const eventId = (ev as any).EventID ?? (ev as any).eventId ?? (ev as any).id ?? 'unknown';
-      errors.push(`Event ${eventId} missing Reference (keys: ${Object.keys(ev).join(', ')})`);
+
+    if (stopReason) {
+      // Not attempted (rate limited): must be retried next run.
+      outcomes.push({ reference: ref, eventDate, status: 'transient' });
       continue;
     }
 
-    if (seenRefs.has(ref)) continue;
+    if (!ref) {
+      const eventId = (ev as any)?.EventID ?? (ev as any)?.eventId ?? (ev as any)?.id ?? 'unknown';
+      errors.push(`Event ${eventId} missing Reference (keys: ${Object.keys(ev ?? {}).join(', ')})`);
+      outcomes.push({ reference: null, eventDate, status: 'permanent' });
+      continue;
+    }
+
+    if (seenRefs.has(ref)) {
+      outcomes.push({ reference: ref, eventDate, status: 'ok' });
+      continue;
+    }
     seenRefs.add(ref);
 
-    const type = (ev.EventType || '').toUpperCase();
+    const type = String(ev.EventType || '').toUpperCase();
 
-    if (type === 'CANCEL') {
-      // mark as cancelled in our DB
-      const { error } = await supabase
-        .from('bookings')
-        .update({ status: 'cancelled' })
-        .eq('tenant_id', tenantId)
-        .eq('source', BOOKING_SOURCE)
-        .eq('reference', ref);
-
-      if (error) {
-        errors.push(`Failed to cancel booking ${ref}: ${error.message}`);
-      } else {
-        bookingsCancelled++;
-      }
-
-      continue;
-    }
-
-    // For NEW / AMEND / anything else, fetch booking details
-    let booking: CavuBooking | null = null;
     try {
-      booking = await getBookingDetails(config, ref);
-    } catch (err: any) {
-      const msg = err?.message ?? String(err);
-      errors.push(`GetBookingDetails failed for ${ref}: ${msg}`);
-
-      if (msg.includes('429')) {
-        // Rate limit hit: stop processing to avoid spamming
-        break;
+      if (type === 'CANCEL') {
+        await cancelCavuBooking(supabase, tenantId, ref);
+        bookingsCancelled++;
+        outcomes.push({ reference: ref, eventDate, status: 'ok' });
+        continue;
       }
 
-      continue;
-    }
-
-    if (!booking) {
-      errors.push(`No booking details returned for ${ref}`);
-      continue;
-    }
-
-    // Map customer name from nested structure
-    const customerFirst = booking.Customer?.FirstName ?? '';
-    const customerLast = booking.Customer?.Surname ?? '';
-    const customerNameRaw = `${customerFirst} ${customerLast}`.trim();
-    const customerName = customerNameRaw || 'Unknown';
-
-    // Normalize plate: uppercase, remove spaces
-    const plateRaw = booking.Vehicle?.Registration ?? '';
-    const plateNorm = plateRaw.replace(/\s+/g, '').toUpperCase();
-    const plate = plateNorm || 'UNKNOWN';
-
-    // Map status from CAVU Status
-    function mapCavuStatus(status?: string): 'reserved' | 'checked_in' | 'checked_out' | 'cancelled' {
-      switch ((status || '').toUpperCase()) {
-        case 'CONFIRMED':
-          return 'reserved';
-        case 'COMPLETED':
-          return 'checked_out';
-        case 'CANCELLED':
-          return 'cancelled';
-        case 'NOSHOW':
-          return 'cancelled';
-        default:
-          return 'reserved';
-      }
-    }
-
-    // Extract flight_date from ArrivalDate (YYYY-MM-DD format)
-    const flightDate = booking.ArrivalDate ? booking.ArrivalDate.slice(0, 10) : null;
-
-    // Compute missing fields
-    const missingFields: string[] = [];
-    if (!customerName || customerName === 'Unknown') {
-      missingFields.push('customer_name');
-    }
-    if (!plate || plate === 'UNKNOWN' || plate === '') {
-      missingFields.push('plate');
-    }
-    if (!booking.Customer?.Email || booking.Customer.Email.trim() === '') {
-      missingFields.push('customer_email');
-    }
-    if (!booking.ArrivalDate || booking.ArrivalDate.trim() === '') {
-      missingFields.push('start_at');
-    }
-    if (!booking.DepartureDate || booking.DepartureDate.trim() === '') {
-      missingFields.push('end_at');
-    }
-
-    const isIncomplete = missingFields.length > 0;
-
-    const row = {
-      tenant_id: tenantId,
-      reference: booking.Reference,
-      external_source: SUPPLIER_CODE,
-      start_at: parseSupplierDateTimeToUtc(booking.ArrivalDate) ?? booking.ArrivalDate,
-      end_at: parseSupplierDateTimeToUtc(booking.DepartureDate) ?? booking.DepartureDate,
-      customer_name: customerName,
-      customer_email: booking.Customer?.Email ?? null,
-      customer_phone: booking.Customer?.Mobile ?? null,
-      plate: plate,
-      car_make: booking.Vehicle?.Make ?? null,
-      car_model: booking.Vehicle?.Model ?? null,
-      car_color: booking.Vehicle?.Colour ?? null,
-      flight_number: booking.OutboundFlight ?? null,
-      return_flight_number: booking.ReturnFlight ?? null,
-      returning_from: booking.ReturningFrom ?? null,
-      outbound_terminal: booking.OutboundTerminal ?? null,
-      return_terminal: booking.ReturnTerminal ?? null,
-      flight_date: flightDate,
-      source: BOOKING_SOURCE,
-      status: mapCavuStatus(booking.Status),
-      money_received: booking.AmountPaid ?? 0,
-      money_charged: booking.AmountPaid ?? 0,
-      notes: booking.SpecialRequests ?? null,
-      is_incomplete: isIncomplete,
-      missing_fields: missingFields,
-      updated_at: new Date().toISOString(),
-    };
-
-    const { data: upsertedBooking, error } = await supabase
-      .from('bookings')
-      .upsert(row as any, {
-        onConflict: BOOKING_CONFLICT_TARGET,
-        ignoreDuplicates: false,
-      } as any)
-      .select('id, tenant_id, reference')
-      .single();
-
-    if (error) {
-      const msg = formatUpsertError('bookings', ref, error);
-      console.error('[CAVU SYNC] Upsert failed', msg, error);
-      errors.push(`Upsert failed: ${msg}`);
-    } else {
-      bookingsUpserted++;
-
-      // Save full booking payload to booking_external_payloads
-      if (upsertedBooking?.id) {
-        const { error: payloadError } = await supabase
-          .from('booking_external_payloads')
-          .upsert({
-            tenant_id: upsertedBooking.tenant_id,
-            booking_id: upsertedBooking.id,
-            source: BOOKING_SOURCE,
-            reference: upsertedBooking.reference,
-            payload: booking as any,
-            fetched_at: new Date().toISOString(),
-          } as any, {
-            onConflict: BOOKING_CONFLICT_TARGET,
-            ignoreDuplicates: false,
-          } as any);
-
-        if (payloadError) {
-          // Log but don't fail the sync if payload save fails
-          const msg = formatUpsertError('booking_external_payloads', ref, payloadError);
-          console.warn('[CAVU SYNC] Failed to save payload', msg, payloadError);
+      // For NEW / AMEND / anything else, fetch booking details
+      let booking: CavuBooking | null = null;
+      try {
+        booking = await getBookingDetails(config, ref);
+      } catch (err: any) {
+        const msg = err?.message ?? String(err);
+        errors.push(`GetBookingDetails failed for ${ref}: ${msg}`);
+        outcomes.push({ reference: ref, eventDate, status: classifyCavuError(err) });
+        if (err?.code === 'CAVU_RATE_LIMIT' || msg.includes('429')) {
+          // Rate limit hit: stop processing to avoid spamming; the rest are retried next run.
+          stopReason = 'rate_limited';
         }
+        continue;
       }
+
+      if (!booking) {
+        errors.push(`No booking details returned for ${ref}`);
+        outcomes.push({ reference: ref, eventDate, status: 'permanent' });
+        continue;
+      }
+
+      await writeCavuBooking(supabase, { tenantId, booking, timezone, mode: 'sync', reference: ref });
+      bookingsUpserted++;
+      outcomes.push({ reference: ref, eventDate, status: 'ok' });
+    } catch (err: any) {
+      // Includes RangeError from an impossible ArrivalDate/DepartureDate: one bad event must not
+      // abort the tenant run.
+      const kind = classifyCavuError(err);
+      const msg = err instanceof RangeError ? `invalid date (${err.message})` : err?.message ?? String(err);
+      console.error('[CAVU SYNC] Event failed', ref, kind, msg);
+      errors.push(`Upsert failed for ${ref}: ${msg}`);
+      outcomes.push({ reference: ref, eventDate, status: kind });
     }
   }
 
   return {
-    tenantId,
-    hours,
+    ...base,
     eventsSeen,
     bookingsUpserted,
     bookingsCancelled,
     errors,
+    fetchOk: true,
+    outcomes,
   };
 }
-

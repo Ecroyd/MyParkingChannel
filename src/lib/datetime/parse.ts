@@ -29,6 +29,14 @@ export function sanitizeSupplierDateTimeInput(raw: string): string {
   return s;
 }
 
+/** True when year/month/day is a real calendar date (rejects 31/09, 29/02 in non-leap years). */
+function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (month < 1 || month > 12 || day < 1) return false;
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return day <= daysInMonth;
+}
+
 /**
  * Convert a tenant-local date/time pair into a UTC ISO string.
  * Accepts DD/MM/YYYY, YYYY-MM-DD, HH:mm, and HHmm.
@@ -77,14 +85,7 @@ export function parseTenantLocalDateTimeToUtc(
 
   const hour = Number(timeMatch[1]);
   const minute = Number(timeMatch[2]);
-  if (
-    ymd.month < 1 ||
-    ymd.month > 12 ||
-    ymd.day < 1 ||
-    ymd.day > 31 ||
-    hour > 23 ||
-    minute > 59
-  ) {
+  if (!isValidCalendarDate(ymd.year, ymd.month, ymd.day) || hour > 23 || minute > 59) {
     return null;
   }
 
@@ -120,6 +121,8 @@ export function buildTenantLocalIso(dateRaw: string, timeRaw: string): string | 
   const hour = Number(timeMatch[1]);
   const minute = Number(timeMatch[2]);
   if (hour > 23 || minute > 59) return null;
+  // Invalid calendar dates (31/09/2026) would otherwise surface later as a RangeError.
+  if (!isValidCalendarDate(ymd.year, ymd.month, ymd.day)) return null;
 
   return `${ymd.year.toString().padStart(4, '0')}-${ymd.month
     .toString()
@@ -138,6 +141,8 @@ export function parseNaiveLocalIsoToUtc(
   const s = sanitizeSupplierDateTimeInput(naiveIso).replace(' ', 'T');
   const match = s.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
   if (!match) return null;
+  const [y, mo, d] = match[1].split('-').map(Number);
+  if (!isValidCalendarDate(y, mo, d) || Number(match[2]) > 23 || Number(match[3]) > 59) return null;
   const localIso = `${match[1]}T${match[2]}:${match[3]}:${match[4] ?? '00'}`;
   return zonedTimeToUtc(localIso, timezone).toISOString();
 }

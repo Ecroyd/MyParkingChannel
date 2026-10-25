@@ -25,7 +25,12 @@ export async function getCavuConfigForTenant(
   const cfg = (data?.config as any) ?? {};
 
   if (!cfg.operator_id || !cfg.operator_private_key || !cfg.subscription_key) {
-    console.warn('[CAVU] Incomplete config for tenant', tenantId, cfg);
+    // Never log cfg itself: it holds the operator private key and subscription key.
+    console.warn('[CAVU] Incomplete config for tenant', tenantId, {
+      has_operator_id: !!cfg.operator_id,
+      has_private_key: !!cfg.operator_private_key,
+      has_subscription_key: !!cfg.subscription_key,
+    });
     return null;
   }
 

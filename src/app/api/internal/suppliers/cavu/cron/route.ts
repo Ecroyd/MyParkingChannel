@@ -6,13 +6,23 @@ import { createSyncAlert, getAlertRoutes } from '@/lib/suppliers/alerting';
 import { deliverAlert } from '@/lib/suppliers/alertDelivery';
 import { logRequestAttribution, validateCronAuth } from '@/lib/jobSecret';
 import { writeCavuHealthForTenant } from '@/lib/health/cavuWrite';
+import { getCavuConfigForTenant } from '@/lib/suppliers/getTenantSupplierConfig';
+import { getBookingDetails } from '@/lib/suppliers/cavu';
+import { writeCavuBooking } from '@/lib/suppliers/cavuBookingWrite';
+import { decideCavuCursor } from '@/lib/suppliers/cavuCursor';
 
 // Parsing/sync can take a while; allow up to 5 minutes (Vercel Pro).
 export const maxDuration = 300;
 
-const SUPPLIER_CODE = 'cavu';
 const BOOKING_SOURCE = 'cavu';
-const BOOKING_CONFLICT_TARGET = 'tenant_id,source,reference';
+
+// Heal step limits: only bookings that haven't finished more than HEAL_LOOKBACK_DAYS ago, at most
+// HEAL_BATCH per quiet run, and a booking whose CAVU payload was fetched in the last
+// HEAL_RETRY_HOURS is skipped (booking_external_payloads.fetched_at is our "last attempt" marker).
+const HEAL_BATCH = 25;
+const HEAL_CANDIDATES = 200;
+const HEAL_LOOKBACK_DAYS = 2;
+const HEAL_RETRY_HOURS = 24;
 
 /**
  * Calculate hours to sync based on last_synced_at.
@@ -37,7 +47,11 @@ function computeHoursFromLastSyncedAt(
 /**
  * Update last_synced_at in tenant_supplier_configs.config for a tenant
  */
-async function updateLastSyncedAt(tenantId: string, supabase: ReturnType<typeof createAdminClient>) {
+async function updateLastSyncedAt(
+  tenantId: string,
+  supabase: ReturnType<typeof createAdminClient>,
+  cursor: string
+) {
   const { data: existing, error: fetchError } = await supabase
     .from('tenant_supplier_configs')
     .select('config')
@@ -53,7 +67,7 @@ async function updateLastSyncedAt(tenantId: string, supabase: ReturnType<typeof 
   const config = (existing.config as any) ?? {};
   const updatedConfig = {
     ...config,
-    last_synced_at: new Date().toISOString(),
+    last_synced_at: cursor,
   };
 
   const { error: updateError } = await supabase
@@ -67,14 +81,57 @@ async function updateLastSyncedAt(tenantId: string, supabase: ReturnType<typeof 
   }
 }
 
-function formatUpsertError(tableName: string, reference: string, error: { message?: string } | null) {
-  return [
-    `supplier_code=${SUPPLIER_CODE}`,
-    `reference=${reference}`,
-    `table=${tableName}`,
-    `conflict_target=${BOOKING_CONFLICT_TARGET}`,
-    `postgres_error=${error?.message ?? 'Unknown Postgres error'}`,
-  ].join(' ');
+
+async function healIncompleteBookings(
+  tenantId: string,
+  supabase: ReturnType<typeof createAdminClient>,
+  timezone: string
+): Promise<number> {
+  const sinceEnd = new Date(Date.now() - HEAL_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const { data: candidates, error } = await supabase
+    .from('bookings')
+    .select('reference')
+    .eq('tenant_id', tenantId)
+    .eq('source', BOOKING_SOURCE)
+    .eq('is_incomplete', true)
+    .gte('end_at', sinceEnd)
+    .order('start_at', { ascending: true })
+    .limit(HEAL_CANDIDATES);
+  if (error) throw error;
+  const refs = (candidates ?? []).map((b: any) => b.reference as string).filter(Boolean);
+  if (refs.length === 0) return 0;
+
+  const retryAfter = new Date(Date.now() - HEAL_RETRY_HOURS * 60 * 60 * 1000).toISOString();
+  const { data: recent } = await supabase
+    .from('booking_external_payloads')
+    .select('reference')
+    .eq('tenant_id', tenantId)
+    .eq('source', BOOKING_SOURCE)
+    .in('reference', refs)
+    .gte('fetched_at', retryAfter);
+  const recentlyFetched = new Set((recent ?? []).map((r: any) => r.reference as string));
+  const toHeal = refs.filter((r) => !recentlyFetched.has(r)).slice(0, HEAL_BATCH);
+  if (toHeal.length === 0) return 0;
+
+  const config = await getCavuConfigForTenant(tenantId);
+  if (!config) return 0;
+
+  let healed = 0;
+  for (const reference of toHeal) {
+    try {
+      const booking = await getBookingDetails(config, reference);
+      if (booking) {
+        const res = await writeCavuBooking(supabase, { tenantId, booking, timezone, mode: 'heal', reference });
+        if (res.action === 'updated') healed++;
+      }
+    } catch (err: any) {
+      console.warn('[CAVU CRON] Heal failed for', reference, err?.message ?? err);
+      if (err?.code === 'CAVU_RATE_LIMIT') break;
+    }
+    // Small delay to avoid rate limits
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  return healed;
 }
 
 async function runCavuCron(req?: NextRequest) {
@@ -207,154 +264,28 @@ async function runCavuCron(req?: NextRequest) {
         hours: hoursToFetch,
       });
 
-      // Heal step: if no events seen, try to heal incomplete bookings
+      // Heal step: if no events seen, fill blanks on incomplete bookings (never times/status/money).
       let healedCount = 0;
-      if (result.eventsSeen === 0) {
+      if (result.fetchOk && result.eventsSeen === 0) {
         try {
-          // Fetch up to 25 incomplete CAVU bookings
-          const { data: incompleteBookings } = await supabase
-            .from('bookings')
-            .select('reference')
-            .eq('tenant_id', tenantId)
-            .eq('source', BOOKING_SOURCE)
-            .eq('is_incomplete', true)
-            .limit(25);
-
-          if (incompleteBookings && incompleteBookings.length > 0) {
-            // Import sync-booking logic directly to avoid HTTP calls
-            const { getCavuConfigForTenant } = await import('@/lib/suppliers/getTenantSupplierConfig');
-            const { getBookingDetails } = await import('@/lib/suppliers/cavu');
-            const healConfig = await getCavuConfigForTenant(tenantId);
-
-            if (healConfig) {
-              // Heal bookings sequentially (rate-limited)
-              for (const booking of incompleteBookings) {
-                try {
-                  const healBooking = await getBookingDetails(healConfig, booking.reference);
-                  if (healBooking) {
-                    // Map and upsert (same logic as sync-booking route)
-                    const customerFirst = healBooking.Customer?.FirstName ?? '';
-                    const customerLast = healBooking.Customer?.Surname ?? '';
-                    const customerNameRaw = `${customerFirst} ${customerLast}`.trim();
-                    const customerName = customerNameRaw || 'Unknown';
-                    const plateRaw = healBooking.Vehicle?.Registration ?? '';
-                    const plateNorm = plateRaw.replace(/\s+/g, '').toUpperCase();
-                    const plate = plateNorm || 'UNKNOWN';
-                    const flightDate = healBooking.ArrivalDate ? healBooking.ArrivalDate.slice(0, 10) : null;
-
-                    function mapCavuStatus(status?: string): 'reserved' | 'checked_in' | 'checked_out' | 'cancelled' {
-                      if (!status) return 'reserved';
-                      const upper = status.toUpperCase();
-                      if (upper.includes('CANCELLED') || upper.includes('CANCEL')) return 'cancelled';
-                      if (upper.includes('CHECKED_OUT') || upper.includes('DEPARTED') || upper.includes('OUT')) return 'checked_out';
-                      if (upper.includes('CHECKED_IN') || upper.includes('ARRIVED') || upper.includes('IN')) return 'checked_in';
-                      if (upper.includes('CONFIRMED') || upper.includes('RESERVED')) return 'reserved';
-                      return 'reserved';
-                    }
-
-                    // Compute missing fields for heal
-                    const healMissingFields: string[] = [];
-                    if (!customerName || customerName === 'Unknown') {
-                      healMissingFields.push('customer_name');
-                    }
-                    if (!plate || plate === 'UNKNOWN' || plate === '') {
-                      healMissingFields.push('plate');
-                    }
-                    if (!healBooking.Customer?.Email || healBooking.Customer.Email.trim() === '') {
-                      healMissingFields.push('customer_email');
-                    }
-                    if (!healBooking.ArrivalDate || healBooking.ArrivalDate.trim() === '') {
-                      healMissingFields.push('start_at');
-                    }
-                    if (!healBooking.DepartureDate || healBooking.DepartureDate.trim() === '') {
-                      healMissingFields.push('end_at');
-                    }
-
-                    const healIsIncomplete = healMissingFields.length > 0;
-
-                    const { data: healedBooking, error: healError } = await supabase
-                      .from('bookings')
-                      .upsert({
-                        tenant_id: tenantId,
-                        reference: healBooking.Reference,
-                        external_source: SUPPLIER_CODE,
-                        start_at: healBooking.ArrivalDate,
-                        end_at: healBooking.DepartureDate,
-                        customer_name: customerName,
-                        customer_email: healBooking.Customer?.Email ?? null,
-                        customer_phone: healBooking.Customer?.Mobile ?? null,
-                        plate: plate,
-                        car_make: healBooking.Vehicle?.Make ?? null,
-                        car_model: healBooking.Vehicle?.Model ?? null,
-                        car_color: healBooking.Vehicle?.Colour ?? null,
-                        flight_number: healBooking.OutboundFlight ?? null,
-                        return_flight_number: healBooking.ReturnFlight ?? null,
-                        returning_from: healBooking.ReturningFrom ?? null,
-                        outbound_terminal: healBooking.OutboundTerminal ?? null,
-                        return_terminal: healBooking.ReturnTerminal ?? null,
-                        flight_date: flightDate,
-                        source: BOOKING_SOURCE,
-                        status: mapCavuStatus(healBooking.Status),
-                        money_received: healBooking.AmountPaid ?? 0,
-                        money_charged: healBooking.AmountPaid ?? 0,
-                        notes: healBooking.SpecialRequests ?? null,
-                        is_incomplete: healIsIncomplete,
-                        missing_fields: healMissingFields,
-                        updated_at: new Date().toISOString(),
-                      } as any, {
-                        onConflict: BOOKING_CONFLICT_TARGET,
-                        ignoreDuplicates: false,
-                      } as any)
-                      .select('id, tenant_id, reference')
-                      .single();
-
-                    if (!healError && healedBooking?.id) {
-                      // Save full booking payload to booking_external_payloads
-                      const { error: payloadError } = await supabase
-                        .from('booking_external_payloads')
-                        .upsert({
-                          tenant_id: tenantId,
-                          booking_id: healedBooking.id,
-                          source: BOOKING_SOURCE,
-                          reference: healBooking.Reference,
-                          payload: healBooking as any,
-                          fetched_at: new Date().toISOString(),
-                        } as any, {
-                          onConflict: BOOKING_CONFLICT_TARGET,
-                          ignoreDuplicates: false,
-                        } as any);
-
-                      if (payloadError) {
-                        console.warn('[CAVU CRON] Heal payload upsert failed', formatUpsertError('booking_external_payloads', healBooking.Reference, payloadError), payloadError);
-                      }
-                    }
-
-                    if (!healError) {
-                      healedCount++;
-                    } else {
-                      console.warn('[CAVU CRON] Heal booking upsert failed', formatUpsertError('bookings', healBooking.Reference, healError), healError);
-                    }
-                  }
-                  // Small delay to avoid rate limits
-                  await new Promise(resolve => setTimeout(resolve, 200));
-                } catch (healErr) {
-                  console.warn('[CAVU CRON] Heal failed for', booking.reference, healErr);
-                }
-              }
-            }
-          }
-        } catch (healErr) {
-          console.warn('[CAVU CRON] Heal step error', healErr);
+          healedCount = await healIncompleteBookings(tenantId, supabase, result.timezone);
+        } catch (healErr: any) {
+          console.warn('[CAVU CRON] Heal step error', healErr?.message ?? healErr);
         }
       }
 
-      // Only move the cursor when every event was applied. If some failed, the next run
-      // re-fetches the same window (upserts on tenant/source/reference are idempotent), so
-      // failed events are retried instead of being skipped for good. The window is capped at
-      // 168h above, so a permanently bad event stops being re-fetched after a week.
-      const wasSuccessful = result.errors.length === 0;
-      if (wasSuccessful) {
-        await updateLastSyncedAt(tenantId, supabase);
+      // Cursor: move past events that succeeded or failed permanently (they stay in the run's
+      // errors), but not past transient failures (network / 5xx / 429), which are retried.
+      // A failed or malformed event-list fetch never moves it. Window is still capped at 168h.
+      const cursorDecision = decideCavuCursor({
+        fetchOk: result.fetchOk,
+        fetchStartedAt: new Date(result.fetchStartedAt),
+        previousCursor: lastSyncedAt ?? null,
+        outcomes: result.outcomes,
+        timezone: result.timezone,
+      });
+      if (cursorDecision.advance) {
+        await updateLastSyncedAt(tenantId, supabase, cursorDecision.cursor);
       }
 
       // Update sync run record
@@ -407,6 +338,8 @@ async function runCavuCron(req?: NextRequest) {
         bookingsUpserted: result.bookingsUpserted,
         bookingsCancelled: result.bookingsCancelled,
         healedCount,
+        cursor: cursorDecision.advance ? cursorDecision.cursor : lastSyncedAt || null,
+        cursorReason: cursorDecision.reason,
         errors: result.errors,
       });
 

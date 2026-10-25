@@ -163,7 +163,8 @@ describe("staging → bookings promotion", () => {
     });
 
     expect(result.log.action).toBe("updated");
-    expect(updatePayloads[0].plate).toBeNull();
+    // A blank plate in a later file must not wipe the plate already on the booking.
+    expect(updatePayloads[0]).not.toHaveProperty("plate");
     expect(updatePayloads[0].status).toBe("cancelled");
   });
 

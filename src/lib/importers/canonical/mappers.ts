@@ -1,5 +1,6 @@
 import Papa from "papaparse";
-import { parseSupplierDateTimeToUtc, buildTenantLocalIso } from "@/lib/datetime/parse";
+import { buildTenantLocalIso, DEFAULT_TENANT_TIMEZONE } from "@/lib/datetime/parse";
+import { parseMoney as parseMoneyShared } from "@/lib/parseMoney";
 import type { CanonicalBooking } from "./types";
 import type { HolidayExtrasParseStats } from "@/lib/importers/holidayExtras/parseHolidayExtras";
 import {
@@ -22,11 +23,72 @@ export function toIsoFromDMY_HM(dmy: string | null, hm: string | null): string |
   return buildTenantLocalIso(dmy, hm || "00:00");
 }
 
-export function parseMoney(str: string | null): number | null {
-  if (!str) return null;
-  const cleaned = str.replace(/[^\d.]/g, "");
-  const n = Number(cleaned);
-  return Number.isFinite(n) && n >= 0 ? n : null;
+/** Supplier price → pounds; null when missing/unparseable (never a silent 0). Negative → null. */
+export function parseMoney(str: unknown): number | null {
+  const n = parseMoneyShared(str);
+  return n != null && n >= 0 ? n : null;
+}
+
+/** Wall-clock parts of a UTC instant in the tenant timezone, as naive "YYYY-MM-DDTHH:mm:ss". */
+function instantToNaiveLocal(date: Date, timezone: string = DEFAULT_TENANT_TIMEZONE): string | null {
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+  return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}:${get("second")}`;
+}
+
+/**
+ * Supplier CSV datetime → naive tenant-local ISO ("YYYY-MM-DDTHH:mm:ss", no Z) for staging.
+ * Promotion (bookingFromStaging → sanitizeSupplierDateTimeInput) reads these as tenant-local
+ * and converts to UTC exactly once, so mappers must NOT emit UTC "…Z" strings.
+ * Accepts "2026/08/21 13:00:00", "2026-08-21 13:00:00", "2026-08-21T13:00", "21/08/2026 13:00",
+ * and date-only values (midnight). A value with an explicit offset ("+01:00") is converted to
+ * the tenant's wall-clock time. A bare "Z" suffix is treated like the rest of the pipeline does
+ * (supplier-local with an erroneous suffix).
+ */
+export function supplierDateTimeToNaiveLocal(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+
+  const offset = s.match(/^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?)([+-]\d{2}:?\d{2})$/);
+  if (offset) {
+    return instantToNaiveLocal(new Date(`${offset[1].replace(" ", "T")}${offset[2]}`));
+  }
+
+  const ymd = s.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?Z?)?$/i);
+  if (ymd) {
+    const base = buildTenantLocalIso(`${ymd[1]}-${ymd[2]}-${ymd[3]}`, ymd[4] ? `${ymd[4]}:${ymd[5]}` : "00:00");
+    if (!base) return null;
+    const sec = ymd[6] ? ymd[6].padStart(2, "0") : "00";
+    return Number(sec) > 59 ? null : `${base.slice(0, 17)}${sec}`;
+  }
+
+  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (dmy) {
+    const base = buildTenantLocalIso(`${dmy[1]}/${dmy[2]}/${dmy[3]}`, dmy[4] ? `${dmy[4]}:${dmy[5]}` : "00:00");
+    if (!base) return null;
+    const sec = dmy[6] ? dmy[6].padStart(2, "0") : "00";
+    return Number(sec) > 59 ? null : `${base.slice(0, 17)}${sec}`;
+  }
+
+  return null;
+}
+
+/** Looking4 statuses that mean the booking is off (normalised to CANCELLED for promotion). */
+function normalizeLooking4Status(raw: string | null): string | null {
+  if (!raw) return raw;
+  if (/refund/i.test(raw)) return "CANCELLED";
+  return raw;
 }
 
 export function splitName(name: string | null): { first: string | null; last: string | null } {
@@ -67,20 +129,9 @@ export function looksLikeLooking4OrdersCsv(filename: string, text: string): bool
   );
 }
 
-/** Looking4 "2026/08/21 13:00:00" → naive tenant-local ISO for staging promotion. */
+/** Looking4 "2026/08/21 13:00:00" (or "21/08/2026 13:00") → naive tenant-local ISO for staging promotion. */
 function looking4DateTimeToNaiveLocal(raw: string | null): string | null {
-  if (!raw) return null;
-  const m = String(raw)
-    .trim()
-    .match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-  if (!m) return parseSupplierDateTimeToUtc(raw); // fallback
-  const y = m[1];
-  const mo = m[2].padStart(2, "0");
-  const d = m[3].padStart(2, "0");
-  const h = m[4].padStart(2, "0");
-  const mi = m[5].padStart(2, "0");
-  const s = (m[6] ?? "00").padStart(2, "0");
-  return `${y}-${mo}-${d}T${h}:${mi}:${s}`;
+  return supplierDateTimeToNaiveLocal(raw);
 }
 
 export function mapLooking4OrdersCsv(csvText: string): CanonicalBooking[] {
@@ -94,7 +145,9 @@ export function mapLooking4OrdersCsv(csvText: string): CanonicalBooking[] {
 
     const customerName = csvCell(r, "Customer Full Name");
     const nm = splitName(customerName);
-    const externalStatus = csvCell(r, "Status");
+    const supplierStatus = csvCell(r, "Status");
+    // "Refunded" means the order is off: treat as a cancellation (kept raw in supplier_status).
+    const externalStatus = normalizeLooking4Status(supplierStatus);
     const priceRaw =
       csvCell(r, "Product Native Price") ?? csvCell(r, "Order Price");
 
@@ -115,7 +168,7 @@ export function mapLooking4OrdersCsv(csvText: string): CanonicalBooking[] {
       customer_phone: csvCell(r, "Contact Number"),
       outbound_flight_number: csvCell(r, "Departure Flight Number"),
       return_flight_number: csvCell(r, "Return Flight Number"),
-      total_price: priceRaw ? Number(priceRaw) : null,
+      total_price: parseMoney(priceRaw),
       currency:
         csvCell(r, "Transaction Currency") ??
         csvCell(r, "Product Native Currency") ??
@@ -123,6 +176,7 @@ export function mapLooking4OrdersCsv(csvText: string): CanonicalBooking[] {
       raw: {
         ...r,
         external_status: externalStatus,
+        supplier_status: supplierStatus,
       },
     });
   }
@@ -143,8 +197,9 @@ export function mapCavuHourlyCsv(csvText: string): CanonicalBooking[] {
       channel: "CAVU",
       booking_reference: r.booking_reference || null,
       third_party_reference: r.third_party_reference || null,
-      start_at: r.entry_datetime ? parseSupplierDateTimeToUtc(r.entry_datetime) : null,
-      end_at: r.exit_datetime ? parseSupplierDateTimeToUtc(r.exit_datetime) : null,
+      // Naive local (no Z) — bookingFromStaging converts London → UTC once
+      start_at: supplierDateTimeToNaiveLocal(r.entry_datetime),
+      end_at: supplierDateTimeToNaiveLocal(r.exit_datetime),
       vehicle_registration: r.license_plate || null,
       vehicle_make: r.vehicle_make || null,
       vehicle_model: r.vehicle_model || null,
@@ -155,7 +210,7 @@ export function mapCavuHourlyCsv(csvText: string): CanonicalBooking[] {
       customer_phone: r.contact_number || null,
       outbound_flight_number: r.flight_number || null,
       return_flight_number: r.return_flight_number || null,
-      total_price: r.product_native_price ? Number(r.product_native_price) : null,
+      total_price: parseMoney(r.product_native_price),
       currency: r.transaction_currency || r.product_native_currency || null,
       raw: r,
     };
@@ -303,6 +358,19 @@ export function detectAndMapFromAttachment(filename: string, text: string): Dete
     }
   } catch (err) {
     console.error("[detectAndMap] Holiday Extras check failed:", err);
+  }
+
+  // ParkVia notifications first: they share generic labels ("booking receipt", "Reference:")
+  // with Flyparks and were being misrouted to the Flyparks parser.
+  if (looksLikeParkViaEmail({ subject: filename, body: text })) {
+    try {
+      const parkvia = mapParkViaEmailText(text);
+      if (parkvia && parkvia.length > 0 && parkvia[0].booking_reference) {
+        return { bookings: parkvia, format: null };
+      }
+    } catch (err) {
+      console.error("[detectAndMap] ParkVia parse failed:", err);
+    }
   }
 
   // Flyparks email body text - check before CAVU/APH which might match CSV patterns

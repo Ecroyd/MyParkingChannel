@@ -35,11 +35,16 @@ export function cellToCleanString(cell: any) {
   return expandSciToDigits(s);
 }
 
-/** Normalise to UK +44, handling 0044/44/07 and expanded sci-notation. */
-export function normalisePhoneUK(raw?: string) {
+/**
+ * Normalise to UK +44, handling 0044/44/07 and expanded sci-notation.
+ * `fromNumericCell`: the value came from a numeric spreadsheet cell, so a UK leading 0 may have
+ * been dropped (07700900123 → 7700900123); a 10-digit number starting 7/1/2/3 gets it back.
+ */
+export function normalisePhoneUK(raw?: string | number | null, opts: { fromNumericCell?: boolean } = {}) {
   let s = cellToCleanString(raw);
   // strip everything except digits and leading +
   s = s.replace(/(?!^\+)[^\d]/g, "");
+  if ((opts.fromNumericCell || typeof raw === "number") && /^[1237]\d{9}$/.test(s)) s = "0" + s;
   if (s.startsWith("+44")) return s;
   if (s.startsWith("0044")) return "+44" + s.slice(4);
   if (s.startsWith("44")) return "+44" + s.slice(2);
@@ -65,4 +70,18 @@ export function getCell(row: any[], letterOrIndex?: string): string {
   if (idx < 0) return "";
   const val = row[idx];
   return cellToCleanString(val).trim();
+}
+
+/**
+ * Raw cell value for typed parsing (dates, times, phones): numbers stay numbers (Excel
+ * serials / numeric cells), strings are trimmed. Missing column → "".
+ */
+export function getRawCell(row: any[], letterOrIndex?: string): string | number {
+  const idx = colLetterToIndex(letterOrIndex ?? "");
+  if (idx < 0) return "";
+  const val = row[idx];
+  if (val == null) return "";
+  if (typeof val === "number") return val;
+  if (val instanceof Date) return isNaN(val.getTime()) ? "" : val.toISOString();
+  return expandSciToDigits(String(val)).trim();
 }

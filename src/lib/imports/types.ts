@@ -36,17 +36,22 @@ export type CanonicalBooking = {
   customer_lastname: string;
   customer_title: string;
   customer_firstname: string;
-  start_at: string; // ISO
-  end_at: string;   // ISO
+  /** Naive tenant-local wall-clock "YYYY-MM-DDTHH:mm:ss"; the server applies the tenant timezone. */
+  start_at: string;
+  end_at: string;
   vehicle_reg: string;
   vehicle_colour: string;
   vehicle_make: string;
   vehicle_model: string;
   flight_number: string;
   phone: string;
+  /** Raw status cell from the file; mapped to bookings.status on the server. "" = not given. */
   status: string;
+  /** null = cell empty (on update: keep the existing amount). 0 is a real £0. */
   price: number | null;
   money_received: number | null;
   notes: string;
-  _rawRow?: any[]; // Store original raw row array for Holiday Extras phone finder
+  _rawRow?: any[]; // Original raw row, only sent for Holiday Extras profiles (phone finder)
+  /** 1-based row number in the uploaded file (for error reporting). */
+  rowNumber?: number;
 };

@@ -82,9 +82,11 @@ async function cavuFetch<T>(
   });
 
   if (!res.ok) {
-    const text = await res.text();
+    // Keep error bodies short: they end up in logs, sync-run errors and alert emails.
+    const text = (await res.text()).slice(0, 300);
     console.error('[CAVU] Error response', res.status, text);
     const err: any = new Error(`CAVU request failed: ${res.status} ${text}`);
+    err.status = res.status;
     if (res.status === 429) {
       err.code = 'CAVU_RATE_LIMIT';
     }

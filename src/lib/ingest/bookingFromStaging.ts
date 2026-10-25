@@ -15,6 +15,7 @@ import { resolveCustomerName } from "@/lib/bookings/normalizeCustomerName";
 import { formatPostgresError } from "@/lib/ingest/logBookingPromotionError";
 import { resolveImportPlatform } from "@/lib/ingest/importPlatform";
 import { toBookingInsertPayload } from "@/lib/ingest/safeBookingUpsertPayload";
+import { isPlaceholderPlate } from "@/lib/ingest/plateGuess";
 
 export type ImportRowAction = "inserted" | "updated" | "skipped" | "error";
 
@@ -96,7 +97,7 @@ function resolveCustomerEmail(row: StagingRow, reference: string): string {
 function cleanPlate(reg: string | null | undefined): string | null {
   if (!reg) return null;
   const s = String(reg).trim().toUpperCase().replace(/\s+/g, "");
-  if (!s || s === "-") return null;
+  if (!s || s === "-" || isPlaceholderPlate(s)) return null;
   return s;
 }
 
@@ -601,6 +602,21 @@ export async function upsertBookingFromStagingRow(
   if (updatePayload.anpr_status !== "cancelled") delete updatePayload.anpr_status;
 
   if (existing.row) {
+    // A resent / reprocessed confirmation must not un-cancel a booking. Only an explicit
+    // supplier amendment or reinstatement may move a cancelled booking back to reserved.
+    if (String(existing.row.status ?? "").toLowerCase() === "cancelled" && mappedStatus !== "cancelled") {
+      if (isReinstatingSupplierStatus(parsedStatus)) {
+        // Reinstated: bring the gate/ops board back in line with status.
+        updatePayload.gate_status = "reserved";
+        updatePayload.ops_status = "reserved";
+      } else {
+        delete updatePayload.status;
+        delete updatePayload.external_status;
+      }
+    }
+    // A blank / placeholder plate ("TBC") in a later email must not wipe a known plate.
+    if (updatePayload.plate == null) delete updatePayload.plate;
+
     const updateResult = await updateBookingWithVariants(
       supabase,
       tenantId,
@@ -683,6 +699,16 @@ async function tryPostgrestUpsert(
     },
     bookingId: upserted?.id,
   };
+}
+
+/**
+ * Supplier statuses that explicitly (re)activate a booking: amendments (AMND, AMEND, AMENDED,
+ * AMENDMENT) and reinstatements. NEW / FIRM / RESERVED are plain confirmations and may be resends.
+ */
+export function isReinstatingSupplierStatus(raw: string | null | undefined): boolean {
+  const norm = normalizeSupplierStatus(raw);
+  if (!norm) return false;
+  return norm === "AMND" || /^AMEND/.test(norm) || /^REINSTATE/.test(norm);
 }
 
 /** Staging dedupe key: one row per tenant + reference (import overwrites). */

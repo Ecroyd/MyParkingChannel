@@ -1,5 +1,8 @@
 import { normalizeFlyparksEmailText } from "@/lib/ingest/flyparksTextToStaging";
 import { buildTenantLocalIso } from "@/lib/datetime/parse";
+import { extractTimeOfDay } from "@/lib/ingest/timeOfDay";
+import { isPlaceholderPlate } from "@/lib/ingest/plateGuess";
+import { parseMoney as parseMoneyShared } from "@/lib/parseMoney";
 import {
   findEmailAddress,
   normalizePhoneDigits,
@@ -100,14 +103,16 @@ function pickLabel(text: string, label: string): string | null {
 
 function parseMoney(value: string | null): number | null {
   if (!value) return null;
-  const n = Number(value.replace(/,/g, "").replace(/[^0-9.-]/g, ""));
-  return Number.isFinite(n) ? n : null;
+  const amount =
+    value.match(/-?(?:&pound;|Â£|£|GBP)?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?/i)?.[0] ?? null;
+  return parseMoneyShared(amount);
 }
 
 function normalizePlate(value: string | null): string | null {
   if (!value) return null;
   const plate = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  return plate || null;
+  if (!plate || isPlaceholderPlate(plate)) return null;
+  return plate;
 }
 
 function cleanPhone(value: string | null): string | null {
@@ -122,10 +127,13 @@ function cleanPhone(value: string | null): string | null {
 
 function toLocalIso(value: string | null): string | null {
   if (!value) return null;
-  const m = value.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  const m = value.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(.+)$/);
   if (!m) return null;
-  const [, dd, mm, yyyy, hh, min] = m;
-  return buildTenantLocalIso(`${dd}/${mm}/${yyyy}`, `${hh}:${min}`);
+  const [, dd, mm, yyyy, rest] = m;
+  // "13:30", "13:30:00" or "1:30 PM" → 24h
+  const time = extractTimeOfDay(rest);
+  if (!time) return null;
+  return buildTenantLocalIso(`${dd}/${mm}/${yyyy}`, time);
 }
 
 /**
@@ -149,8 +157,8 @@ export function cleanParkViaCustomerName(value: string | null): string | null {
 
   if (!name) return null;
 
-  // Prefer letter words only (allows O'Brien / Anne-Marie).
-  const words = name.match(/[A-Za-z][A-Za-z'-]*/g) ?? [];
+  // Prefer letter words only (allows O'Brien / Anne-Marie / José / Zoë).
+  const words = name.match(/\p{L}[\p{L}\p{M}'’-]*/gu) ?? [];
   if (words.length === 0) return null;
   name = words.slice(0, 5).join(" ");
 
@@ -202,6 +210,9 @@ export function parkViaEmailBodyToStaging(rawText: string): ParkViaStaging {
       cleaned: {
         phone: cleanPhone(fields.Mobile),
         vehicle_reg: normalizePlate(fields["Registration Number"]),
+        vehicle_reg_placeholder: isPlaceholderPlate(fields["Registration Number"])
+          ? fields["Registration Number"]
+          : null,
         customer_name: cleanParkViaCustomerName(fields.Name),
       },
       body_preview: text.slice(0, 1200),

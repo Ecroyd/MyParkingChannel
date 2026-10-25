@@ -1,5 +1,6 @@
 import { buildTenantLocalIso } from "@/lib/datetime/parse";
 import { aphV1 } from "./mapping";
+import { parseMoney as parseMoneyShared } from "@/lib/parseMoney";
 
 const trim = (s: unknown) => String(s ?? "").trim();
 
@@ -12,10 +13,8 @@ function parseDateTimeUK(ddmmyy: string, hhmm: string): string | null {
 }
 
 function parseMoney(x: string): number | null {
-  const v = trim(x);
-  if (!v) return null;
-  const n = Number(v);
-  return Number.isFinite(n) && n >= 0 ? n : null;
+  const n = parseMoneyShared(trim(x));
+  return n != null && n >= 0 ? n : null;
 }
 
 /**

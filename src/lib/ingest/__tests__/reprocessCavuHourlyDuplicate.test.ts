@@ -56,8 +56,9 @@ describe("CAVU hourly duplicate dedupe + retry finalize", () => {
     expect(duplicateDedupeKeys).toBe(1);
     expect(duplicateRowsCollapsed).toBe(1);
     // Last row in file wins (03:00). Supplier datetimes are car-park local time
-    // with an erroneous "Z" (see sanitizeSupplierDateTimeInput), so 03:00 BST = 02:00Z.
-    expect(rows[0].start_at).toBe("2026-06-06T02:00:00.000Z");
+    // with an erroneous "Z" (see sanitizeSupplierDateTimeInput). The mapper emits naive local;
+    // promotion converts 03:00 BST → 02:00Z exactly once.
+    expect(rows[0].start_at).toBe("2026-06-06T03:00:00");
   });
 
   it("builds parse_reason with duplicate_dedupe_keys after successful retry", () => {

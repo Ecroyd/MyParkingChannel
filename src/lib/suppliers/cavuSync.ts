@@ -3,10 +3,7 @@ import 'server-only';
 import { createAdminClient } from '@/lib/supabase/server';
 import { getCavuConfigForTenant } from './getTenantSupplierConfig';
 import { getArrivalsForDate, getBookingDetails, CavuBooking } from './cavu';
-
-const SUPPLIER_CODE = 'cavu';
-const BOOKING_SOURCE = 'cavu';
-const BOOKING_CONFLICT_TARGET = 'tenant_id,source,reference';
+import { getTenantTimezone, writeCavuBooking } from './cavuBookingWrite';
 
 export type CavuSyncOptions = {
   daysPast?: number;
@@ -34,15 +31,6 @@ function addDays(date: Date, offset: number): Date {
   return d;
 }
 
-function formatUpsertError(tableName: string, reference: string, error: { message?: string } | null) {
-  return [
-    `supplier_code=${SUPPLIER_CODE}`,
-    `reference=${reference}`,
-    `table=${tableName}`,
-    `conflict_target=${BOOKING_CONFLICT_TARGET}`,
-    `postgres_error=${error?.message ?? 'Unknown Postgres error'}`,
-  ].join(' ');
-}
 
 export async function syncCavuArrivalsForTenant(
   tenantId: string,
@@ -57,6 +45,7 @@ export async function syncCavuArrivalsForTenant(
   }
 
   const supabase = createAdminClient();
+  const timezone = await getTenantTimezone(supabase, tenantId);
   const today = new Date();
   const seenRefs = new Set<string>();
   const datesProcessed: string[] = [];
@@ -130,89 +119,13 @@ export async function syncCavuArrivalsForTenant(
         continue;
       }
 
-      // Map customer name from nested structure
-      const customerFirst = booking.Customer?.FirstName ?? '';
-      const customerLast = booking.Customer?.Surname ?? '';
-      const customerNameRaw = `${customerFirst} ${customerLast}`.trim();
-      const customerName = customerNameRaw || 'Unknown';
-
-      // Normalize plate: uppercase, remove spaces
-      const plateRaw = booking.Vehicle?.Registration ?? '';
-      const plateNorm = plateRaw.replace(/\s+/g, '').toUpperCase();
-      const plate = plateNorm || 'UNKNOWN';
-
-      // Map status from CAVU Status
-      function mapCavuStatus(status?: string): 'reserved' | 'checked_in' | 'checked_out' | 'cancelled' {
-        if (!status) return 'reserved';
-        const upper = status.toUpperCase();
-        if (upper.includes('CANCELLED') || upper.includes('CANCEL')) return 'cancelled';
-        if (upper.includes('CHECKED_OUT') || upper.includes('DEPARTED') || upper.includes('OUT')) return 'checked_out';
-        if (upper.includes('CHECKED_IN') || upper.includes('ARRIVED') || upper.includes('IN')) return 'checked_in';
-        if (upper.includes('CONFIRMED') || upper.includes('RESERVED')) return 'reserved';
-        return 'reserved'; // Default
-      }
-
-      // Extract flight_date from ArrivalDate (YYYY-MM-DD format)
-      const flightDate = booking.ArrivalDate ? booking.ArrivalDate.slice(0, 10) : null;
-
-      // Compute missing fields
-      const missingFields: string[] = [];
-      if (!customerName || customerName === 'Unknown') {
-        missingFields.push('customer_name');
-      }
-      if (!plate || plate === 'UNKNOWN' || plate === '') {
-        missingFields.push('plate');
-      }
-      if (!booking.Customer?.Email || booking.Customer.Email.trim() === '') {
-        missingFields.push('customer_email');
-      }
-      if (!booking.ArrivalDate || booking.ArrivalDate.trim() === '') {
-        missingFields.push('start_at');
-      }
-      if (!booking.DepartureDate || booking.DepartureDate.trim() === '') {
-        missingFields.push('end_at');
-      }
-
-      const isIncomplete = missingFields.length > 0;
-
-      const row = {
-        tenant_id: tenantId,
-        reference: booking.Reference,
-        external_source: SUPPLIER_CODE,
-        start_at: booking.ArrivalDate,
-        end_at: booking.DepartureDate,
-        customer_name: customerName,
-        customer_email: booking.Customer?.Email ?? null,
-        customer_phone: booking.Customer?.Mobile ?? null,
-        plate: plate,
-        car_make: booking.Vehicle?.Make ?? null,
-        car_model: booking.Vehicle?.Model ?? null,
-        car_color: booking.Vehicle?.Colour ?? null,
-        flight_number: booking.OutboundFlight ?? null,
-        flight_date: flightDate,
-        source: BOOKING_SOURCE,
-        status: mapCavuStatus(booking.Status),
-        money_received: booking.AmountPaid ?? 0,
-        money_charged: booking.AmountPaid ?? 0,
-        notes: booking.SpecialRequests ?? null,
-        is_incomplete: isIncomplete,
-        missing_fields: missingFields,
-        updated_at: new Date().toISOString(),
-      };
-
-      const { error } = await supabase
-        .from('bookings')
-        .upsert(row as any, {
-          onConflict: BOOKING_CONFLICT_TARGET,
-          ignoreDuplicates: false,
-        } as any);
-
-      if (error) {
-        const msg = formatUpsertError('bookings', ref, error);
-        console.error('[CAVU SYNC] Upsert failed', msg, error);
-        errors.push(`Upsert failed: ${msg}`);
-      } else {
+      try {
+        await writeCavuBooking(supabase, { tenantId, booking, timezone, mode: 'sync', reference: ref });
         bookingsUpserted++;
+      } catch (err: any) {
+        const msg = err instanceof RangeError ? `invalid date (${err.message})` : err?.message ?? String(err);
+        console.error('[CAVU SYNC] Write failed', ref, msg);
+        errors.push(`Upsert failed for ${ref}: ${msg}`);
       }
     }
   }

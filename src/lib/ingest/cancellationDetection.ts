@@ -9,19 +9,25 @@ export type StagingRowLike = {
   raw_json?: unknown;
 };
 
-export function isCancelledRow(row: StagingRowLike): boolean {
-  const externalStatus =
-    row.external_status ??
-    (row.raw_json &&
-    typeof row.raw_json === "object" &&
-    row.raw_json !== null &&
-    "external_status" in row.raw_json
-      ? String((row.raw_json as { external_status?: unknown }).external_status ?? "")
-      : null);
+function rawStatusField(raw: unknown, key: "external_status" | "status"): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const v = (raw as Record<string, unknown>)[key];
+  return v == null ? null : String(v);
+}
 
-  if (isCancelledSupplierStatus(row.status) || isCancelledSupplierStatus(externalStatus)) {
-    return true;
-  }
+/**
+ * True only when a status field says cancelled (status, external_status, raw_json.external_status,
+ * raw_json.status) or the supplier's explicit CANX token appears in the raw row.
+ * Free text such as "Free cancellation" or a T&Cs note must not mark a booking cancelled.
+ */
+export function isCancelledRow(row: StagingRowLike): boolean {
+  const candidates = [
+    row.status,
+    row.external_status,
+    rawStatusField(row.raw_json, "external_status"),
+    rawStatusField(row.raw_json, "status"),
+  ];
+  if (candidates.some((s) => isCancelledSupplierStatus(s))) return true;
 
   const rawStr =
     row.raw_json == null
@@ -30,5 +36,5 @@ export function isCancelledRow(row: StagingRowLike): boolean {
         ? row.raw_json
         : JSON.stringify(row.raw_json);
 
-  return /\bCANX\b/i.test(rawStr) || /cancel/i.test(rawStr);
+  return /\bCANX\b/i.test(rawStr);
 }

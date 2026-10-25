@@ -13,11 +13,31 @@ const PLATE_BLOCKLIST = new Set([
   "COST",
 ]);
 
+/** Values customers / suppliers type when the registration is not known yet. */
+const PLACEHOLDER_PLATES = new Set([
+  "TBC",
+  "TBA",
+  "TBD",
+  "UNKNOWN",
+  "NA",
+  "NONE",
+  "NOTKNOWN",
+  "UNK",
+]);
+
+/** True for "TBC", "TBA", "N/A", "Unknown" etc. (any spacing/punctuation/case). */
+export function isPlaceholderPlate(value: string | null | undefined): boolean {
+  if (!value) return false;
+  const norm = String(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return PLACEHOLDER_PLATES.has(norm);
+}
+
 /** UK VRM patterns — current (AA99AAA) and common legacy shapes. */
 export function isPlausibleUkVrm(value: string): boolean {
   const norm = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (norm.length < 5 || norm.length > 8) return false;
   if (PLATE_BLOCKLIST.has(norm)) return false;
+  if (PLACEHOLDER_PLATES.has(norm)) return false;
 
   if (/^[A-Z]{2}\d{2}[A-Z]{3}$/.test(norm)) return true;
   if (/^[A-Z]{1,3}\d{1,4}[A-Z]{1,3}$/.test(norm)) return true;
@@ -44,6 +64,7 @@ export function normalizeUkPlate(value: string | null | undefined): string | nul
  */
 export function normalizeLabeledPlate(value: string | null | undefined): string | null {
   if (!value) return null;
+  if (isPlaceholderPlate(value)) return null;
   const strict = normalizeUkPlate(value);
   if (strict) return strict;
 
@@ -52,6 +73,7 @@ export function normalizeLabeledPlate(value: string | null | undefined): string 
   const norm = token.toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (norm.length < 3 || norm.length > 8) return null;
   if (PLATE_BLOCKLIST.has(norm)) return null;
+  if (PLACEHOLDER_PLATES.has(norm)) return null;
   if (!/^[A-Z0-9]+$/.test(norm)) return null;
   return norm;
 }

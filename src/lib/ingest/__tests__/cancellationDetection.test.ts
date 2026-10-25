@@ -15,9 +15,23 @@ describe("isCancelledRow", () => {
     expect(isCancelledRow({ external_status: "*CANX*" })).toBe(true);
   });
 
-  it("returns true when raw_json string contains cancel", () => {
-    expect(isCancelledRow({ raw_json: { note: "Booking cancelled" } })).toBe(true);
-    expect(isCancelledRow({ raw_json: "cancellation" })).toBe(true);
+  it("returns true for raw_json status fields and the explicit CANX token", () => {
+    expect(isCancelledRow({ raw_json: { external_status: "Cancelled" } })).toBe(true);
+    expect(isCancelledRow({ raw_json: { status: "CANCELLED" } })).toBe(true);
+    expect(isCancelledRow({ raw_json: { fields: ["0001", "*CANX*", "REF1"] } })).toBe(true);
+    expect(isCancelledRow({ raw_json: "row *CANX* REF1" })).toBe(true);
+  });
+
+  it("ignores free text mentioning cancellation outside status fields", () => {
+    expect(isCancelledRow({ raw_json: { note: "Booking cancelled" } })).toBe(false);
+    expect(isCancelledRow({ raw_json: "cancellation" })).toBe(false);
+    expect(
+      isCancelledRow({
+        status: "reserved",
+        external_status: "NEW",
+        raw_json: { product: "Meet & Greet - Free cancellation up to 24h", external_status: "NEW" },
+      })
+    ).toBe(false);
   });
 
   it("returns false for reserved/active status", () => {

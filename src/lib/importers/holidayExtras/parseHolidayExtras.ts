@@ -4,6 +4,7 @@ import {
   normalizeSupplierStatus,
 } from "@/lib/ingest/importStatusMapping";
 import { parseNaiveLocalIsoToUtc } from "@/lib/datetime/parse";
+import { parseMoney as parseMoneyShared } from "@/lib/parseMoney";
 
 const trim = (v: unknown) => String(v ?? "").trim().replace(/^"|"$/g, "");
 
@@ -138,11 +139,7 @@ export function parseExtDateTime(
 }
 
 function parseMoney(v: string | number | null | undefined): number | null {
-  if (v === null || v === undefined) return null;
-  const s = String(v).trim();
-  if (!s) return null;
-  const n = Number(s.replace(/[^0-9.-]/g, ""));
-  return Number.isFinite(n) ? n : null;
+  return parseMoneyShared(v);
 }
 
 function normalizeReg(v: string | null | undefined): string | null {

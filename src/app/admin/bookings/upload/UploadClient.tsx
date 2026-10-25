@@ -3,9 +3,10 @@
 import * as XLSX from "xlsx";
 import React from "react";
 import dayjs from "dayjs";
-import { getCell, normalisePhoneUK, cellToCleanString } from "@/lib/imports/utils";
-import { composeISO, DateParseOptions } from "@/lib/imports/datetime";
-import { mapStatus } from "@/lib/imports/normalise";
+import type { DateParseOptions } from "@/lib/imports/datetime";
+import { previewStatus } from "@/lib/imports/normalise";
+import { looksLikeHeaderRow } from "@/lib/imports/header";
+import { buildImportRows, type RowIssue } from "@/lib/imports/buildRows";
 import { autoDetectMap, compareMaps, bestMatchAgainstSaved, MapState as AutoMapState } from "@/lib/imports/autoDetect";
 import type { CanonicalBooking, ImportProfileMap } from "@/lib/imports/types";
 
@@ -27,6 +28,50 @@ const DATE_OPTS: DateParseOptions = {
   validYearMin: 2015, 
   validYearMax: 2035 
 } as const;
+
+/** Rows per commit request: keeps each body well under Vercel's 4.5MB limit and the timeout. */
+const COMMIT_CHUNK_SIZE = 200;
+
+/** Decode CSV bytes as UTF-8, falling back to Windows-1252 when the file isn't valid UTF-8. */
+function decodeText(buf: ArrayBuffer): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buf);
+  } catch {
+    return new TextDecoder("windows-1252").decode(buf);
+  }
+}
+
+function isDelimitedTextFile(name: string) {
+  return /\.(csv|tsv)$/i.test(name);
+}
+
+type CommitSummary = {
+  inserted: number;
+  updated: number;
+  duplicates: RowIssue[];
+  warnings: RowIssue[];
+  errors: Array<{ rowIndex: number; reference: string; reason: string }>;
+  failedChunk?: string;
+  rowsNotSent: number;
+};
+
+async function readJsonSafe(res: Response): Promise<any | null> {
+  const text = await res.text();
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return null;
+  }
+}
+
+function describeHttpError(res: Response, j: any): string {
+  if (res.status === 401) return j?.error || "Your session has expired. Sign in again and retry.";
+  if (res.status === 403) return "You need Admin or Operations access to import";
+  if (res.status === 413) return j?.error || "The request was too large for the server.";
+  if (res.status === 504 || res.status === 408) return "The server timed out processing this batch.";
+  if (j?.error) return String(j.error);
+  return `Server returned ${res.status} ${res.statusText || ""}`.trim() + (j ? "" : " (not a JSON response)");
+}
 
 const FIELDS: Array<{key: keyof ImportProfileMap, label: string, required?: boolean, group?: string}> = [
   // Core fields
@@ -81,7 +126,14 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
   const [preview, setPreview] = React.useState<CanonicalBooking[]>([]);
   const [profileName, setProfileName] = React.useState("Auto-generated");
   const [fileAnalysed, setFileAnalysed] = React.useState(false);
-  const [overwrite, setOverwrite] = React.useState<boolean>(true);
+  const [overwrite, setOverwrite] = React.useState<boolean>(false);
+  const [hasHeader, setHasHeader] = React.useState<boolean>(true);
+  const [rowNumbers, setRowNumbers] = React.useState<number[]>([]);
+  const [emptyRowsSkipped, setEmptyRowsSkipped] = React.useState(0);
+  const [rowErrors, setRowErrors] = React.useState<RowIssue[]>([]);
+  const [fileDuplicates, setFileDuplicates] = React.useState<RowIssue[]>([]);
+  const [importing, setImporting] = React.useState(false);
+  const [commitSummary, setCommitSummary] = React.useState<CommitSummary | null>(null);
   const [statusMsg, setStatusMsg] = React.useState<string>("");
   const [mappings, setMappings] = React.useState<{id:string;name:string;mapping:any}[]>([]);
   const [selectedMappingId, setSelectedMappingId] = React.useState<string>("");
@@ -108,6 +160,9 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
     setFileAnalysed(false);
     setRows([]);
     setPreview([]);
+    setRowErrors([]);
+    setFileDuplicates([]);
+    setCommitSummary(null);
   }
 
   function analyseFile() {
@@ -182,8 +237,18 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
       } else {
         // Parse as Excel/CSV using XLSX (handles both .xlsx and .csv files)
         try {
-          const data = new Uint8Array(reader.result as ArrayBuffer);
-          const wb = XLSX.read(data, { type: "array" });
+          let wb: XLSX.WorkBook;
+          if (isDelimitedTextFile(file.name)) {
+            // CSV/TSV: keep every cell as the exact text in the file. Without raw:true SheetJS
+            // turns "01/02/2026" into a US-date serial (2 Jan), strips phone leading zeros and
+            // reads "12,50" as 1250. Dates are parsed later as DD/MM/YYYY.
+            const text = decodeText(reader.result as ArrayBuffer);
+            wb = XLSX.read(text, { type: "string", raw: true });
+          } else {
+            // XLSX/XLS: real date cells arrive as Excel serial numbers and are converted exactly.
+            const data = new Uint8Array(reader.result as ArrayBuffer);
+            wb = XLSX.read(data, { type: "array" });
+          }
           const ws = wb.Sheets[wb.SheetNames[0]];
           // Parse with header: 1 to get array of arrays, preserve empty cells
           aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
@@ -225,21 +290,26 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
       
       // Normalize rows: ensure all rows have the same length, padding with empty strings
       // Filter out completely empty rows, but keep rows with at least one non-empty cell
-      const filteredRows = aoa
-        .map(r => {
-          if (!r || r.length === 0) return null;
-          // Pad row to maxCols length with empty strings
-          const normalized = [...r];
-          while (normalized.length < maxCols) {
-            normalized.push("");
-          }
-          return normalized;
-        })
-        .filter(r => r && r.some(cell => cell !== null && cell !== undefined && String(cell).trim() !== ""));
+      const filteredRows: any[][] = [];
+      const lineNumbers: number[] = [];
+      let empty = 0;
+      aoa.forEach((r, idx) => {
+        const normalized = [...(r || [])];
+        while (normalized.length < maxCols) normalized.push("");
+        if (normalized.some(cell => cell !== null && cell !== undefined && String(cell).trim() !== "")) {
+          filteredRows.push(normalized);
+          lineNumbers.push(idx + 1);
+        } else {
+          empty++;
+        }
+      });
       
-      setRows(filteredRows as any[][]);
+      setRows(filteredRows);
+      setRowNumbers(lineNumbers);
+      setEmptyRowsSkipped(empty);
+      setHasHeader(looksLikeHeaderRow(filteredRows[0]));
       setFileAnalysed(true);
-      console.log(`📄 File analysed: ${filteredRows.length} rows loaded, ${maxCols} columns detected`);
+      console.log(`📄 File analysed: ${filteredRows.length} rows loaded, ${maxCols} columns detected, ${empty} empty rows skipped`);
     };
     
     // Read as text for .txt files, as array buffer for Excel files
@@ -273,153 +343,25 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
     }
   }
 
-  // Check if a row looks like a header row (contains header-like text)
-  function isHeaderRow(row: any[]): boolean {
-    if (!row || row.length === 0) return false;
-    
-    // Check if row contains common header patterns (expanded list for CAVU/APH)
-    const headerPatterns = [
-      /^booking[_\s-]?reference$/i,
-      /^entry[_\s-]?datetime$/i,
-      /^exit[_\s-]?datetime$/i,
-      /^license[_\s-]?plate$/i,
-      /^customer[_\s-]?name$/i,
-      /^vehicle[_\s-]?reg$/i,
-      /^reference$/i,
-      /^source$/i,
-      /^booking[_\s-]?status[_\s-]?name$/i,
-      /^booking[_\s-]?datetime$/i,
-      /^flight[_\s-]?number$/i,
-      /^departure[_\s-]?terminal$/i,
-      /^return[_\s-]?flight[_\s-]?number$/i,
-      /^return[_\s-]?terminal$/i,
-      /^vehicle[_\s-]?make$/i,
-      /^vehicle[_\s-]?model$/i,
-      /^vehicle[_\s-]?colour$/i,
-      /^contact[_\s-]?number$/i,
-      /^passenger[_\s-]?count$/i,
-      /^number[_\s-]?of[_\s-]?people[_\s-]?in[_\s-]?vehicle$/i,
-      /^third[_\s-]?party[_\s-]?reference$/i,
-      /^transaction[_\s-]?currency$/i,
-      /^product[_\s-]?native[_\s-]?currency$/i,
-      /^product[_\s-]?native[_\s-]?price$/i,
-      /^purchase[_\s-]?model$/i,
-      /^deposit[_\s-]?amount$/i,
-      /^car[_\s-]?park[_\s-]?balance$/i,
-      /^product[_\s-]?name$/i,
-      /^booking[_\s-]?item[_\s-]?reference$/i,
-    ];
-    
-    // Count how many cells match header patterns
-    let headerMatches = 0;
-    for (const cell of row) {
-      const cellStr = cellToCleanString(cell).trim();
-      if (headerPatterns.some(pattern => pattern.test(cellStr))) {
-        headerMatches++;
-      }
-    }
-    
-    // If 2+ cells match header patterns, it's likely a header row
-    if (headerMatches >= 2) return true;
-    
-    // Also check if row is mostly text (not numbers/dates) - typical of headers
-    const textCount = row.filter(cell => {
-      const s = cellToCleanString(cell).trim();
-      return s && !/^\d+\.?\d*$/.test(s) && !/^\d{4}-\d{2}-\d{2}/.test(s) && !/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s);
-    }).length;
-    
-    // If more than 70% of cells are text (not numbers/dates), likely a header
-    return textCount / Math.max(row.length, 1) > 0.7;
+  function currentProfileName() {
+    return selectedMappingId ? (mappings.find(m=>m.id===selectedMappingId)?.name || "Auto-generated") : "Auto-generated";
   }
 
   function buildPreview() {
-    const out: CanonicalBooking[] = [];
-    console.log(`🔍 Building preview for ${rows.length} rows`);
-    
-    // Detect and skip header rows
-    let startIndex = 0;
-    if (rows.length > 0 && isHeaderRow(rows[0])) {
-      console.log("📋 Detected header row, skipping first row");
-      startIndex = 1;
-    }
-    
-    // Process all rows except headers
-    for (let i = startIndex; i < rows.length; i++) {
-      const r = rows[i];
-      
-      // Skip any other rows that look like headers
-      if (isHeaderRow(r)) {
-        console.log(`📋 Skipping row ${i + 1} (looks like header)`);
-        continue;
-      }
-
-      // timestamps: use timestamp if provided (for Excel serial dates with time), otherwise compose date+time
-      const startTimestamp = getCell(r, map.start_timestamp);
-      const endTimestamp = getCell(r, map.end_timestamp);
-      
-      const start_at = startTimestamp 
-        ? composeISO(startTimestamp, undefined, timezone as any, DATE_OPTS)
-        : composeISO(getCell(r, map.start_date), getCell(r, map.start_time), timezone as any, DATE_OPTS);
-      
-      const end_at = endTimestamp
-        ? composeISO(endTimestamp, undefined, timezone as any, DATE_OPTS)
-        : composeISO(getCell(r, map.end_date), getCell(r, map.end_time), timezone as any, DATE_OPTS);
-
-      // Handle full name or separate first/last name
-      let customer_firstname: string;
-      let customer_lastname: string;
-      const customer_name_full = getCell(r, map.customer_name);
-      
-      if (customer_name_full && customer_name_full.trim()) {
-        // If full name is provided, split it into first and last name
-        const nameParts = customer_name_full.trim().split(/\s+/);
-        if (nameParts.length === 1) {
-          // Only one word, treat as last name
-          customer_firstname = "";
-          customer_lastname = nameParts[0].toUpperCase();
-        } else {
-          // Last word is last name, everything else is first name
-          customer_lastname = nameParts[nameParts.length - 1].toUpperCase();
-          customer_firstname = nameParts.slice(0, -1).join(" ");
-        }
-      } else {
-        // Use separate first/last name fields
-        customer_lastname = getCell(r, map.customer_lastname).toUpperCase();
-        customer_firstname = getCell(r, map.customer_firstname);
-      }
-      
-      const customer_title = getCell(r, map.customer_title).toUpperCase();
-
-      const phoneRaw = getCell(r, map.phone);
-      const statusRaw = getCell(r, map.status);
-
-      const price = Number(getCell(r, map.price)) || null;
-      const money_received = Number(getCell(r, map.money_received)) || null;
-
-      out.push({
-        source: sourceMapping === "custom" ? customSource : sourceMapping, // Use the selected source mapping
-        reference: getCell(r, map.reference).toUpperCase(),
-        customer_name: `${customer_firstname} ${customer_lastname}`.trim(),
-        customer_lastname,
-        customer_title,
-        customer_firstname,
-        start_at,
-        end_at,
-        vehicle_reg: getCell(r, map.vehicle_reg).toUpperCase(),
-        vehicle_colour: getCell(r, map.vehicle_colour).toUpperCase(),
-        vehicle_make: getCell(r, map.vehicle_make).toUpperCase(),
-        vehicle_model: getCell(r, map.vehicle_model).toUpperCase(),
-        flight_number: getCell(r, map.flight_number).toUpperCase(),
-        phone: normalisePhoneUK(phoneRaw),
-        status: mapStatus(statusRaw),
-        price,
-        money_received,
-        notes: getCell(r, map.notes),
-        _rawRow: r, // Store original raw row array for Holiday Extras phone finder
-      });
-    }
-    console.log(`✅ Preview built: ${out.length} rows processed`);
-    setPreview(out);
+    const profileUpper = currentProfileName().toUpperCase().replace(/\s+/g, "");
+    const result = buildImportRows(rows, map, {
+      hasHeader,
+      source: sourceMapping === "custom" ? customSource : sourceMapping,
+      dateOpts: { ...DATE_OPTS, timezone },
+      // The server only uses the raw row for the Holiday Extras phone finder.
+      includeRawRow: profileUpper.includes("HOLIDAYEXTRAS"),
+      rowNumbers,
+    });
+    console.log(`✅ Preview built: ${result.rows.length} ready, ${result.errors.length} errors, ${result.duplicates.length} duplicates`);
+    setPreview(result.rows);
+    setRowErrors(result.errors);
+    setFileDuplicates(result.duplicates);
+    setCommitSummary(null);
   }
 
   async function saveProfile() {
@@ -440,73 +382,71 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
   async function commitImport() {
     if (!tenantId) { setStatusMsg("Enter a tenant ID."); return; }
     if (!preview.length) { setStatusMsg("Preview first, then import."); return; }
-    
-    console.log("🔍 Import Debug Info:");
-    console.log("Tenant ID:", tenantId);
-    console.log("Tenant object:", tenant);
-    console.log("Preview rows count:", preview.length);
-    console.log("Original file rows count:", rows.length);
-    console.log("Overwrite mode:", overwrite);
-    
-    const requestBody = { 
-      tenantId, 
-      rows: preview, // Send the processed preview data (now contains all rows)
-      profileName: selectedMappingId ? (mappings.find(m=>m.id===selectedMappingId)?.name || "Auto-generated") : "Auto-generated", 
-      overwriteDuplicates: overwrite,
-      sourceMapping: sourceMapping === "custom" ? "other" : sourceMapping // Custom sources map to 'other' in database
+    if (importing) return;
+    setImporting(true);
+    setStatusMsg("");
+
+    const summary: CommitSummary = {
+      inserted: 0, updated: 0, duplicates: [], warnings: [], errors: [], rowsNotSent: 0,
     };
-    
-    console.log("Request body:", requestBody);
-    
-    const res = await fetch("/api/import/bookings/commit", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(requestBody),
-    });
-    const j = await res.json();
-    if (!res.ok) {
-      console.error("❌ Import failed:", j);
-      alert(`Import failed.\nInserted: ${j.inserted ?? 0}\nUpdated: ${j.updated ?? 0}\nSkipped: ${j.skipped ?? 0}\nErrors: ${j.errors ?? 0}\n\nServer says:\n${(j.serverErrors||[]).join("\n")}`);
+    let runId: string | null = null;
+    const profileName = currentProfileName();
+
+    try {
+      for (let i = 0; i < preview.length; i += COMMIT_CHUNK_SIZE) {
+        const chunk = preview.slice(i, i + COMMIT_CHUNK_SIZE);
+        setStatusMsg(`Importing rows ${i + 1}-${i + chunk.length} of ${preview.length}…`);
+        const url = "/api/import/bookings/commit" + (runId ? `?runId=${encodeURIComponent(runId)}` : "");
+        let res: Response;
+        try {
+          res = await fetch(url, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              tenantId,
+              rows: chunk,
+              profileName,
+              overwriteDuplicates: overwrite,
+              sourceMapping: sourceMapping === "custom" ? "other" : sourceMapping, // Custom sources map to 'other' in database
+            }),
+          });
+        } catch (err: any) {
+          summary.failedChunk = `Network error: ${err?.message ?? String(err)}`;
+          summary.rowsNotSent = preview.length - i;
+          break;
+        }
+        const j = await readJsonSafe(res);
+        if (!res.ok || !j) {
+          summary.failedChunk = describeHttpError(res, j);
+          summary.rowsNotSent = preview.length - i;
+          break;
+        }
+        runId = j.runId ?? runId;
+        summary.inserted += j.insertedCount ?? 0;
+        summary.updated += j.updatedCount ?? 0;
+        summary.duplicates.push(...(j.duplicates ?? []));
+        summary.warnings.push(...(j.warnings ?? []));
+        summary.errors.push(...(j.errors ?? []));
+      }
+    } finally {
+      setImporting(false);
+    }
+
+    setCommitSummary(summary);
+    if (summary.failedChunk) {
+      setStatusMsg(`Import stopped: ${summary.failedChunk}. ${summary.inserted + summary.updated} booking(s) were saved before it stopped; ${summary.rowsNotSent} row(s) were not sent.`);
       return;
     }
-    
-    // Check for invalid rows
-    if (j.invalidRows && j.invalidRows.length > 0) {
-      const invalidMsg = `⚠️ Some rows were skipped due to missing dates:\n\n${j.invalidRows.map((row: any) => `Row ${row.index}: ${row.reason}`).join('\n')}\n\nThese rows were not imported.`;
-      alert(invalidMsg);
-    }
-    
-    // Success! Clear all data and reset to upload ready state
-    const successCount = j.successCount ?? 0;
-    const skippedCount = j.skippedCount ?? 0;
-    const errorCount = j.errorCount ?? 0;
-    
-    let msg = `✅ Import complete!\n\n`;
-    msg += `Successfully processed: ${successCount} booking(s)\n`;
-    msg += `   (includes both new bookings and updates to existing bookings)\n`;
-    
-    if (errorCount > 0) {
-      msg += `\n❌ Errors: ${errorCount}\n`;
-      msg += `   Check the import errors page for details.`;
-    }
-    
-    if (errorCount === 0) {
-      msg += `\nAll rows processed successfully!`;
-    }
-    
-    alert(msg);
-    
-    // Reset all state to upload ready
+    setStatusMsg(
+      `Import complete: ${summary.inserted} new, ${summary.updated} updated, ${summary.duplicates.length} skipped as duplicates, ${summary.errors.length} error(s).`
+    );
+    // Clear the file so the same rows aren't committed twice; the summary stays on screen.
     setFile(null);
     setFileAnalysed(false);
     setRows([]);
-    setMap({});
     setPreview([]);
-    setStatusMsg("");
-    setOverwrite(true);
-    setSelectedMappingId("");
-    setSourceMapping("other");
-    setCustomSource("");
+    setRowErrors([]);
+    setFileDuplicates([]);
   }
 
 
@@ -708,6 +648,11 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
                 )}
               </div>
 
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={hasHeader} onChange={e => setHasHeader(e.target.checked)} />
+                First row is a header (column names)
+              </label>
+
               <div className="flex gap-2">
                 <button 
                   onClick={buildPreview} 
@@ -732,14 +677,24 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
                     </div>
                     <button 
                       onClick={commitImport} 
-                      className="px-6 py-2 rounded-lg bg-green-600 text-white font-medium hover:bg-green-700 transition-colors"
+                      disabled={importing}
+                      className="px-6 py-2 rounded-lg bg-green-600 text-white font-medium hover:bg-green-700 transition-colors disabled:opacity-50"
                     >
-                      Import {preview.length} Booking{preview.length !== 1 ? 's' : ''}
+                      {importing ? "Importing…" : `Import ${preview.length} Booking${preview.length !== 1 ? 's' : ''}`}
                     </button>
                   </div>
-                  <p className="text-xs text-green-700">
-                    ✓ Existing bookings with the same reference will be updated automatically
-                  </p>
+                  <label className="flex items-start gap-2 text-xs text-green-800">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={overwrite}
+                      onChange={e => setOverwrite(e.target.checked)}
+                    />
+                    <span>
+                      Update existing bookings with the same reference. When off, they are skipped and listed as duplicates.
+                      Checked-in/out and cancelled bookings keep their status; empty cells keep existing values.
+                    </span>
+                  </label>
                 </div>
               )}
 
@@ -755,6 +710,26 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
         </div>
 
         <div className="lg:col-span-2 space-y-4">
+          {commitSummary && <CommitSummaryBlock summary={commitSummary} />}
+
+          {fileAnalysed && (preview.length > 0 || rowErrors.length > 0 || fileDuplicates.length > 0) && (
+            <div className="bg-white border rounded-lg p-4 space-y-3 text-sm">
+              <h3 className="font-semibold">Rows not in the import</h3>
+              <ul className="text-gray-700 space-y-1">
+                <li>{hasHeader ? 1 : 0} header row skipped{hasHeader ? "" : " (first row treated as data)"}</li>
+                <li>{emptyRowsSkipped} empty row(s) skipped</li>
+                <li className={rowErrors.length ? "text-red-700 font-medium" : ""}>
+                  {rowErrors.length} row(s) with errors (will NOT be imported)
+                </li>
+                <li className={fileDuplicates.length ? "text-amber-700 font-medium" : ""}>
+                  {fileDuplicates.length} duplicate reference(s) in this file (the last row for each reference is used)
+                </li>
+              </ul>
+              <IssueList title="Row errors" issues={rowErrors} tone="red" />
+              <IssueList title="Duplicates in file" issues={fileDuplicates} tone="amber" />
+            </div>
+          )}
+
           {/* Raw File Data */}
           {fileAnalysed && rows.length > 0 && (
             <div className="bg-white border rounded-lg p-4">
@@ -844,15 +819,14 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
                           <td className="border px-2 py-1">{r.phone || "-"}</td>
                           <td className="border px-2 py-1">
                             <span className={`px-2 py-0.5 rounded text-xs whitespace-nowrap ${
-                              r.status === 'cancelled' ? 'bg-red-100 text-red-700' :
-                              r.status === 'amended' ? 'bg-yellow-100 text-yellow-700' :
+                              previewStatus(r.status) === 'cancelled' ? 'bg-red-100 text-red-700' :
                               'bg-green-100 text-green-700'
-                            }`}>
-                              {r.status}
+                            }`} title={r.status ? `File: ${r.status}` : "No status in file"}>
+                              {previewStatus(r.status)}
                             </span>
                           </td>
-                          <td className="border px-2 py-1">{r.price ? `£${r.price.toFixed(2)}` : "-"}</td>
-                          <td className="border px-2 py-1">{r.money_received ? `£${r.money_received.toFixed(2)}` : "-"}</td>
+                          <td className="border px-2 py-1">{r.price != null ? `£${r.price.toFixed(2)}` : "-"}</td>
+                          <td className="border px-2 py-1">{r.money_received != null ? `£${r.money_received.toFixed(2)}` : "-"}</td>
                           <td className="border px-2 py-1 max-w-[200px] truncate" title={r.notes || ""}>{r.notes || "-"}</td>
                         </tr>
                       );
@@ -871,6 +845,45 @@ export default function UploadClient({ tenant, tenantId }: UploadClientProps) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function IssueList({ title, issues, tone }: { title: string; issues: RowIssue[]; tone: "red" | "amber" }) {
+  if (!issues.length) return null;
+  const color = tone === "red" ? "text-red-800 bg-red-50 border-red-200" : "text-amber-800 bg-amber-50 border-amber-200";
+  return (
+    <details className={`border rounded p-2 ${color}`} open={issues.length <= 20}>
+      <summary className="cursor-pointer font-medium">{title} ({issues.length})</summary>
+      <ul className="mt-2 space-y-0.5 max-h-60 overflow-auto font-mono text-xs">
+        {issues.slice(0, 500).map((e, i) => (
+          <li key={i}>Row {e.rowNumber}{e.reference ? ` (${e.reference})` : ""}: {e.reason}</li>
+        ))}
+        {issues.length > 500 && <li>… and {issues.length - 500} more</li>}
+      </ul>
+    </details>
+  );
+}
+
+function CommitSummaryBlock({ summary }: { summary: CommitSummary }) {
+  const failed = Boolean(summary.failedChunk);
+  return (
+    <div className={`border rounded-lg p-4 space-y-2 text-sm ${failed ? "bg-red-50 border-red-300" : "bg-green-50 border-green-300"}`}>
+      <h3 className="font-semibold">{failed ? "Import stopped" : "Import complete"}</h3>
+      {failed && <p className="text-red-800">{summary.failedChunk} ({summary.rowsNotSent} row(s) not sent)</p>}
+      <ul className="space-y-0.5">
+        <li>{summary.inserted} new booking(s)</li>
+        <li>{summary.updated} existing booking(s) updated</li>
+        <li>{summary.duplicates.length} skipped as duplicates</li>
+        <li>{summary.errors.length} error(s)</li>
+      </ul>
+      <IssueList
+        title="Errors"
+        issues={summary.errors.map(e => ({ rowNumber: e.rowIndex, reference: e.reference, reason: e.reason }))}
+        tone="red"
+      />
+      <IssueList title="Skipped duplicates" issues={summary.duplicates} tone="amber" />
+      <IssueList title="Warnings" issues={summary.warnings} tone="amber" />
     </div>
   );
 }

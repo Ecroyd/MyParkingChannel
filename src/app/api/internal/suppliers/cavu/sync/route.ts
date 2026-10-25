@@ -4,10 +4,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { getCavuConfigForTenant } from '@/lib/suppliers/getTenantSupplierConfig';
 import { getRecentEvents, getBookingDetails } from '@/lib/suppliers/cavu';
 import { isCronRequest } from '@/lib/auth/apiGuards';
-
-const SUPPLIER_CODE = 'cavu';
-const BOOKING_SOURCE = 'cavu';
-const BOOKING_CONFLICT_TARGET = 'tenant_id,source,reference';
+import { cancelCavuBooking, getTenantTimezone, writeCavuBooking } from '@/lib/suppliers/cavuBookingWrite';
 
 /**
  * Robustly extract booking reference from a CAVU event.
@@ -47,15 +44,6 @@ function getCavuEventReference(event: any): string | null {
   return null;
 }
 
-function formatUpsertError(tableName: string, reference: string, error: { message?: string } | null) {
-  return [
-    `supplier_code=${SUPPLIER_CODE}`,
-    `reference=${reference}`,
-    `table=${tableName}`,
-    `conflict_target=${BOOKING_CONFLICT_TARGET}`,
-    `postgres_error=${error?.message ?? 'Unknown Postgres error'}`,
-  ].join(' ');
-}
 
 const DEFAULT_HOURS = 4;
 
@@ -94,95 +82,43 @@ export async function GET(req: NextRequest) {
 
   try {
     const events = await getRecentEvents(config, hours);
+    if (!Array.isArray(events)) {
+      return NextResponse.json(
+        { error: 'CAVU returned an unexpected events body (not an array)' },
+        { status: 502 }
+      );
+    }
+    const timezone = await getTenantTimezone(supabase, tenantId);
 
     let processed = 0;
+    const errors: string[] = [];
 
     for (const event of events) {
       const ref = getCavuEventReference(event);
       if (!ref) continue;
+      const type = String(event.EventType || '').toUpperCase();
 
-      if (event.EventType === 'NEW' || event.EventType === 'AMEND') {
-        const booking = await getBookingDetails(config, ref);
-        if (!booking) continue;
-
-        // Map customer name from nested structure
-        const customerFirst = booking.Customer?.FirstName ?? '';
-        const customerLast = booking.Customer?.Surname ?? '';
-        const customerNameRaw = `${customerFirst} ${customerLast}`.trim();
-        const customerName = customerNameRaw || 'Unknown';
-
-        // Normalize plate: uppercase, remove spaces
-        const plateRaw = booking.Vehicle?.Registration ?? '';
-        const plateNorm = plateRaw.replace(/\s+/g, '').toUpperCase();
-        const plate = plateNorm || 'UNKNOWN';
-
-        // Map status from CAVU Status
-        function mapCavuStatus(status?: string): 'reserved' | 'checked_in' | 'checked_out' | 'cancelled' {
-          if (!status) return 'reserved';
-          const upper = status.toUpperCase();
-          if (upper.includes('CANCELLED') || upper.includes('CANCEL')) return 'cancelled';
-          if (upper.includes('CHECKED_OUT') || upper.includes('DEPARTED') || upper.includes('OUT')) return 'checked_out';
-          if (upper.includes('CHECKED_IN') || upper.includes('ARRIVED') || upper.includes('IN')) return 'checked_in';
-          if (upper.includes('CONFIRMED') || upper.includes('RESERVED')) return 'reserved';
-          return 'reserved'; // Default
-        }
-
-        // Map CAVU booking to your bookings schema
-        const { error } = await supabase.from('bookings').upsert(
-          {
-            tenant_id: tenantId,
-            reference: booking.Reference,
-            external_source: SUPPLIER_CODE,
-            customer_name: customerName,
-            customer_email: booking.Customer?.Email ?? null,
-            plate: plate,
-            car_make: booking.Vehicle?.Make ?? null,
-            car_model: booking.Vehicle?.Model ?? null,
-            car_color: booking.Vehicle?.Colour ?? null,
-            start_at: booking.ArrivalDate,
-            end_at: booking.DepartureDate,
-            status: mapCavuStatus(booking.Status),
-            source: BOOKING_SOURCE,
-            money_received: 0,
-            money_charged: 0,
-            notes: booking.SpecialRequests ?? null,
-            updated_at: new Date().toISOString(),
-          },
-          {
-            onConflict: BOOKING_CONFLICT_TARGET,
-            ignoreDuplicates: false,
-          } as any // Supabase type quirk
-        );
-
-        if (error) {
-          const msg = formatUpsertError('bookings', ref, error);
-          console.error('[CAVU] Upsert booking error', msg, error);
-        } else {
+      try {
+        if (type === 'NEW' || type === 'AMEND') {
+          const booking = await getBookingDetails(config, ref);
+          if (!booking) continue;
+          await writeCavuBooking(supabase, { tenantId, booking, timezone, mode: 'sync', reference: ref });
+          processed++;
+        } else if (type === 'CANCEL') {
+          await cancelCavuBooking(supabase, tenantId, ref);
           processed++;
         }
+        // NOSHOW events: optional, can be added later
+      } catch (err: any) {
+        const msg = err instanceof RangeError ? `invalid date (${err.message})` : err?.message ?? String(err);
+        console.error('[CAVU] Sync event failed', ref, msg);
+        errors.push(`${ref}: ${msg}`);
       }
-
-      if (event.EventType === 'CANCEL') {
-        const { error } = await supabase
-          .from('bookings')
-          .update({ status: 'cancelled' })
-          .eq('tenant_id', tenantId)
-          .eq('source', BOOKING_SOURCE)
-          .eq('reference', ref);
-
-        if (error) {
-          console.error('[CAVU] Cancel update error', error);
-        } else {
-          processed++;
-        }
-      }
-
-      // NOSHOW events: optional, can be added later
     }
 
-    return NextResponse.json({ ok: true, processed, events: events.length });
+    return NextResponse.json({ ok: true, processed, events: events.length, errors });
   } catch (err: any) {
-    console.error('[CAVU] Sync error', err);
+    console.error('[CAVU] Sync error', err?.message ?? err);
     return NextResponse.json(
       { error: err.message ?? 'Unknown error' },
       { status: 500 }

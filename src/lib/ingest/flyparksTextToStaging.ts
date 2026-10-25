@@ -4,7 +4,9 @@ import {
   normalizePhoneDigits,
   resolveCustomerContactDetails,
 } from '@/lib/ingest/customerContactDetails';
-import { normalizeLabeledPlate, normalizeUkPlate } from '@/lib/ingest/plateGuess';
+import { isPlaceholderPlate, normalizeLabeledPlate, normalizeUkPlate } from '@/lib/ingest/plateGuess';
+import { extractTimeOfDay } from '@/lib/ingest/timeOfDay';
+import { parseMoney as parseMoneyShared } from '@/lib/parseMoney';
 export type FlyparksStaging = {
   reference: string | null;
   customer_name: string | null;
@@ -81,6 +83,8 @@ const FIELD_LABELS = [
   "Vehicle registration",
   "Vehicle Registration",
   "Vehicle Details",
+  "Payment Reference",
+  "Transaction Reference",
   "Reference",
   "Booking Reference",
   "Car Parking",
@@ -139,7 +143,7 @@ export function normalizeFlyparksEmailText(input: string | null | undefined): st
   text = text
     .replace(new RegExp(`\\b(${LABEL_PATTERN})\\s*:`, "gi"), "\n$1:")
     .replace(/\b(YOUR BOOKING REFERENCE):?\s+([A-Z0-9-]{3,20})\b/gi, "\n$1: $2")
-    .replace(/\b(Drop off date|Drop off time|Pick up date|Pick up time):?\s+(\d{1,2}\/\d{1,2}\/\d{2,4}|\d{1,2}:\d{2})\b/gi, "\n$1: $2")
+    .replace(/\b(Drop off date|Drop off time|Pick up date|Pick up time):?\s+(\d{1,2}\/\d{1,2}\/\d{2,4}|\d{1,2}:\d{2}(?:\s*[ap]\.?m\b\.?)?)(?!\d)/gi, "\n$1: $2")
     .replace(/\b(Car Parking|Total Cost):?\s+(£|Â£)?\s*([0-9]+(?:\.[0-9]{1,2})?)\b/gi, "\n$1: £$3")
     .replace(/\b(Return flight number):?\s*$/gim, "\n$1: ");  // Handle empty return flight
 
@@ -162,8 +166,17 @@ export function looksLikeFlyparksDirectEmail(subject: string | null | undefined,
     return true;
   }
 
-  // New format: ***BOOKING RECEIPT***
-  if (haystack.includes("***booking receipt***") || haystack.includes("booking receipt")) {
+  // ParkVia / ParkCloud notifications share generic labels ("Booking receipt", "Reference:",
+  // "Departure date") with Flyparks; never claim them unless Flyparks is named.
+  if (/park(via|cloud)/i.test(haystack) && !haystack.includes("flyparks")) {
+    return false;
+  }
+
+  // New format: ***BOOKING RECEIPT*** + YOUR BOOKING REFERENCE
+  if (
+    haystack.includes("***booking receipt***") ||
+    (haystack.includes("booking receipt") && haystack.includes("your booking reference"))
+  ) {
     return true;
   }
 
@@ -201,7 +214,7 @@ function extractDate(value: string | null): string | null {
 
 function extractTime(value: string | null): string | null {
   if (!value) return null;
-  return value.match(/\b(\d{1,2}:\d{2})\b/)?.[1] ?? null;
+  return extractTimeOfDay(value);
 }
 
 const CUSTOMER_TITLES = /^(MR|MRS|MS|MISS|DR|SIR|MADAM|PROF|REV)\.?\s+/i;
@@ -244,9 +257,12 @@ function extractForwardedCustomerEmail(text: string): string | null {
 
 function parseMoney(value: string | null): number | null {
   if (!value) return null;
-  const normalized = value.replace(/,/g, "");
-  const match = normalized.match(/£\s*([0-9]+(?:\.[0-9]{1,2})?)/) ?? normalized.match(/\b([0-9]+(?:\.[0-9]{1,2})?)\b/);
-  return match ? Number(match[1]) : null;
+  // Labelled value may carry trailing text ("£110.00 (incl. VAT)"); take the first amount.
+  const amount =
+    value.match(/(?:&pound;|Â£|£|GBP)\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?/i)?.[0] ??
+    value.match(/[0-9][0-9,]*(?:\.[0-9]{1,2})?/)?.[0] ??
+    null;
+  return parseMoneyShared(amount);
 }
 
 function toLocalIso(d: string | null, t: string | null): string | null {
@@ -330,12 +346,17 @@ function extractPhone(text: string, explicitPhone: string | null): string | null
   return normalizePhoneDigits(raw);
 }
 
-export function getFlyparksRequiredMissing(staging: Pick<FlyparksStaging, "reference" | "start_at" | "end_at" | "vehicle_reg">): string[] {
+export function getFlyparksRequiredMissing(
+  staging: Pick<FlyparksStaging, "reference" | "start_at" | "end_at" | "vehicle_reg"> & { raw_json?: any }
+): string[] {
+  // Customer explicitly typed "TBC"/"Unknown" for the plate: book it with a blank plate rather
+  // than dropping the booking (the operator adds the plate later).
+  const platePlaceholder = Boolean(staging.raw_json?.extracted?.vehicleRegistrationPlaceholder);
   return [
     !staging.reference ? "reference" : null,
     !staging.start_at ? "start_at" : null,
     !staging.end_at ? "end_at" : null,
-    !staging.vehicle_reg ? "vehicle_reg" : null,
+    !staging.vehicle_reg && !platePlaceholder ? "vehicle_reg" : null,
   ].filter(Boolean) as string[];
 }
 
@@ -343,7 +364,8 @@ export function flyparksTextToStaging(rawText: string): FlyparksStaging {
   const text = normalizeFlyparksEmailText(rawText);
 
   const reference =
-    pickLabel(text, ["Reference", "Booking Reference", "YOUR BOOKING REFERENCE"])?.match(/[A-Z0-9-]{3,20}/i)?.[0] ?? null;
+    // Booking reference labels win over a bare "Reference" (and never "Payment Reference").
+    pickLabel(text, ["YOUR BOOKING REFERENCE", "Booking Reference", "Reference"])?.match(/[A-Z0-9-]{3,20}/i)?.[0] ?? null;
   const dearName = extractDearName(text);
   const detailsBlock = pickLabel(text, ["Your details", "Customer name", "Name"]);
   const labeledEmail = pickLabel(text, ["Email"]);
@@ -395,9 +417,10 @@ export function flyparksTextToStaging(rawText: string): FlyparksStaging {
   const vehicleMake = pickLabel(text, ["Vehicle make"]) ?? splitModel.make ?? vehicleDetails.make;
   const vehicleModel = splitModel.model ?? vehicleModelRaw ?? vehicleDetails.model;
   const vehicleColour = pickLabel(text, ["Vehicle colour", "Vehicle Colour"]) ?? vehicleDetails.colour;
-  const vehicleRegistration =
-    normalizeLabeledPlate(pickLabel(text, ["Vehicle registration", "Vehicle Registration"])) ??
-    vehicleDetails.registration;
+  const labeledRegistration = pickLabel(text, ["Vehicle registration", "Vehicle Registration"]);
+  const vehicleRegistration = normalizeLabeledPlate(labeledRegistration) ?? vehicleDetails.registration;
+  const vehicleRegistrationPlaceholder =
+    !vehicleRegistration && isPlaceholderPlate(labeledRegistration) ? labeledRegistration : null;
   
   // Prefer Total Cost, fall back to Car Parking
   const totalCostRaw = pickLabel(text, ["Total Cost"]) ?? pickLabel(text, ["Car Parking", "Parking Cost", "Product Base Cost"]);
@@ -440,6 +463,7 @@ export function flyparksTextToStaging(rawText: string): FlyparksStaging {
         vehicleDetails: pickLabel(text, ["Vehicle Details"]),
         vehicleColour,
         vehicleRegistration,
+        vehicleRegistrationPlaceholder,
         dateCandidates: Array.from(text.matchAll(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g)).map((match) => match[0]),
         plateCandidates: Array.from(text.matchAll(/\b[A-Z]{2}\d{2}\s?[A-Z]{3}\b/gi))
           .map((match) => normalizeUkPlate(match[0]))

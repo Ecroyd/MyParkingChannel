@@ -348,7 +348,11 @@ export async function processIngestEmail(
           booking_reference_guess: reference,
         };
         }
-      } else if (!bookingFilePresent && looksLikeParkVia) {
+      } else if (looksLikeParkVia) {
+        // Always try the ParkVia body, even with a PDF/XLSX attached (those are invoices/T&Cs
+        // and were silently swallowing the booking). Staging dedupe is tenant|ref|REFERENCE —
+        // the same key parseEmailFile uses — so an attachment row for the same booking updates
+        // the same staging row / booking rather than creating a second one.
         const tenantId =
           tenantIdFromInbox ??
           detectTenantFromEmail({
@@ -381,15 +385,25 @@ export async function processIngestEmail(
           !reference ? "reference" : null,
           !staging.start_at ? "start_at" : null,
           !staging.end_at ? "end_at" : null,
-          !staging.vehicle_reg ? "vehicle_reg" : null,
+          // An explicit "TBC"/"Unknown" plate still books (blank plate) rather than failing.
+          !staging.vehicle_reg &&
+          !(staging.raw_json?.cleaned as { vehicle_reg_placeholder?: string | null } | undefined)
+            ?.vehicle_reg_placeholder
+            ? "vehicle_reg"
+            : null,
         ].filter(Boolean);
 
-        if (missingFields.length > 0) {
+        if (missingFields.length > 0 && bookingFilePresent) {
+          // Body incomplete but an attachment is present: let the attachment parse decide
+          // (an all-attachments-failed parse still raises an alert below).
+          console.warn(
+            `[process-ingest] ParkVia body incomplete (missing ${missingFields.join(",")}); falling back to attachments`
+          );
+        } else if (missingFields.length > 0) {
           throw new Error(
             `ParkVia text-only: missing required fields ${missingFields.join(",")}; extracted=${JSON.stringify(staging.raw_json?.fields ?? {})}`
           );
-        }
-
+        } else {
         const dedupe_key = `${tenantId}|ref|${reference}`;
         const stagingPayload = safeStagingUpsertPayload({
           tenant_id: tenantId,
@@ -451,12 +465,16 @@ export async function processIngestEmail(
         textPromoted = true;
         bookingId = promoteResult.bookingId ?? null;
         }
+        }
       }
     } else if (parseFailure) {
       throw new Error(parseFailure);
     }
 
     const fileIds: string[] = [];
+    // Images (signature logos, inline image001.png) are stored but already marked skipped; they
+    // must not count as "the email had a booking file" for the body fallback or the alert check.
+    const nonImageFileIds: string[] = [];
     if (allAttachments.length > 0) {
       for (const attachment of allAttachments) {
         try {
@@ -483,6 +501,7 @@ export async function processIngestEmail(
 
           if (!fileError && fileData) {
             fileIds.push(fileData.id);
+            if (!isImage) nonImageFileIds.push(fileData.id);
             try {
               const fileBuffer = Buffer.from(attachment.data_base64, "base64");
               const { error: storageError } = await supabase.storage
@@ -511,7 +530,7 @@ export async function processIngestEmail(
       }
     }
 
-    if (fileIds.length === 0 && parsableBodyText) {
+    if (nonImageFileIds.length === 0 && parsableBodyText) {
       const looksLikeOnlySignatureOrQr =
         !parsableBodyText ||
         parsableBodyText.length < 80 ||
@@ -545,6 +564,7 @@ export async function processIngestEmail(
 
         if (!fileError && fileData) {
           fileIds.push(fileData.id);
+          nonImageFileIds.push(fileData.id);
           await supabase.storage.from("email-imports").upload(storagePath, bodyBuffer, {
             contentType: "text/csv",
             upsert: false,
@@ -576,6 +596,7 @@ export async function processIngestEmail(
 
         if (!fileError && fileData) {
           fileIds.push(fileData.id);
+          nonImageFileIds.push(fileData.id);
           await supabase.storage.from("email-imports").upload(storagePath, bodyBuffer, {
             contentType: "text/plain",
             upsert: false,
@@ -616,7 +637,7 @@ export async function processIngestEmail(
 
     if (textPromoted || bookingId) {
       await markIngestSuccess(supabase, emailId, parseSuccessPatch);
-    } else if (fileIds.length === 0 && looksLikeBookingEmail(parsedForReceipt?.subject ?? bodySubject)) {
+    } else if (nonImageFileIds.length === 0 && looksLikeBookingEmail(parsedForReceipt?.subject ?? bodySubject)) {
       // Nothing was recognised in an email that looks booking-related (e.g. a supplier changed
       // their template). Previously it stayed "received" with no signal; surface it instead.
       throw new Error(

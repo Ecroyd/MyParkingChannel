@@ -1,195 +1,271 @@
-import dayjs from "dayjs";
-import utc from "dayjs/plugin/utc";
-
-dayjs.extend(utc);
-
 /**
- * Parse flexible date formats including Excel serial numbers
- * Handles both integer (date only) and decimal (date + time) Excel serial numbers
+ * Date/time parsing for the admin manual CSV/XLSX booking import.
+ *
+ * Rules (UK car parks):
+ * - Slash/dash/dot dates are ALWAYS day-first (DD/MM/YYYY). Never `new Date(ambiguousString)`.
+ * - YYYY-MM-DD (optionally with a time) and ISO strings are accepted.
+ * - Excel serials (date, date+time, or a time fraction such as 0.375 = 09:00) are converted
+ *   with pure arithmetic, so the result never depends on the browser's timezone.
+ * - Output is a NAIVE tenant-local wall-clock string "YYYY-MM-DDTHH:mm:ss" (no Z). The commit
+ *   route converts it to UTC with the tenant timezone (Europe/London), which handles BST/GMT.
+ * - Invalid calendar dates (31/02/2026, month 13) are reported as errors, never rolled over.
  */
-export function parseFlexibleDate(value: string | number | null): string | null {
-  if (!value) return null;
-
-  // Handle Excel serial numbers (typically 30000-60000 range)
-  // Can be integer (date only) or decimal (date + time, e.g., 46143.125)
-  const strValue = String(value);
-  if (typeof value === 'number' || /^\d+\.?\d*$/.test(strValue)) {
-    const serial = Number(value);
-    if (serial > 30000 && serial < 60000) {
-      // Excel serial date: 1899-12-30 is day 0
-      // Integer part = days since 1899-12-30
-      // Decimal part = fraction of day (time)
-      const days = Math.floor(serial);
-      const timeFraction = serial - days;
-      
-      const baseDate = new Date(1899, 11, 30);
-      baseDate.setDate(baseDate.getDate() + days);
-      
-      // Add time component if present (fraction of day)
-      if (timeFraction > 0) {
-        const hours = Math.floor(timeFraction * 24);
-        const minutes = Math.floor((timeFraction * 24 - hours) * 60);
-        const seconds = Math.floor(((timeFraction * 24 - hours) * 60 - minutes) * 60);
-        baseDate.setHours(hours, minutes, seconds);
-      }
-      
-      return baseDate.toISOString();
-    }
-  }
-
-  // Handle ISO-like dates with space separator (e.g., "2026-05-01 03:00:00")
-  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}/.test(value)) {
-    // Replace space with 'T' to make it proper ISO format
-    const isoString = value.replace(/\s+/, 'T');
-    const date = new Date(isoString);
-    if (!isNaN(date.getTime())) return date.toISOString();
-  }
-
-  // Handle slash dates (dd/mm/yyyy or mm/dd/yyyy)
-  if (typeof value === 'string' && value.includes('/')) {
-    const [a, b, c] = value.split('/');
-    // Assume dd/mm/yyyy unless the year is clearly in the middle
-    if (Number(c) > 1900) {
-      return new Date(`${c}-${b.padStart(2, '0')}-${a.padStart(2, '0')}`).toISOString();
-    }
-  }
-
-  // Handle ISO or RFC-compliant strings (with T separator)
-  const date = new Date(value);
-  if (!isNaN(date.getTime())) return date.toISOString();
-
-  return null;
-}
-
-export type Tz = "UTC" | "Europe/London";
+import { formatInTimeZone } from "date-fns-tz";
 
 export type DateParseOptions = {
   /** two-digit year pivot: <= pivot → 2000+yy, > pivot → 1900+yy */
-  twoDigitPivot?: number;           // default 69
+  twoDigitPivot?: number; // default 69
   /** reject years outside this range to avoid 1957, 2094 etc. */
-  validYearMin?: number;            // default 2015
-  validYearMax?: number;            // default 2035
+  validYearMin?: number; // default 2015
+  validYearMax?: number; // default 2035
+  /** Timezone used only when a value carries an explicit UTC offset (e.g. +01:00). */
+  timezone?: string; // default Europe/London
 };
 
-function yyToFull(yy: string, pivot = 69) {
-  const y = parseInt(yy, 10);
-  return y <= pivot ? 2000 + y : 1900 + y;
+export type LocalDate = { y: number; m: number; d: number };
+export type LocalTime = { h: number; mi: number; s: number };
+export type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
+
+export type CellValue = string | number | null | undefined;
+
+const MONTHS: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+  jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12,
+};
+
+function pad(n: number, w = 2) {
+  return String(n).padStart(w, "0");
 }
 
-function parseDDMMYYDigits(s: string, opts: DateParseOptions) {
-  let t = s.replace(/\D/g, "");
-  if (t.length === 5) t = "0" + t;           // Excel dropped leading zero
-  if (t.length !== 6) return null;
-
-  const dd = parseInt(t.slice(0, 2), 10);
-  const mm = parseInt(t.slice(2, 4), 10);
-  const yy = t.slice(4, 6);
-
-  if (dd < 1 || dd > 31 || mm < 1 || mm > 12) return null;
-
-  const fullY = yyToFull(yy, opts.twoDigitPivot ?? 69);
-  if ((opts.validYearMin ?? 2015) > fullY) return null;
-  if ((opts.validYearMax ?? 2035) < fullY) return null;
-
-  const d = dayjs(`${fullY}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`);
-  return d.isValid() ? d : null;
+function isLeap(y: number) {
+  return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
 }
 
-export function parseDateFlex(dateCell?: string, opts: DateParseOptions = {}) {
-  const v = (dateCell ?? "").toString().trim();
-  if (!v) return null;
+export function daysInMonth(y: number, m: number) {
+  return [31, isLeap(y) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1] ?? 0;
+}
 
-  // First try the flexible date parser for Excel serials and common formats
-  const flexibleResult = parseFlexibleDate(v);
-  if (flexibleResult) {
-    const d = dayjs(flexibleResult);
-    const y = d.year();
-    if (d.isValid() && (opts.validYearMin ?? 2015) <= y && y <= (opts.validYearMax ?? 2035)) {
-      return d;
+function fullYear(yRaw: string, pivot: number) {
+  if (yRaw.length === 2) {
+    const yy = parseInt(yRaw, 10);
+    return yy <= pivot ? 2000 + yy : 1900 + yy;
+  }
+  return parseInt(yRaw, 10);
+}
+
+function validateDate(y: number, m: number, d: number, opts: DateParseOptions, raw: string): Parsed<LocalDate> {
+  if (m < 1 || m > 12) return { ok: false, error: `invalid month ${m} in "${raw}" (dates must be DD/MM/YYYY)` };
+  if (d < 1 || d > daysInMonth(y, m)) return { ok: false, error: `invalid day ${d} for ${pad(m)}/${y} in "${raw}"` };
+  const min = opts.validYearMin ?? 2015;
+  const max = opts.validYearMax ?? 2035;
+  if (y < min || y > max) return { ok: false, error: `year ${y} out of range ${min}-${max} in "${raw}"` };
+  return { ok: true, value: { y, m, d } };
+}
+
+function validateTime(h: number, mi: number, s: number, raw: string): Parsed<LocalTime> {
+  if (!(h >= 0 && h <= 23) || !(mi >= 0 && mi <= 59) || !(s >= 0 && s <= 59)) {
+    return { ok: false, error: `invalid time "${raw}"` };
+  }
+  return { ok: true, value: { h, mi, s } };
+}
+
+/**
+ * Excel serial (days since 1899-12-30, fraction = time of day) → wall-clock parts.
+ * Pure arithmetic in UTC, rounded to the nearest second, so no timezone drift.
+ */
+export function excelSerialToParts(serial: number): { date: LocalDate; time: LocalTime } | null {
+  if (!Number.isFinite(serial) || serial < 0) return null;
+  const totalSeconds = Math.round(serial * 86400);
+  const days = Math.floor(totalSeconds / 86400);
+  const secs = totalSeconds - days * 86400;
+  const dt = new Date(Date.UTC(1899, 11, 30) + days * 86400000);
+  return {
+    date: { y: dt.getUTCFullYear(), m: dt.getUTCMonth() + 1, d: dt.getUTCDate() },
+    time: { h: Math.floor(secs / 3600), mi: Math.floor((secs % 3600) / 60), s: secs % 60 },
+  };
+}
+
+/** Parse a time-of-day string/number. Returns null for empty input. */
+export function parseTimeValue(v: CellValue): Parsed<LocalTime> | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "number") {
+    if (!Number.isFinite(v) || v < 0) return { ok: false, error: `invalid time "${v}"` };
+    if (Number.isInteger(v)) {
+      // 930 / 1430 typed into Excel as a number = HHmm
+      if (v > 0 && v <= 2359) return validateTime(Math.floor(v / 100), v % 100, 0, String(v));
+      // 0 = midnight; a larger integer is a date-only serial (no time part)
+      return { ok: true, value: { h: 0, mi: 0, s: 0 } };
     }
+    // Excel time fraction (0.375 = 09:00); a full date-time serial keeps only its time part.
+    let secs = Math.round((v - Math.floor(v)) * 86400);
+    if (secs >= 86400) secs = 86399;
+    return { ok: true, value: { h: Math.floor(secs / 3600), mi: Math.floor((secs % 3600) / 60), s: secs % 60 } };
   }
 
-  // 1) ddmmyy (5/6 digits) for cases not caught by flexible parser
-  const ddmmyy = parseDDMMYYDigits(v, opts);
-  if (ddmmyy) return ddmmyy;
+  const raw = String(v).trim();
+  if (!raw) return null;
+  const s = raw.toLowerCase().replace(/\s+/g, " ");
 
-  // 2) dd/mm/yy or dd/mm/yyyy
-  if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(v)) {
-    const [d1, m1, y1] = v.split("/");
-    const fullY = y1.length === 2 ? yyToFull(y1, opts.twoDigitPivot ?? 69) : parseInt(y1, 10);
-    if ((opts.validYearMin ?? 2015) <= fullY && fullY <= (opts.validYearMax ?? 2035)) {
-      const d = dayjs(`${fullY}-${m1.padStart(2, "0")}-${d1.padStart(2, "0")}`);
-      if (d.isValid()) return d;
+  // 12-hour: "9:15 PM", "9:15pm", "9pm", "9.15 pm", "09:15:30 am", "9:15 p.m."
+  let m = s.match(/^(\d{1,2})(?:[:.](\d{2}))?(?::(\d{2}))? ?([ap])\.?m\.?$/);
+  if (m) {
+    const h12 = Number(m[1]);
+    if (h12 < 1 || h12 > 12) return { ok: false, error: `invalid 12-hour time "${raw}"` };
+    const h = (h12 % 12) + (m[4] === "p" ? 12 : 0);
+    return validateTime(h, Number(m[2] ?? 0), Number(m[3] ?? 0), raw);
+  }
+
+  // 24-hour: "H:mm", "HH:mm", "HH:mm:ss", "HH:mm:ss.SSS"
+  m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/);
+  if (m) return validateTime(Number(m[1]), Number(m[2]), Number(m[3] ?? 0), raw);
+
+  // "9.30" / "21.15" (exactly two minute digits → unambiguous H.mm)
+  m = s.match(/^(\d{1,2})\.(\d{2})$/);
+  if (m) return validateTime(Number(m[1]), Number(m[2]), 0, raw);
+
+  // "0930" / "930" (HHmm)
+  m = s.match(/^(\d{1,2})(\d{2})$/);
+  if (m) return validateTime(Number(m[1]), Number(m[2]), 0, raw);
+
+  // Excel time fraction / date-time serial written out as text, e.g. "0.375" or "46320.3958"
+  if (/^\d*\.\d{3,}$/.test(s)) return parseTimeValue(Number(s));
+
+  return { ok: false, error: `unrecognised time "${raw}"` };
+}
+
+export type ParsedDateTime = { date: LocalDate; time: LocalTime | null };
+
+/**
+ * Parse a date cell, which may also carry a time ("25/10/2026 09:30", ISO, Excel serial).
+ * Returns null for empty input.
+ */
+export function parseDateValue(v: CellValue, opts: DateParseOptions = {}): Parsed<ParsedDateTime> | null {
+  if (v === null || v === undefined) return null;
+  const pivot = opts.twoDigitPivot ?? 69;
+
+  if (typeof v === "number") {
+    const serial = parseNumericDate(v, String(v), opts);
+    if (serial.ok || !Number.isInteger(v)) return serial;
+    // ddmmyy typed into Excel as a number (leading zero lost)
+    return parseCompactDigits(String(v), opts) ?? serial;
+  }
+
+  const raw = String(v).trim();
+  if (!raw) return null;
+
+  // Pure number in text form: Excel serial ("46320", "46320.375") or compact digits.
+  if (/^\d+(\.\d+)?$/.test(raw)) {
+    if (/^\d{5,6}$/.test(raw) || /^\d{8}$/.test(raw)) {
+      const serial = /^\d{5}$/.test(raw) ? parseNumericDate(Number(raw), raw, opts) : null;
+      if (serial?.ok) return serial;
+      const compact = parseCompactDigits(raw, opts);
+      if (compact) return compact;
+      return serial ?? { ok: false, error: `unrecognised date "${raw}"` };
     }
+    return parseNumericDate(Number(raw), raw, opts);
   }
 
-  // 3) ISO date/ts (YYYY-MM-DD or YYYY-MM-DDTHH:mm…)
-  if (/^\d{4}-\d{2}-\d{2}/.test(v)) {
-    const d = dayjs(v);
-    const y = d.year();
-    if (d.isValid() && (opts.validYearMin ?? 2015) <= y && y <= (opts.validYearMax ?? 2035)) return d;
+  const splitTime = (rest: string | undefined): Parsed<LocalTime | null> => {
+    const t = (rest ?? "").replace(/^[,T\s]+/, "").trim();
+    if (!t) return { ok: true, value: null };
+    const pt = parseTimeValue(t);
+    if (!pt) return { ok: true, value: null };
+    return pt;
+  };
+
+  // ISO / YYYY-MM-DD[ T]HH:mm[:ss[.SSS]][Z|±hh:mm] (also YYYY/MM/DD)
+  let m = raw.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[T\s]+(\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?)\s*(Z|[+-]\d{2}:?\d{2})?)?$/i);
+  if (m) {
+    const [, y, mo, d, time, offset] = m;
+    if (offset && offset.toUpperCase() !== "Z") {
+      // Explicit offset = absolute instant; express it in tenant wall-clock time.
+      const inst = new Date(`${y}-${pad(+mo)}-${pad(+d)}T${time}${offset.length === 5 ? offset.slice(0, 3) + ":" + offset.slice(3) : offset}`);
+      if (isNaN(inst.getTime())) return { ok: false, error: `invalid date "${raw}"` };
+      const local = formatInTimeZone(inst, opts.timezone ?? "Europe/London", "yyyy-MM-dd'T'HH:mm:ss");
+      return parseDateValue(local, opts);
+    }
+    // A bare "Z" is treated as supplier-local wall-clock time (same convention as
+    // sanitizeSupplierDateTimeInput on the server).
+    const dv = validateDate(+y, +mo, +d, opts, raw);
+    if (!dv.ok) return dv;
+    const tv = splitTime(time);
+    if (!tv.ok) return tv;
+    return { ok: true, value: { date: dv.value, time: tv.value } };
   }
 
+  // UK day-first: DD/MM/YYYY, DD-MM-YY, DD.MM.YYYY, optionally followed by a time.
+  m = raw.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})(?:(?:[,T]|\s)+(.+))?$/i);
+  if (m) {
+    const [, d, mo, y, rest] = m;
+    const dv = validateDate(fullYear(y, pivot), +mo, +d, opts, raw);
+    if (!dv.ok) return dv;
+    const tv = splitTime(rest);
+    if (!tv.ok) return { ok: false, error: `${tv.error} in "${raw}"` };
+    return { ok: true, value: { date: dv.value, time: tv.value } };
+  }
+
+  // "25 Oct 2026", "25-Oct-26", "Sun 25 October 2026 09:30", "25th Oct 2026"
+  m = raw.match(/^(?:[a-z]{3,9},?\s+)?(\d{1,2})(?:st|nd|rd|th)?[\s/-]+([a-z]{3,9})\.?[\s/-]+(\d{2}|\d{4})(?:(?:[,T]|\s)+(.+))?$/i);
+  if (m) {
+    const [, d, monName, y, rest] = m;
+    const mo = MONTHS[monName.toLowerCase().slice(0, monName.toLowerCase().startsWith("sept") ? 4 : 3)];
+    if (!mo) return { ok: false, error: `unrecognised month "${monName}" in "${raw}"` };
+    const dv = validateDate(fullYear(y, pivot), mo, +d, opts, raw);
+    if (!dv.ok) return dv;
+    const tv = splitTime(rest);
+    if (!tv.ok) return { ok: false, error: `${tv.error} in "${raw}"` };
+    return { ok: true, value: { date: dv.value, time: tv.value } };
+  }
+
+  return { ok: false, error: `unrecognised date "${raw}" (expected DD/MM/YYYY)` };
+}
+
+function parseNumericDate(n: number, raw: string, opts: DateParseOptions): Parsed<ParsedDateTime> {
+  const parts = excelSerialToParts(n);
+  if (!parts || n < 1) return { ok: false, error: `unrecognised date "${raw}"` };
+  const dv = validateDate(parts.date.y, parts.date.m, parts.date.d, opts, raw);
+  if (!dv.ok) return { ok: false, error: `unrecognised date "${raw}"` };
+  const hasTime = n % 1 !== 0;
+  return { ok: true, value: { date: dv.value, time: hasTime ? parts.time : null } };
+}
+
+/** ddmmyy (Excel may drop the leading zero → 5 digits), ddmmyyyy or yyyymmdd. */
+function parseCompactDigits(raw: string, opts: DateParseOptions): Parsed<ParsedDateTime> | null {
+  const pivot = opts.twoDigitPivot ?? 69;
+  let t = raw;
+  if (t.length === 5) t = "0" + t;
+  const candidates: Parsed<LocalDate>[] = [];
+  if (t.length === 6) {
+    candidates.push(validateDate(fullYear(t.slice(4, 6), pivot), +t.slice(2, 4), +t.slice(0, 2), opts, raw));
+  } else if (t.length === 8) {
+    candidates.push(validateDate(+t.slice(4, 8), +t.slice(2, 4), +t.slice(0, 2), opts, raw)); // DDMMYYYY
+    candidates.push(validateDate(+t.slice(0, 4), +t.slice(4, 6), +t.slice(6, 8), opts, raw)); // YYYYMMDD
+  }
+  const good = candidates.filter((c): c is { ok: true; value: LocalDate } => c.ok);
+  if (good.length === 1) return { ok: true, value: { date: good[0].value, time: null } };
   return null;
 }
 
-export function parseDateCell(v?: string): dayjs.Dayjs | null {
-  return parseDateFlex(v);
+export function formatNaiveLocal(date: LocalDate, time: LocalTime | null): string {
+  const t = time ?? { h: 0, mi: 0, s: 0 };
+  return `${pad(date.y, 4)}-${pad(date.m)}-${pad(date.d)}T${pad(t.h)}:${pad(t.mi)}:${pad(t.s)}`;
 }
 
-export function parseTimeCell(v?: string): {h: number, m: number} {
-  const s = (v || "").trim();
-  if (/^([01]\d|2[0-3]):[0-5]\d$/.test(s)) {
-    return { h: Number(s.slice(0,2)), m: Number(s.slice(3,5)) };
-  }
-  return { h: 0, m: 0 };
-}
-
-export function composeISO(
-  dateStr?: string,
-  timeStr?: string,
-  tz: Tz = "Europe/London",
+/**
+ * Combine a date cell (which may include a time) and an optional time cell into a naive
+ * tenant-local "YYYY-MM-DDTHH:mm:ss". A non-empty time cell wins over a time embedded in
+ * the date cell. An empty time gives 00:00. Unparseable values are errors.
+ */
+export function composeLocalDateTime(
+  dateCell: CellValue,
+  timeCell?: CellValue,
   opts: DateParseOptions = {}
-) {
-  if (!dateStr) return "";
-  
-  // Check if dateStr is an Excel serial with time (decimal part indicates time)
-  const isExcelSerialWithTime = /^\d+\.\d+$/.test(String(dateStr));
-  
-  // Check if dateStr contains time information (ISO-like format with space or T)
-  // Formats: "2026-05-01 03:00:00", "2026-05-01T03:00:00", "2026-05-01 03:00"
-  const hasTimeInString = /^\d{4}-\d{2}-\d{2}[T\s]\d{1,2}:\d{2}/.test(String(dateStr));
-  
-  // Try parsing as a full timestamp first (handles ISO with time)
-  let d: dayjs.Dayjs | null = null;
-  if (hasTimeInString || isExcelSerialWithTime) {
-    // Parse as full timestamp - parseFlexibleDate should handle this
-    const flexibleResult = parseFlexibleDate(dateStr);
-    if (flexibleResult) {
-      d = dayjs(flexibleResult);
-      const y = d.year();
-      if (d.isValid() && (opts.validYearMin ?? 2015) <= y && y <= (opts.validYearMax ?? 2035)) {
-        // Time is already included, use it as-is
-        return tz === "UTC" ? d.utc().toISOString() : d.utc(true).toISOString();
-      }
-    }
-  }
-  
-  // Fall back to regular date parsing
-  d = parseDateFlex(dateStr, opts);
-  if (!d) return "";
-  
-  // If we have a separate timeStr, use it (only if dateStr didn't already have time)
-  let hh = d.hour();
-  let mm = d.minute();
-  
-  // Only override time if timeStr is provided and dateStr didn't already have time
-  if (!hasTimeInString && !isExcelSerialWithTime && timeStr && /^([01]\d|2[0-3]):[0-5]\d$/.test(timeStr.trim())) {
-    const [h, m] = timeStr.split(":");
-    hh = Number(h);
-    mm = Number(m);
-  }
-  
-  const local = d.hour(hh).minute(mm).second(0).millisecond(0);
-  return tz === "UTC" ? local.utc().toISOString() : local.utc(true).toISOString();
+): Parsed<string> {
+  const pd = parseDateValue(dateCell, opts);
+  if (!pd) return { ok: false, error: "missing date" };
+  if (!pd.ok) return pd;
+  const pt = parseTimeValue(timeCell);
+  if (pt && !pt.ok) return pt;
+  const time = pt?.ok ? pt.value : pd.value.time;
+  return { ok: true, value: formatNaiveLocal(pd.value.date, time) };
 }
