@@ -11,11 +11,12 @@ import { isCronRequest } from '@/lib/auth/apiGuards';
 export const maxDuration = 300;
 
 const CANARY_TO_EMAIL = 'canary-bookings@myparkingchannel.app';
+/** Previous run is marked down if still unreceived when the next twice-daily cron fires. */
 const STALE_MINUTES = 10;
 const TOKEN_RANDOM_BYTES = 4; // 6 chars base64url
 
 /**
- * GET: Test run / ping. cron-job.org "test run" may use GET; return 200 so it succeeds.
+ * GET: Vercel Cron (twice daily, see vercel.json) calls GET with Bearer CRON_SECRET.
  */
 export async function GET(req: NextRequest) {
   logRequestAttribution(req, '/api/internal/cron/ingest-canary');
@@ -26,8 +27,8 @@ export async function GET(req: NextRequest) {
 
 /**
  * Internal cron: evaluate previous ingest canary and send next one.
- * Auth: x-job-secret (JOB_SECRET) or Authorization: Bearer INTERNAL_CRON_KEY or x-internal-cron-key.
- * External scheduler (e.g. cron-job.org) calls POST with one of these headers.
+ * Schedule: twice daily via vercel.json (`0 7,19 * * *` UTC) — not every 15 minutes
+ * (that was burning ~96 Resend sends/day). Auth: CRON_SECRET / INTERNAL_CRON_KEY / JOB_SECRET.
  */
 export async function POST(req: NextRequest) {
   logRequestAttribution(req, '/api/internal/cron/ingest-canary');

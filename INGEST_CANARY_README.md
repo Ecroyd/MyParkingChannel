@@ -10,11 +10,12 @@ Proves the inbound booking email path is alive: **Email Routing → Worker → P
 - **Action:** Send to a Worker → **parking-channel-email-ingest**
 - Do **not** forward canary to Gmail or elsewhere; the proof is `ingest_emails` + `ingest_canary_runs`.
 
-### 2. Cron (cron-job.org)
+### 2. Cron (Vercel)
 
-- **cron-job.org** must call **POST** `https://yourdomain.com/api/internal/cron/ingest-canary` with header **`Authorization: Bearer <INTERNAL_CRON_KEY>`**.
-- **Recommended schedule:** every **15 minutes**.
-- **Canary is considered down** if not received within **10 minutes** (next run marks `status = 'down'`).
+- Vercel Cron calls **GET** `/api/internal/cron/ingest-canary` with `Authorization: Bearer <CRON_SECRET>` (**twice daily**: `0 7,19 * * *` UTC — 07:00 and 19:00 UTC).
+- Parse/retry housekeeping stays on `/api/internal/cron/ingest-maintenance` every 15 minutes and does **not** send canary mail.
+- Manual/external runs: **POST** the same path with `Authorization: Bearer <INTERNAL_CRON_KEY>` (or `CRON_SECRET` / `JOB_SECRET`).
+- **Canary is considered down** if not received within **10 minutes** (the next scheduled run marks `status = 'down'`).
 
 ### 3. Expected behaviour
 
