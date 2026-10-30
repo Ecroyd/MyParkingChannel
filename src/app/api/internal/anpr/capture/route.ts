@@ -3,7 +3,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { getRelayTokenFromRequest, verifyRelayToken } from '@/lib/anpr/relayTokenAuth';
 import crypto from 'crypto';
 import { applyBookingOccupancyAction } from '@/lib/ops/occupancyAction';
 import {
@@ -11,7 +10,7 @@ import {
   pickCaptureBooking,
   plateIlikePattern,
 } from '@/lib/anpr/captureBookingMatch';
-import { touchGatewayDevice } from '@/lib/anpr/gatewayDevice';
+import { authenticateGatewayRequest, touchGatewayDevice } from '@/lib/anpr/gatewayDevice';
 
 // Where the read came from (gate_events.source). Defaults to 'videofit' for the existing relay.
 const SOURCE_RE = /^[a-z0-9_-]{1,32}$/;
@@ -52,16 +51,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Authenticate relay token (Bearer / x-relay-token / ?token=). Accepts the tenant_secrets
-    // relay token, the anpr_sites hash (rotate-token) or the legacy env token.
-    const relayAuth = await verifyRelayToken(tenantId, getRelayTokenFromRequest(req));
-    if (!relayAuth.ok) {
-      return NextResponse.json(
-        { error: relayAuth.status === 401 ? 'Invalid relay token' : relayAuth.error },
-        { status: relayAuth.status }
-      );
-    }
     const supabase = createAdminClient();
+
+    // Paired gateways send their own device key (x-gateway-key); other relays use the tenant relay
+    // token (Bearer / x-relay-token / ?token=: tenant_secrets, anpr_sites hash or legacy env).
+    const auth = await authenticateGatewayRequest(req, supabase, tenantId);
+    if (!auth.ok) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
 
     // Parse request body
     let body: {
@@ -115,10 +112,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Optional gateway identity: marks the gate device as seen (admin "connected" state) and is
-    // stored on the gate event. An unknown or inactive device is rejected so misconfiguration
-    // shows up at the gateway instead of silently.
-    const deviceId = body.device_id ?? null;
+    // Gateway identity: marks the gate device as seen (admin "connected" state) and is stored on
+    // the gate event. A device key implies the device; with a relay token, device_id is optional.
+    // An unknown or inactive device is rejected so misconfiguration shows up at the gateway.
+    const deviceId = auth.via === 'gateway_key' ? auth.deviceId : body.device_id ?? null;
     if (deviceId !== null) {
       const touched = await touchGatewayDevice(supabase, tenantId, deviceId);
       if (!touched.ok) {
