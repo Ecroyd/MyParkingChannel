@@ -11,6 +11,7 @@ import {
   pickCaptureBooking,
   plateIlikePattern,
 } from '@/lib/anpr/captureBookingMatch';
+import { touchGatewayDevice } from '@/lib/anpr/gatewayDevice';
 
 // Where the read came from (gate_events.source). Defaults to 'videofit' for the existing relay.
 const SOURCE_RE = /^[a-z0-9_-]{1,32}$/;
@@ -71,6 +72,7 @@ export async function POST(req: NextRequest) {
       lane?: string | null;
       confidence?: number | null;
       source?: string | null;
+      device_id?: string | null;
       raw?: unknown;
     };
 
@@ -111,6 +113,17 @@ export async function POST(req: NextRequest) {
         { error: 'source must be 1-32 characters of a-z, 0-9, "_" or "-"' },
         { status: 400 }
       );
+    }
+
+    // Optional gateway identity: marks the gate device as seen (admin "connected" state) and is
+    // stored on the gate event. An unknown or inactive device is rejected so misconfiguration
+    // shows up at the gateway instead of silently.
+    const deviceId = body.device_id ?? null;
+    if (deviceId !== null) {
+      const touched = await touchGatewayDevice(supabase, tenantId, deviceId);
+      if (!touched.ok) {
+        return NextResponse.json({ error: touched.error }, { status: touched.status });
+      }
     }
 
     // Normalize plate
@@ -164,6 +177,7 @@ export async function POST(req: NextRequest) {
       confidence: body.confidence ?? null,
       lane: body.lane ?? null,
       camera_id: body.camera_id ?? null,
+      device_id: deviceId,
       event_hash: eventHash,
       result: 'deny', // Initial value
       reason: 'unprocessed', // Initial value

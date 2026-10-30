@@ -59,7 +59,7 @@ Reads show up in Admin → ANPR → Events, and arrivals and departures reach th
 1. **Done (branch `feat/anpr-phase1-capture`): plate matching ignores spacing.** Several booking writers keep spaces (`AB12 CDE`), so `/capture` now queries with a spacing-insensitive pattern and compares normalised plates (`src/lib/anpr/captureBookingMatch.ts`). The import mapper (`src/lib/imports/mapToBookings.ts`) now also strips spaces. No backfill is needed for matching.
 2. **Done: `source` field.** `/capture` accepts an optional `source` (default `videofit`), so the gateway sends `hikvision`. It's recorded on `gate_events.source` and in the occupancy metadata.
 3. **Done: departures after long overstays.** If an `out` read matches nothing within ±6 hours, it checks the vehicle out of its most recent arrived-but-not-departed booking.
-4. **Open: health.** Add a gateway heartbeat (a `last_seen_at` on `anpr_sites`, or a small endpoint) and alert when there has been nothing for 15 minutes during opening hours, using the existing canary/alerting pattern.
+4. **Done: gateway heartbeat.** The gateway is registered as a `gate_devices` row and sends its id as `device_id` on every `/capture`. That updates `last_seen` and is stored on `gate_events.device_id`. It also calls `POST /api/internal/anpr/heartbeat?tenantId=` with `{ device_id }` every 5 minutes, so it stays "connected" when no cars move. The admin ANPR page already shows connected or disconnected from `last_seen`. Still open: a push alert (email/Slack) when it goes quiet, following the existing canary/alerting pattern.
 
 ### The gateway (phase 1 scope)
 
