@@ -63,7 +63,7 @@ Reads show up in Admin → ANPR → Events, and arrivals and departures reach th
 
 ### The gateway (phase 1 scope)
 
-**Built in [`gateway/`](../gateway/README.md)**: live stream, dedupe, durable queue, `/capture` delivery, heartbeat, probe and dry-run modes, and a Windows startup task. The site computer is a staff PC that stays on. Still to do: NVR catch-up after downtime, and confirming the event format against the real NVR with `probe`.
+**Built in [`gateway/`](../gateway/README.md)**: live stream, dedupe, durable queue, `/capture` delivery, heartbeat, probe and dry-run modes, and a Windows startup task. The site computer is a staff PC that stays on. Catch-up after downtime is built on the NVR's real search format, captured and checked against this NVR. Still to do: confirm the live event format with `probe`, which needs an NVR login for the gateway.
 
 - **Runtime:** Node.js/TypeScript service, run as a Windows service (NSSM) or with systemd. Config: NVR address and read-only credentials, tenant ID, relay token, base URL, and the channel map.
 - **Listen:** keep one long-lived connection to `GET /ISAPI/Event/notification/alertStream` on the NVR, and parse vehicle-detection (ANPR) events for D1 and D2. Reconnect with backoff.

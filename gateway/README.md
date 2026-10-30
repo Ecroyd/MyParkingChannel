@@ -18,6 +18,12 @@ Background and the overall plan: [`docs/anpr-gateway-plan.md`](../docs/anpr-gate
 - Every read goes into a **SQLite queue on disk** (`data/queue.db`) before it is sent. Failed sends
   retry with backoff (up to 5 minutes), so internet outages and restarts delay reads but don't lose
   them. Reads the server rejects as invalid (HTTP 400) are parked in the `dead` table.
+- **Catch-up:** the gateway records on disk when its NVR stream was last alive. After any gap
+  (PC off or asleep, gateway restarted, network drop) it searches the NVR's stored vehicle
+  detections for that period, with 10 minutes' overlap either side and up to 3 days back, and
+  queues the reads it missed. Every read, live or caught up, is remembered in a `seen` table, so
+  overlap never double-counts. A search that fails is retried every 5 minutes until it succeeds.
+  Stored reads carry no travel direction, so catch-up uses `CHANNEL_DIRECTIONS`.
 - A **heartbeat** every `HEARTBEAT_SECONDS` keeps the gateway's gate device "connected" on the admin
   ANPR page.
 - Logs go to the console and `data/gateway.log` (rotated at 5 MB).
@@ -59,10 +65,12 @@ node --test "test/*.test.ts"   # tests
 10. **Shadow run:** for a few days, compare Admin → ANPR → Events with the NVR's own vehicle
     detection search before staff rely on it.
 
-## Not yet done
+## Verified against the site NVR (DS-7732NI-M4/24P, V5.04.081, 30 Oct 2026)
 
-- **Catch-up from the NVR** (`eventRecordSearch`) after downtime. While the gateway is off,
-  reads are missed rather than delayed; queued reads are still delivered after a restart. The
-  request format will be taken from a real capture of this NVR.
-- **Event format confirmation.** The parser follows Hikvision's documented ANPR notification fields
-  and accepts XML and JSON. Run `probe` against the site NVR before going live.
+- **Catch-up search:** the `eventRecordSearch` request and response formats were captured from the
+  NVR's own Event Center page. The NVR honours UTC offsets: the same window as `+00:00` and as
+  `+01:00` returned the same 18 reads, and a window an hour later returned 22. Stored reads use
+  channel `1` for D1 and `2` for D2.
+- **Still to confirm with `probe`:** the live alertStream notification format. The parser follows
+  Hikvision's documented ANPR fields and accepts both XML and JSON. `probe` also runs a catch-up
+  search, so one probe session checks both paths.

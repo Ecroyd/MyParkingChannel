@@ -41,7 +41,47 @@ export class ReadQueue {
         failed_at INTEGER NOT NULL,
         error TEXT
       );
+      -- Every plate read seen (live or catch-up), sent or not: the dedupe memory.
+      CREATE TABLE IF NOT EXISTS seen (
+        plate_norm TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        at_ms INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS seen_lookup ON seen (plate_norm, channel, at_ms);
+      CREATE TABLE IF NOT EXISTS state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
     `);
+  }
+
+  /**
+   * Record a read and say whether it is new: false when the same plate was already seen on the
+   * same channel within windowMs either side. Every read is recorded, so a car sitting at the
+   * barrier keeps its window open, and catch-up can overlap live reads without double counting.
+   */
+  recordRead(plateNorm: string, channel: string, atMs: number, windowMs: number): boolean {
+    const nearby = this.db
+      .prepare('SELECT 1 AS x FROM seen WHERE plate_norm = ? AND channel = ? AND at_ms BETWEEN ? AND ? LIMIT 1')
+      .get(plateNorm, channel, atMs - windowMs, atMs + windowMs);
+    this.db.prepare('INSERT INTO seen (plate_norm, channel, at_ms) VALUES (?, ?, ?)').run(plateNorm, channel, atMs);
+    return !nearby;
+  }
+
+  /** Forget reads older than the given age (catch-up never looks back further). */
+  pruneSeen(olderThanMs: number, nowMs = Date.now()): void {
+    this.db.prepare('DELETE FROM seen WHERE at_ms < ?').run(nowMs - olderThanMs);
+  }
+
+  getState(key: string): string | null {
+    const row = this.db.prepare('SELECT value FROM state WHERE key = ?').get(key);
+    return row ? String(row.value) : null;
+  }
+
+  setState(key: string, value: string): void {
+    this.db
+      .prepare('INSERT INTO state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .run(key, value);
   }
 
   enqueue(payload: CapturePayload, nowMs = Date.now()): void {

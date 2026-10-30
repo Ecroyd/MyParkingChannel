@@ -7,6 +7,13 @@ import { boundaryFromContentType, MultipartParser, type MultipartPart } from './
 
 export const ALERT_STREAM_PATH = '/ISAPI/Event/notification/alertStream';
 
+export type StreamHooks = {
+  /** The NVR accepted the stream request: anything missed before this is a gap. */
+  onConnected?: () => void;
+  /** Bytes arrived: the stream is alive. */
+  onActivity?: () => void;
+};
+
 export class NvrClient {
   readonly http: DigestClient;
 
@@ -27,13 +34,18 @@ export class NvrClient {
    * skipped). Resolves when the stream ends or goes quiet for longer than idleMs; throws on
    * HTTP errors. The caller reconnects.
    */
-  async streamOnce(onText: (text: string, part: MultipartPart) => void, idleMs = 120_000): Promise<void> {
+  async streamOnce(
+    onText: (text: string, part: MultipartPart) => void,
+    idleMs = 120_000,
+    hooks: StreamHooks = {}
+  ): Promise<void> {
     const controller = new AbortController();
     const res = await this.http.request(ALERT_STREAM_PATH, { signal: controller.signal });
     if (!res.ok || !res.body) {
       await res.body?.cancel();
       throw new Error(`alertStream returned HTTP ${res.status}`);
     }
+    hooks.onConnected?.();
 
     const parser = new MultipartParser(boundaryFromContentType(res.headers.get('content-type')) ?? 'boundary');
     let idle = setTimeout(() => controller.abort(), idleMs);
@@ -41,6 +53,7 @@ export class NvrClient {
       for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
         clearTimeout(idle);
         idle = setTimeout(() => controller.abort(), idleMs);
+        hooks.onActivity?.();
         for (const part of parser.push(chunk)) {
           const type = (part.headers['content-type'] ?? '').toLowerCase();
           if (type.startsWith('image/')) continue;
@@ -56,13 +69,13 @@ export class NvrClient {
   }
 
   /** Reconnect forever with backoff (2s doubling to 60s; reset after a healthy connection). */
-  async streamForever(onText: (text: string) => void, shouldStop: () => boolean): Promise<void> {
+  async streamForever(onText: (text: string) => void, shouldStop: () => boolean, hooks: StreamHooks = {}): Promise<void> {
     let delay = 2000;
     while (!shouldStop()) {
       const startedAt = Date.now();
       try {
         log.info('Connecting to NVR alertStream');
-        await this.streamOnce((text) => onText(text));
+        await this.streamOnce((text) => onText(text), undefined, hooks);
         log.warn('alertStream ended; reconnecting');
       } catch (err) {
         log.error('alertStream error', err);

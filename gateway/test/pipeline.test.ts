@@ -2,7 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseAnprNotification } from '../src/anprEvent.ts';
 import { loadConfig, parseDirectionMap } from '../src/config.ts';
-import { ReadDeduper } from '../src/dedupe.ts';
 import { resolveDirection, toCapturePayload } from '../src/pipeline.ts';
 import { ReadQueue } from '../src/queue.ts';
 import { classifyResponse } from '../src/sender.ts';
@@ -41,13 +40,28 @@ test('builds the /capture payload', () => {
   assert.equal('device_id' in toCapturePayload(read, 'in', { deviceId: null }), false);
 });
 
-test('dedupe: repeats within the window count once, per channel', () => {
-  const d = new ReadDeduper(60);
-  assert.equal(d.accept('AB12CDE', '1', 0), true);
-  assert.equal(d.accept('AB12CDE', '1', 30_000), false);
-  assert.equal(d.accept('AB12CDE', '1', 80_000), false); // still sitting there: window slides
-  assert.equal(d.accept('AB12CDE', '2', 81_000), true);
-  assert.equal(d.accept('AB12CDE', '1', 200_000), true);
+test('dedupe: repeats within the window count once, per channel, in any order', () => {
+  const q = new ReadQueue(':memory:');
+  const w = 60_000;
+  assert.equal(q.recordRead('AB12CDE', '1', 0, w), true);
+  assert.equal(q.recordRead('AB12CDE', '1', 30_000, w), false);
+  assert.equal(q.recordRead('AB12CDE', '1', 80_000, w), false); // still sitting there: window slides
+  assert.equal(q.recordRead('AB12CDE', '2', 81_000, w), true);
+  assert.equal(q.recordRead('AB12CDE', '1', 200_000, w), true);
+  // Catch-up finds a stored read a second off a live one it already handled.
+  assert.equal(q.recordRead('AB12CDE', '1', 199_000, w), false);
+  q.pruneSeen(100_000, 250_000);
+  assert.equal(q.recordRead('AB12CDE', '1', 30_000, w), true); // its neighbours were pruned
+  q.close();
+});
+
+test('state survives in the queue database', () => {
+  const q = new ReadQueue(':memory:');
+  assert.equal(q.getState('last_alive_at'), null);
+  q.setState('last_alive_at', '123');
+  q.setState('last_alive_at', '456');
+  assert.equal(q.getState('last_alive_at'), '456');
+  q.close();
 });
 
 test('queue: survives retries, parks rejected reads', () => {
