@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import crypto from 'crypto';
 import { applyBookingOccupancyAction } from '@/lib/ops/occupancyAction';
 import {
+  findDuplicateCapture,
   normalizePlate,
   pickCaptureBooking,
   plateIlikePattern,
@@ -181,6 +182,15 @@ export async function POST(req: NextRequest) {
       booking_id: null,
       processed_at: null,
     };
+
+    // Same plate, same direction within a minute from any gateway or relay: already handled.
+    const earlier = await findDuplicateCapture(supabase, tenantId, plateNorm, body.direction, occurredAt);
+    if (earlier) {
+      return NextResponse.json(
+        { ok: true, duplicate: true, eventId: earlier.id, bookingId: earlier.booking_id, result: earlier.result },
+        { status: 200 }
+      );
+    }
 
     // Try to insert gate_events row
     const { data: insertedEvent, error: insertError } = await supabase
