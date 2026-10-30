@@ -5,6 +5,8 @@
 // database query uses a spacing-insensitive ILIKE pattern and the exact comparison happens here
 // on the normalised plate.
 
+import type { SupabaseClient } from '@supabase/supabase-js';
+
 export type CaptureDirection = 'in' | 'out';
 
 export type CaptureBookingCandidate = {
@@ -26,6 +28,43 @@ export function normalizePlate(plate: string | null | undefined): string {
  */
 export function plateIlikePattern(plateNorm: string): string {
   return plateNorm.split('').join('%');
+}
+
+/** The same plate in the same direction within this window counts as one read. */
+export const CAPTURE_DUPLICATE_WINDOW_MS = 60_000;
+
+/**
+ * An earlier ANPR gate event for the same plate and direction within the window, from any source
+ * or gateway. Lets more than one gateway run at a site: exact repeats are already stopped by the
+ * unique event_hash, and this catches the rest (a gateway's catch-up re-sending a read another
+ * gateway delivered live, labelled with a different camera id or a second off).
+ */
+export async function findDuplicateCapture(
+  supabase: SupabaseClient,
+  tenantId: string,
+  plateNorm: string,
+  direction: CaptureDirection,
+  occurredAt: Date,
+  windowMs: number = CAPTURE_DUPLICATE_WINDOW_MS
+): Promise<{ id: string; booking_id: string | null; result: string | null } | null> {
+  const t = occurredAt.getTime();
+  const { data, error } = await supabase
+    .from('gate_events')
+    .select('id, booking_id, result')
+    .eq('tenant_id', tenantId)
+    .eq('mode', 'anpr')
+    .eq('plate_norm', plateNorm)
+    .eq('direction', direction)
+    .gte('event_at', new Date(t - windowMs).toISOString())
+    .lte('event_at', new Date(t + windowMs).toISOString())
+    .order('event_at', { ascending: true })
+    .limit(1);
+  if (error) {
+    // Never drop a read because the duplicate check failed; event_hash still stops exact repeats.
+    console.error('[ANPR Capture] Duplicate check failed:', error);
+    return null;
+  }
+  return data?.[0] ?? null;
 }
 
 /**

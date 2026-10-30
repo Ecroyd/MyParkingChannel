@@ -49,6 +49,10 @@ Background and the overall plan: [`docs/anpr-gateway-plan.md`](../docs/anpr-gate
 5. **Shadow run:** for a few days, compare Admin → ANPR → Events with the NVR's own vehicle
    detection search before staff rely on it.
 
+**More than one gateway at a site** (e.g. a backup PC) is fine: pair each with its own code. My
+Parking Channel counts the same plate in the same direction within a minute once, whichever
+gateway sends it. Check the NVR accepts that many event connections; some models limit them.
+
 To remove it: Administrator PowerShell, `Unregister-ScheduledTask -TaskName 'MPC ANPR Gateway'`, then
 delete `C:\ProgramData\MPC Gateway`.
 

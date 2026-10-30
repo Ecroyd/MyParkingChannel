@@ -1,9 +1,44 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  findDuplicateCapture,
   normalizePlate,
   pickCaptureBooking,
   plateIlikePattern,
 } from '@/lib/anpr/captureBookingMatch';
+
+function gateEventsStub(result: { data: unknown; error: unknown }) {
+  const q: Record<string, ReturnType<typeof vi.fn>> = {};
+  for (const m of ['select', 'eq', 'gte', 'lte', 'order']) q[m] = vi.fn(() => q);
+  q.limit = vi.fn(async () => result);
+  return { client: { from: vi.fn(() => q) } as unknown as SupabaseClient, q };
+}
+
+describe('findDuplicateCapture', () => {
+  const at = new Date('2026-10-30T08:00:00Z');
+
+  it('looks for the same plate and direction within a minute either side, any camera', async () => {
+    const { client, q } = gateEventsStub({ data: [{ id: 'ev-1', booking_id: 'b-1', result: 'allow' }], error: null });
+    await expect(findDuplicateCapture(client, 'tenant', 'AB12CDE', 'in', at)).resolves.toEqual({
+      id: 'ev-1',
+      booking_id: 'b-1',
+      result: 'allow',
+    });
+    expect(q.eq).toHaveBeenCalledWith('plate_norm', 'AB12CDE');
+    expect(q.eq).toHaveBeenCalledWith('direction', 'in');
+    expect(q.eq).not.toHaveBeenCalledWith('camera_id', expect.anything());
+    expect(q.gte).toHaveBeenCalledWith('event_at', '2026-10-30T07:59:00.000Z');
+    expect(q.lte).toHaveBeenCalledWith('event_at', '2026-10-30T08:01:00.000Z');
+  });
+
+  it('returns null when there is none, and never blocks a read when the check fails', async () => {
+    await expect(findDuplicateCapture(gateEventsStub({ data: [], error: null }).client, 't', 'X', 'out', at)).resolves.toBeNull();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(
+      findDuplicateCapture(gateEventsStub({ data: null, error: { message: 'boom' } }).client, 't', 'X', 'out', at)
+    ).resolves.toBeNull();
+  });
+});
 
 const booking = (id: string, plate: string | null, start: string, end: string) => ({
   id,
