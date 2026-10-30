@@ -39,7 +39,7 @@ export function mapStagingToBookings(stagingRecord: Record<string, unknown>) {
   const plateRaw = stagingRecord.vehicle_reg as string | null | undefined;
   const plate =
     plateRaw && String(plateRaw).trim() && plateRaw !== "-"
-      ? String(plateRaw).trim().toUpperCase()
+      ? String(plateRaw).replace(/\s+/g, "").toUpperCase()
       : null;
 
   const customerEmail =
