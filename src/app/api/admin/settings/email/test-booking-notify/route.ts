@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentTenantContext } from '@/lib/auth/current-tenant-context';
 import { canManageSettings } from '@/lib/auth/permissions';
-import { normalizeEmailList } from '@/lib/email/tenantNotifyEmail';
+import { partitionBookingNotifyEmails } from '@/lib/email/tenantNotifyEmail';
 import { queueTenantBookingNotifyTest } from '@/lib/email/bookingEmails';
 
 /**
@@ -32,7 +32,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const override = normalizeEmailList(body.booking_notify_emails ?? body.recipients ?? []);
+    const { allowed: override, blocked } = partitionBookingNotifyEmails(
+      body.booking_notify_emails ?? body.recipients ?? []
+    );
+    if (blocked.length > 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Cannot send to platform ingest address(es): ${blocked.join(', ')}. Use a staff inbox, not bookings@myparkingchannel.app.`,
+          blocked,
+        },
+        { status: 400 }
+      );
+    }
     const result = await queueTenantBookingNotifyTest({
       tenantId,
       recipients: override.length > 0 ? override : undefined,

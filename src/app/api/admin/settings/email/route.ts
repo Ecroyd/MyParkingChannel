@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentTenantContext } from '@/lib/auth/current-tenant-context';
 import { canManageSettings } from '@/lib/auth/permissions';
 import { createAdminClient } from '@/lib/supabase/server-admin';
-import { normalizeEmailList } from '@/lib/email/tenantNotifyEmail';
+import { partitionBookingNotifyEmails } from '@/lib/email/tenantNotifyEmail';
 
 export async function POST(req: NextRequest) {
   try {
@@ -47,9 +47,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const notifyList = normalizeEmailList(
+    const { allowed: notifyList, blocked } = partitionBookingNotifyEmails(
       booking_notify_emails ?? booking_notify_email ?? []
     );
+
+    if (blocked.length > 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Do not use platform ingest addresses as notification recipients: ${blocked.join(', ')}. Use a real staff inbox (e.g. info@yourparking.com). bookings@myparkingchannel.app is for Cloudflare inbound booking email only.`,
+          blocked,
+        },
+        { status: 400 }
+      );
+    }
 
     const adminClient = await createAdminClient();
 
