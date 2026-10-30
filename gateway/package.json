@@ -1,0 +1,17 @@
+{
+  "name": "mpc-anpr-gateway",
+  "private": true,
+  "version": "0.1.0",
+  "description": "On-site gateway: Hikvision NVR ANPR reads -> My Parking Channel /api/internal/anpr/capture",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/main.ts run",
+    "dry-run": "node src/main.ts run --dry-run",
+    "probe": "node src/main.ts probe",
+    "test": "node --test \"test/*.test.ts\"",
+    "typecheck": "tsc -p ."
+  }
+}

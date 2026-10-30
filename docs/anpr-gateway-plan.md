@@ -63,6 +63,8 @@ Reads show up in Admin → ANPR → Events, and arrivals and departures reach th
 
 ### The gateway (phase 1 scope)
 
+**Built in [`gateway/`](../gateway/README.md)**: live stream, dedupe, durable queue, `/capture` delivery, heartbeat, probe and dry-run modes, and a Windows startup task. The site computer is a staff PC that stays on. Still to do: NVR catch-up after downtime, and confirming the event format against the real NVR with `probe`.
+
 - **Runtime:** Node.js/TypeScript service, run as a Windows service (NSSM) or with systemd. Config: NVR address and read-only credentials, tenant ID, relay token, base URL, and the channel map.
 - **Listen:** keep one long-lived connection to `GET /ISAPI/Event/notification/alertStream` on the NVR, and parse vehicle-detection (ANPR) events for D1 and D2. Reconnect with backoff.
 - **Direction:** the simplest rule is `D1 → in`, `D2 → out`. If one camera covers both directions, use the camera's own direction field (it reports "Forward"/"Reverse") instead. Confirm on site.
