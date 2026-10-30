@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isPlatformIngestEmail,
   normalizeEmailList,
   parseEmailList,
+  partitionBookingNotifyEmails,
   resolveTenantBookingNotifyEmails,
 } from '@/lib/email/tenantNotifyEmail';
 
@@ -16,6 +18,29 @@ describe('parseEmailList / normalizeEmailList', () => {
     expect(normalizeEmailList(['A@x.com', 'a@x.com', 'not-an-email', ''])).toEqual([
       'A@x.com',
     ]);
+  });
+});
+
+describe('platform ingest addresses', () => {
+  it('recognizes bookings@ and canary-bookings@ as ingest inboxes', () => {
+    expect(isPlatformIngestEmail('bookings@myparkingchannel.app')).toBe(true);
+    expect(isPlatformIngestEmail('Bookings@MyParkingChannel.app')).toBe(true);
+    expect(isPlatformIngestEmail('canary-bookings@myparkingchannel.app')).toBe(true);
+    expect(isPlatformIngestEmail('info@flyparksexeter.co.uk')).toBe(false);
+    expect(isPlatformIngestEmail('bookings@site.co.uk')).toBe(false);
+  });
+
+  it('partitions ingest addresses out of notify lists', () => {
+    expect(
+      partitionBookingNotifyEmails([
+        'info@flyparksexeter.co.uk',
+        'bookings@myparkingchannel.app',
+        'manager@example.com',
+      ])
+    ).toEqual({
+      allowed: ['info@flyparksexeter.co.uk', 'manager@example.com'],
+      blocked: ['bookings@myparkingchannel.app'],
+    });
   });
 });
 
@@ -36,6 +61,25 @@ describe('resolveTenantBookingNotifyEmails', () => {
         bookingNotifyEmail: 'legacy@example.com',
       })
     ).toEqual(['legacy@example.com']);
+  });
+
+  it('strips platform ingest addresses so they never become Resend To:', () => {
+    expect(
+      resolveTenantBookingNotifyEmails({
+        bookingNotifyEmails: [
+          'bookings@myparkingchannel.app',
+          'info@flyparksexeter.co.uk',
+        ],
+      })
+    ).toEqual(['info@flyparksexeter.co.uk']);
+  });
+
+  it('returns empty when only ingest addresses were configured', () => {
+    expect(
+      resolveTenantBookingNotifyEmails({
+        bookingNotifyEmails: ['bookings@myparkingchannel.app'],
+      })
+    ).toEqual([]);
   });
 
   it('returns empty when nothing is configured (safe empty state)', () => {
