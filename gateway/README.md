@@ -51,7 +51,7 @@ node --test "test/*.test.ts"   # tests
 5. **My Parking Channel admin:**
    - The Fly Parks ANPR site is enabled, and there is a relay token.
    - Create a gate device for the gateway (e.g. "Fly Parks gateway") and copy its id.
-6. **Configure:** copy `.env.example` to `.env` and fill it in. Only someone authorised should
+6. **Configure:** copy `env.example` to `.env` and fill it in. Only someone authorised should
    handle the NVR password and relay token.
 7. **Find the channels:** run `node src\main.ts probe 600` and drive a car past each ANPR camera.
    The summary shows each channel's id and name. Put them in `CHANNEL_DIRECTIONS` (e.g. `1:in,2:out`).

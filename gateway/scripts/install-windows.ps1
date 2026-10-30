@@ -25,7 +25,7 @@ $node = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
 if (-not $node) { throw 'node.exe not found. Install Node.js 24 LTS first.' }
 $major = [int]((& $node --version).TrimStart('v').Split('.')[0])
 if ($major -lt 24) { throw "Node.js 24+ required (found $(& $node --version))." }
-if (-not (Test-Path (Join-Path $GatewayDir '.env'))) { throw "Missing $GatewayDir\.env (copy .env.example)." }
+if (-not (Test-Path (Join-Path $GatewayDir '.env'))) { throw "Missing $GatewayDir\.env (copy env.example)." }
 
 $action = New-ScheduledTaskAction -Execute $node -Argument 'src\main.ts run' -WorkingDirectory $GatewayDir
 $trigger = New-ScheduledTaskTrigger -AtStartup

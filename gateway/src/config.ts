@@ -1,5 +1,5 @@
 // Gateway configuration, read from environment variables (optionally a .env file next to
-// package.json). See .env.example for every setting.
+// package.json). See env.example for every setting.
 
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -45,7 +45,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name]?.trim();
-  if (!value) throw new Error(`Missing required setting ${name} (see .env.example)`);
+  if (!value) throw new Error(`Missing required setting ${name} (see env.example)`);
   return value;
 }
 
