@@ -6,13 +6,14 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { getRelayTokenFromRequest, verifyRelayToken } from '@/lib/anpr/relayTokenAuth';
 import crypto from 'crypto';
 import { applyBookingOccupancyAction } from '@/lib/ops/occupancyAction';
+import {
+  normalizePlate,
+  pickCaptureBooking,
+  plateIlikePattern,
+} from '@/lib/anpr/captureBookingMatch';
 
-/**
- * Normalize plate: UPPER(alnum only)
- */
-function normalizePlate(plate: string): string {
-  return plate.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-}
+// Where the read came from (gate_events.source). Defaults to 'videofit' for the existing relay.
+const SOURCE_RE = /^[a-z0-9_-]{1,32}$/;
 
 /**
  * Compute event_hash = sha256(tenantId|plate_norm|occurred_at|direction|camera_id|lane)
@@ -69,6 +70,7 @@ export async function POST(req: NextRequest) {
       camera_id?: string | null;
       lane?: string | null;
       confidence?: number | null;
+      source?: string | null;
       raw?: unknown;
     };
 
@@ -103,6 +105,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const source = body.source ?? 'videofit';
+    if (!SOURCE_RE.test(source)) {
+      return NextResponse.json(
+        { error: 'source must be 1-32 characters of a-z, 0-9, "_" or "-"' },
+        { status: 400 }
+      );
+    }
+
     // Normalize plate
     const plateNorm = normalizePlate(body.plate);
     if (!plateNorm) {
@@ -133,7 +143,6 @@ export async function POST(req: NextRequest) {
       body.lane || null
     );
 
-    // For Videofit capture events: set mode='anpr'
     const mode = 'anpr';
 
     // Store raw plate and normalized plate
@@ -150,7 +159,7 @@ export async function POST(req: NextRequest) {
       direction: body.direction, // Store direction ('in'|'out')
       plate: rawPlate, // Store raw plate
       plate_norm: plateNorm, // Store normalized plate
-      source: 'videofit',
+      source,
       raw_payload: JSON.stringify(rawPayload),
       confidence: body.confidence ?? null,
       lane: body.lane ?? null,
@@ -190,64 +199,67 @@ export async function POST(req: NextRequest) {
     const windowStart = new Date(occurredAt.getTime() - 6 * 60 * 60 * 1000); // -6 hours
     const windowEnd = new Date(occurredAt.getTime() + 6 * 60 * 60 * 1000); // +6 hours
 
-    // Fetch potential matching bookings
+    // Booking plates may be saved with spaces ("AB12 CDE"); the pattern matches any spacing and
+    // pickCaptureBooking keeps only exact normalised matches.
+    const platePattern = plateIlikePattern(plateNorm);
     const { data: bookings, error: bookingError } = await supabase
       .from('bookings')
       .select('id, start_at, end_at, status, arrived_at, departed_at, ops_status, plate')
       .eq('tenant_id', tenantId)
-      .ilike('plate', plateNorm)
+      .ilike('plate', platePattern)
       .lte('start_at', windowEnd.toISOString())
       .gte('end_at', windowStart.toISOString())
       .neq('status', 'cancelled')
       .order('start_at', { ascending: true });
+
+    if (bookingError) {
+      console.error('[ANPR Capture] Booking lookup failed:', bookingError);
+    }
+
+    let matchedBooking = pickCaptureBooking(bookings ?? [], plateNorm, body.direction, occurredAt);
+
+    // Overstay: a departure more than 6h after the booked end falls outside the window above.
+    // Check the vehicle out of the most recent booking it arrived on and never left.
+    if (!matchedBooking && body.direction === 'out') {
+      const { data: openStays, error: openStayError } = await supabase
+        .from('bookings')
+        .select('id, start_at, end_at, status, arrived_at, departed_at, ops_status, plate')
+        .eq('tenant_id', tenantId)
+        .ilike('plate', platePattern)
+        .not('arrived_at', 'is', null)
+        .is('departed_at', null)
+        .lte('start_at', occurredAtIso)
+        .neq('status', 'cancelled')
+        .order('start_at', { ascending: false })
+        .limit(10);
+
+      if (openStayError) {
+        console.error('[ANPR Capture] Open-stay lookup failed:', openStayError);
+      }
+      matchedBooking =
+        (openStays ?? []).find((b) => normalizePlate(b.plate) === plateNorm) ?? null;
+    }
 
     let bookingId: string | null = null;
     let result = 'deny';
     let reason: string | null = 'no booking match';
     const now = new Date().toISOString();
 
-    if (!bookingError && bookings && bookings.length > 0) {
-      // Choose closest booking based on direction
-      let matchedBooking: typeof bookings[0] | null = null;
+    if (matchedBooking) {
+      bookingId = matchedBooking.id;
 
-      if (body.direction === 'in') {
-        // For IN: choose closest start_at
-        matchedBooking = bookings.reduce((closest, booking) => {
-          const bookingStart = new Date(booking.start_at);
-          const diffCurrent = Math.abs(occurredAt.getTime() - bookingStart.getTime());
-          if (!closest) return booking;
-          const closestStart = new Date(closest.start_at);
-          const diffClosest = Math.abs(occurredAt.getTime() - closestStart.getTime());
-          return diffCurrent < diffClosest ? booking : closest;
-        }, null as typeof bookings[0] | null);
-      } else {
-        // For OUT: choose closest end_at
-        matchedBooking = bookings.reduce((closest, booking) => {
-          const bookingEnd = new Date(booking.end_at);
-          const diffCurrent = Math.abs(occurredAt.getTime() - bookingEnd.getTime());
-          if (!closest) return booking;
-          const closestEnd = new Date(closest.end_at);
-          const diffClosest = Math.abs(occurredAt.getTime() - closestEnd.getTime());
-          return diffCurrent < diffClosest ? booking : closest;
-        }, null as typeof bookings[0] | null);
-      }
-
-      if (matchedBooking) {
-        bookingId = matchedBooking.id;
-
-        try {
-          await applyBookingOccupancyAction({
-            bookingId: matchedBooking.id,
-            action: body.direction === 'in' ? 'arrived' : 'departed',
-            source: 'anpr',
-            eventAt: occurredAtIso,
-            metadata: { provider: 'internal_capture' },
-          });
-          result = 'allow';
-          reason = null;
-        } catch (err) {
-          console.error('[ANPR Capture] Occupancy action failed:', err);
-        }
+      try {
+        await applyBookingOccupancyAction({
+          bookingId: matchedBooking.id,
+          action: body.direction === 'in' ? 'arrived' : 'departed',
+          source: 'anpr',
+          eventAt: occurredAtIso,
+          metadata: { provider: 'internal_capture', capture_source: source },
+        });
+        result = 'allow';
+        reason = null;
+      } catch (err) {
+        console.error('[ANPR Capture] Occupancy action failed:', err);
       }
     }
 
