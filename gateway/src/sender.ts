@@ -44,9 +44,12 @@ export class CloudSender {
   }
 
   private async post(path: string, body: unknown): Promise<{ status: number; json: unknown }> {
+    const auth: Record<string, string> = this.config.deviceKey
+      ? { 'x-gateway-key': this.config.deviceKey }
+      : { 'x-relay-token': this.config.relayToken ?? '' };
     const res = await this.fetchImpl(this.url(path), {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-relay-token': this.config.relayToken },
+      headers: { 'content-type': 'application/json', ...auth },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(20_000),
     });
@@ -89,7 +92,7 @@ export class CloudSender {
   }
 
   async heartbeat(): Promise<void> {
-    if (!this.config.deviceId) return;
+    if (!this.config.deviceId && !this.config.deviceKey) return;
     try {
       const { status, json } = await this.post('heartbeat', { device_id: this.config.deviceId });
       if (status !== 200) log.warn(`Heartbeat failed (${status})`, json);

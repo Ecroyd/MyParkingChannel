@@ -1,10 +1,13 @@
-// Gateway configuration, read from environment variables (optionally a .env file next to
-// package.json). See env.example for every setting.
+// Gateway configuration: from settings.json written by the set-up page (configFromSettings), or
+// from environment variables / a .env file for headless use (loadConfig, see env.example).
 
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import type { StoredSettings } from './settings.ts';
 
 export type Direction = 'in' | 'out';
+
+export const DEFAULT_MPC_BASE_URL = 'https://myparkingchannel.app';
 
 export type GatewayConfig = {
   nvrUrl: string;
@@ -12,8 +15,11 @@ export type GatewayConfig = {
   nvrPassword: string;
   mpcBaseUrl: string;
   tenantId: string;
-  relayToken: string;
-  /** gate_devices id for liveness; optional but recommended. */
+  /** Paired gateways authenticate with their own device key (x-gateway-key)... */
+  deviceKey: string | null;
+  /** ...older set-ups with the tenant relay token plus deviceId. */
+  relayToken: string | null;
+  /** gate_devices id for liveness; optional with a relay token, implied by a device key. */
   deviceId: string | null;
   /** NVR channel id (as it appears in events) -> direction. */
   channelDirections: Map<string, Direction>;
@@ -76,18 +82,39 @@ export function loadConfig(
     throw new Error('MPC_DEVICE_ID must be the gate device UUID from the admin ANPR page');
   }
 
+  const deviceKey = env.MPC_DEVICE_KEY?.trim() || null;
+
   return {
     nvrUrl: required(env, 'NVR_URL').replace(/\/+$/, ''),
     nvrUsername: required(env, 'NVR_USERNAME'),
     nvrPassword: required(env, 'NVR_PASSWORD'),
-    mpcBaseUrl: (env.MPC_BASE_URL?.trim() || 'https://myparkingchannel.app').replace(/\/+$/, ''),
+    mpcBaseUrl: (env.MPC_BASE_URL?.trim() || DEFAULT_MPC_BASE_URL).replace(/\/+$/, ''),
     tenantId: cloud('MPC_TENANT_ID'),
-    relayToken: cloud('MPC_RELAY_TOKEN'),
+    deviceKey,
+    relayToken: deviceKey ? null : cloud('MPC_RELAY_TOKEN') || null,
     deviceId,
     channelDirections: parseDirectionMap('CHANNEL_DIRECTIONS', env.CHANNEL_DIRECTIONS),
     cameraDirections: parseDirectionMap('CAMERA_DIRECTIONS', env.CAMERA_DIRECTIONS),
     dedupeSeconds: positiveInt(env, 'DEDUPE_SECONDS', 60),
     heartbeatSeconds: positiveInt(env, 'HEARTBEAT_SECONDS', 300),
     dataDir: resolve(rootDir, env.DATA_DIR?.trim() || 'data'),
+  };
+}
+
+export function configFromSettings(s: StoredSettings, dataDir: string): GatewayConfig {
+  return {
+    nvrUrl: s.nvrUrl.replace(/\/+$/, ''),
+    nvrUsername: s.nvrUsername,
+    nvrPassword: s.nvrPassword,
+    mpcBaseUrl: (s.mpcBaseUrl || DEFAULT_MPC_BASE_URL).replace(/\/+$/, ''),
+    tenantId: s.tenantId,
+    deviceKey: s.deviceKey,
+    relayToken: null,
+    deviceId: s.deviceId,
+    channelDirections: new Map(Object.entries(s.channelDirections)),
+    cameraDirections: new Map(),
+    dedupeSeconds: 60,
+    heartbeatSeconds: 300,
+    dataDir,
   };
 }

@@ -31,12 +31,13 @@ export function buildSearchBody(opts: {
   channels: number[];
   position: number;
   searchId: string;
+  maxResults?: number;
 }): string {
   return JSON.stringify({
     EventSearchDescription: {
       searchID: opts.searchId,
       searchResultPosition: opts.position,
-      maxResults: PAGE_SIZE,
+      maxResults: opts.maxResults ?? PAGE_SIZE,
       timeSpanList: [{ startTime: toNvrTime(opts.from), endTime: toNvrTime(opts.to) }],
       type: 'all',
       channels: opts.channels,
@@ -100,6 +101,19 @@ export function parseSearchResponse(json: unknown): SearchPage {
     total: Number.isFinite(Number(result.totalMatches)) ? Number(result.totalMatches) : null,
     reads,
   };
+}
+
+/** How many plate reads one channel stored in the window (the set-up page uses it to spot ANPR cameras). */
+export async function countStoredReads(http: DigestClient, from: Date, to: Date, channel: number): Promise<number> {
+  const res = await http.request(SEARCH_PATH, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: buildSearchBody({ from, to, channels: [channel], position: 0, searchId: randomUUID().toUpperCase(), maxResults: 1 }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) throw new Error(`eventRecordSearch returned HTTP ${res.status}`);
+  const page = parseSearchResponse(await res.json());
+  return page.total ?? page.returned;
 }
 
 /** All stored plate reads on `channels` between `from` and `to`, oldest first. */
