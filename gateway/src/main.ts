@@ -161,9 +161,11 @@ async function probe(config: GatewayConfig, seconds: number): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  // Drop the program path(s): node + script in development; the exe (listed twice) when packaged.
+  // Drop the program path(s): node + script in development; when packaged the exe is repeated in
+  // argv[1], as typed (relative or absolute), so compare by file name.
+  const self = basename(process.execPath).toLowerCase();
   const argv = process.argv.slice(1);
-  while (argv.length && (argv[0] === process.execPath || /main\.(ts|js|cjs)$/.test(argv[0]))) argv.shift();
+  while (argv.length && (basename(argv[0]).toLowerCase() === self || /main\.(ts|js|cjs)$/.test(argv[0]))) argv.shift();
   const [command = 'run', ...rest] = argv[0]?.startsWith('--') ? ['run', ...argv] : argv;
 
   if (command === 'probe') {

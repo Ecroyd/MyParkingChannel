@@ -30,3 +30,9 @@ jobs:
 
       - name: Type check
         run: npx tsc --noEmit -p .
+
+      - name: Gateway tests and type check
+        working-directory: gateway
+        run: |
+          node --test "test/*.test.ts"
+          ../node_modules/.bin/tsc -p .

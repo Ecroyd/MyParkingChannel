@@ -116,7 +116,11 @@ export class Engine {
           onActivity: () => this.markAlive(),
           onDisconnected: (err) => {
             this.state.nvrConnected = false;
-            if (err) this.state.lastError = err.message;
+            if (err) {
+              this.state.lastError = /fetch failed|ECONNREFUSED|EHOSTUNREACH|ETIMEDOUT|ENETUNREACH/i.test(err.message)
+                ? `Can't reach the recorder at ${config.nvrUrl}. Check this computer is on the car park network.`
+                : err.message;
+            }
           },
         }
       )

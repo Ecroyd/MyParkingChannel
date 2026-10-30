@@ -1,0 +1,60 @@
+name: Gateway release
+
+# Builds the Windows ANPR gateway (gateway/) into a single mpc-gateway.exe.
+# Push a tag like gateway-v0.1.0 to publish it as a GitHub release; Admin → Settings → ANPR links
+# to releases/latest/download/mpc-gateway.exe. Manual runs build and upload an artifact only.
+
+on:
+  push:
+    tags: ['gateway-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: gateway
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Tests
+        run: node --test "test/*.test.ts"
+
+      - name: Build mpc-gateway.exe
+        run: node scripts/build-exe.mjs
+
+      - name: Smoke test the exe
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\mpc-gateway.exe -ArgumentList '--data', "$env:RUNNER_TEMP\gw", '--no-browser', '--port', '5799' -PassThru
+          Start-Sleep -Seconds 5
+          try {
+            $r = Invoke-WebRequest -Uri http://127.0.0.1:5799/api/state -Headers @{ 'x-mpc-gateway' = '1' } -UseBasicParsing
+          } finally {
+            Stop-Process -Id $p.Id -ErrorAction SilentlyContinue
+          }
+          if ($r.Content -notmatch '"phase":"pair"') { throw "Unexpected state: $($r.Content)" }
+          if ($r.Content -notmatch '"canInstall":true') { throw "Background install not offered on Windows: $($r.Content)" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mpc-gateway
+          path: gateway/dist/mpc-gateway.exe
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/gateway-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${{ github.ref_name }}" dist/mpc-gateway.exe
+          --title "ANPR gateway ${{ github.ref_name }}"
+          --notes "Windows gateway for My Parking Channel. Install it from Admin → Settings → ANPR → On-site gateway. Windows may warn that the app is unrecognised: click More info → Run anyway."

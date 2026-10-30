@@ -28,42 +28,52 @@ Background and the overall plan: [`docs/anpr-gateway-plan.md`](../docs/anpr-gate
   ANPR page.
 - Logs go to the console and `data/gateway.log` (rotated at 5 MB).
 
+## Install at a car park (the normal way)
+
+1. **Computer:** wired to the same network as the recorder (NVR), always on, sleep set to Never.
+2. **My Parking Channel → Admin → Settings → ANPR → On-site gateway:** click **Download gateway
+   (Windows)** on that computer and run `mpc-gateway.exe`. If Windows says it protected your PC,
+   click **More info → Run anyway** (the app isn't code-signed yet).
+3. The set-up page opens in the browser (`http://127.0.0.1:5719`):
+   1. **Connect:** click **Get pairing code** in admin and type the code. This creates the gate
+      device and its key; nothing to copy by hand.
+   2. **Recorder:** the NVR address, plus the username and password of a dedicated NVR user (not
+      `admin`). **Test and continue** lists the cameras, with each one's plate reads over the last
+      7 days, so the ANPR cameras stand out.
+   3. **Cameras:** set the ANPR cameras to Entry or Exit, and leave the rest on Ignore.
+   4. **Run in the background:** one Windows permission prompt. The gateway moves to
+      `C:\ProgramData\MPC Gateway` (locked to SYSTEM and Administrators, because it holds the NVR
+      password and device key), and from then on runs as a startup task, with nobody signed in.
+4. Opening `mpc-gateway.exe` again (or `http://127.0.0.1:5719`) shows the status page: connection,
+   plates today, sent today and waiting to send. Cameras and the recorder login can be changed there.
+5. **Shadow run:** for a few days, compare Admin → ANPR → Events with the NVR's own vehicle
+   detection search before staff rely on it.
+
+To remove it: Administrator PowerShell, `Unregister-ScheduledTask -TaskName 'MPC ANPR Gateway'`, then
+delete `C:\ProgramData\MPC Gateway`.
+
+## Releasing
+
+Push a tag like `gateway-v0.1.0`. `.github/workflows/gateway-release.yml` runs the tests, builds
+`mpc-gateway.exe` on Windows (Node 24 single executable application: no Node install needed on site),
+smoke-tests it and publishes a GitHub release. The admin download button points at
+`releases/latest/download/mpc-gateway.exe` (override with `ANPR_GATEWAY_DOWNLOAD_URL`).
+`node scripts/build-exe.mjs` builds the same thing locally for the current OS.
+
+## Development
+
 No build step and no npm packages: Node 24 runs the TypeScript directly and has SQLite built in.
 
-## Commands
-
 ```bash
-node src/main.ts probe 300     # record raw NVR events for 5 minutes to data/probe-*.log; sends nothing
-node src/main.ts run --dry-run # parse and log what would be sent; sends nothing
-node src/main.ts run           # the real thing
-node --test "test/*.test.ts"   # tests
+node src/main.ts --data data --port 5719   # the app: set-up page + gateway
+node src/main.ts probe 300                 # headless: record raw NVR events (uses .env); sends nothing
+node --test "test/*.test.ts"               # tests
 ```
 
-## Set-up on the site PC (Windows)
-
-1. **Computer:** wired to the main Fly Parks network, and `http://192.168.1.88` opens the NVR login
-   page in a browser. Sleep set to Never, `powercfg /hibernate off`, and Windows Update active hours
-   covering opening hours.
-2. **Node.js 24 LTS:** install it from nodejs.org.
-3. **Copy this `gateway` folder** to the PC, e.g. `C:\mpc-gateway`.
-4. **NVR user:** on the NVR, create a dedicated user (e.g. `mpc-gateway`) with the lowest role that
-   can receive events. Don't reuse `admin`.
-5. **My Parking Channel admin:**
-   - The Fly Parks ANPR site is enabled, and there is a relay token.
-   - Create a gate device for the gateway (e.g. "Fly Parks gateway") and copy its id.
-6. **Configure:** copy `env.example` to `.env` and fill it in. Only someone authorised should
-   handle the NVR password and relay token.
-7. **Find the channels:** run `node src\main.ts probe 600` and drive a car past each ANPR camera.
-   The summary shows each channel's id and name. Put them in `CHANNEL_DIRECTIONS` (e.g. `1:in,2:out`).
-8. **Dry run:** `node src\main.ts run --dry-run` and check the logged reads look right.
-9. **Install as a startup task** (Administrator PowerShell, in the gateway folder):
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1
-   ```
-   It runs as SYSTEM at boot with nobody logged in, and restarts every minute if it crashes.
-   Remove it with `-Uninstall`.
-10. **Shadow run:** for a few days, compare Admin → ANPR → Events with the NVR's own vehicle
-    detection search before staff rely on it.
+**Headless set-up (alternative):** with a `.env` (copy `env.example`) and no `--data`,
+`node src/main.ts` runs the gateway without the set-up page, authenticating with
+`MPC_DEVICE_KEY` or the tenant relay token. `scripts/install-windows.ps1` installs that variant as
+a startup task.
 
 ## Verified against the site NVR (DS-7732NI-M4/24P, V5.04.081, 30 Oct 2026)
 
