@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/switch'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Copy, Check, Loader2, RefreshCw, Key } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
+import { GatewaySetupCard } from '@/components/admin/anpr/GatewaySetupCard'
 
 type AnprSite = {
   id: string
@@ -235,6 +236,8 @@ export default function AnprSettingsClient() {
         <h1 className="text-lg font-semibold">ANPR Relay Settings</h1>
         <p className="text-sm text-gray-500">Configure SNAP/Videofit ANPR relay integration</p>
       </div>
+
+      <GatewaySetupCard tenantId={tenantId} />
 
       {error && (
         <Alert variant="destructive">

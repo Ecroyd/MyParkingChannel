@@ -1,12 +1,11 @@
 // POST /api/internal/anpr/heartbeat - Keep an on-site ANPR gateway marked connected
-// Authenticated via per-tenant relay token (x-relay-token header or Bearer)
-// Body: { device_id } — the gateway's gate_devices id. Reads sent to /capture with the same
-// device_id also count, so this only matters when no vehicles are moving.
+// Authenticated with the gateway's own key (x-gateway-key; the device is implied), or with the
+// tenant relay token plus body { device_id }. Reads sent to /capture also count, so this only
+// matters when no vehicles are moving.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { requireRelayAuth } from '../_relayAuth';
-import { touchGatewayDevice } from '@/lib/anpr/gatewayDevice';
+import { authenticateGatewayRequest, touchGatewayDevice } from '@/lib/anpr/gatewayDevice';
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,11 +14,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'tenantId required' }, { status: 400 });
     }
 
-    const auth = await requireRelayAuth(req, tenantId);
+    const supabase = createAdminClient();
+    const auth = await authenticateGatewayRequest(req, supabase, tenantId, { requireEnabledSite: true });
     if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
     const body = await req.json().catch(() => null);
-    const touched = await touchGatewayDevice(createAdminClient(), tenantId, body?.device_id);
+    const deviceId = auth.via === 'gateway_key' ? auth.deviceId : body?.device_id;
+    const touched = await touchGatewayDevice(supabase, tenantId, deviceId);
     if (!touched.ok) {
       return NextResponse.json({ error: touched.error }, { status: touched.status });
     }
