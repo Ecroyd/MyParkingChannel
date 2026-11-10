@@ -10,7 +10,9 @@
 //       "totalMatches":58,"Targets":[{"channel":2,"ANPRMatchResult":{"licensePlate":"…"},
 //       "vehicleMatchResult":{"plateNo":"…","vehicleLogo":"…",…},"alarmStartTime":"…+00:00",…}]}}
 //
-// Results carry no travel direction, so catch-up relies on CHANNEL_DIRECTIONS.
+// The captured sample showed no travel direction, but the NVR shows one ("forward"/"reverse") under
+// each read in its own UI, so any direction-like field in a result is used when present. Other plain
+// fields are kept in raw so gate_events shows what the NVR actually sends.
 
 import { randomUUID } from 'node:crypto';
 import { normalizePlate, type AnprRead } from './anprEvent.ts';
@@ -65,6 +67,35 @@ type SearchResult = {
   Targets?: SearchTarget[];
 };
 
+const SKIP_KEY = /url|picture|pic|image|^id$|^channel$|time$/i;
+
+/** Copy short scalar fields from a result (and its nested objects) into raw, skipping links and ids. */
+function collectPlainFields(obj: unknown, raw: Record<string, string>, depth = 0): void {
+  if (!obj || typeof obj !== 'object' || depth > 2) return;
+  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+    if (SKIP_KEY.test(key)) continue;
+    if (value && typeof value === 'object' && !Array.isArray(value)) collectPlainFields(value, raw, depth + 1);
+    else if ((typeof value === 'string' || typeof value === 'number') && String(value).length <= 64 && !(key in raw)) {
+      if (String(value) !== '') raw[key] = String(value);
+    }
+  }
+}
+
+/** A "forward"/"reverse" value under any direction-like key, at any depth. */
+export function findDirection(obj: unknown, depth = 0): 'forward' | 'reverse' | null {
+  if (!obj || typeof obj !== 'object' || depth > 3) return null;
+  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+    if (typeof value === 'string' && /direction/i.test(key)) {
+      const v = value.trim().toLowerCase();
+      if (v === 'forward' || v === 'reverse') return v;
+    } else if (value && typeof value === 'object') {
+      const found = findDirection(value, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 export function parseSearchResponse(json: unknown): SearchPage {
   const result: SearchResult = (json as { EventSearchResult?: SearchResult } | null)?.EventSearchResult ?? {};
   const targets = Array.isArray(result.Targets) ? result.Targets : [];
@@ -76,11 +107,8 @@ export function parseSearchResponse(json: unknown): SearchPage {
     const at = new Date(t?.alarmStartTime ?? t?.startTime ?? '');
     if (!plateNorm || plateNorm === 'UNKNOWN' || Number.isNaN(at.getTime()) || t?.channel == null) continue;
 
-    const vehicle = t.vehicleMatchResult ?? {};
     const raw: Record<string, string> = { catchUp: 'true', eventType: String(t.eventType ?? 'vehicleMatchResult') };
-    for (const key of ['vehicleLogo', 'vehicleColor', 'vehicleType', 'plateColor']) {
-      if (vehicle[key]) raw[key] = String(vehicle[key]);
-    }
+    collectPlainFields(t, raw);
 
     reads.push({
       plate,
@@ -88,7 +116,7 @@ export function parseSearchResponse(json: unknown): SearchPage {
       channelId: String(t.channel),
       channelName: null,
       occurredAt: at.toISOString(),
-      cameraDirection: null,
+      cameraDirection: findDirection(t),
       confidence: null,
       eventType: 'vehicleMatchResult',
       raw,

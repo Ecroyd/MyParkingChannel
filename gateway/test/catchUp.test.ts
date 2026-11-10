@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSearchBody, parseSearchResponse, searchReads, toNvrTime } from '../src/catchUp.ts';
+import { buildSearchBody, parseSearchResponse, searchReads, toNvrTime, findDirection } from '../src/catchUp.ts';
 import { DigestClient } from '../src/digest.ts';
 
 // Same shape as the site NVR's eventRecordSearch response (captured 30 Oct 2026); plates and
@@ -159,4 +159,14 @@ test('the every-minute sweep queues new stored reads once and overlaps the previ
     await engine.stop();
     nvr.close();
   }
+});
+
+test('stored reads pick up a travel direction when the NVR includes one', () => {
+  const t = { ...target(1, 2, 'HU60AAA', '2026-11-10T07:12:00+00:00'), ANPRMatchResult: { licensePlate: 'HU60AAA', direction: 'Reverse' } };
+  const [r] = parseSearchResponse({ EventSearchResult: { responseStatusStrg: 'OK', numOfMatches: 1, Targets: [t] } }).reads;
+  assert.equal(r.cameraDirection, 'reverse');
+  assert.equal(r.raw.direction, 'Reverse');
+  assert.equal(r.raw.pictureUrl, undefined);
+  assert.equal(findDirection({ a: { vehicleDirection: 'forward' } }), 'forward');
+  assert.equal(findDirection({ direction: 'unknown' }), null);
 });

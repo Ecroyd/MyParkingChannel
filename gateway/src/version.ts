@@ -2,7 +2,7 @@
 // gateway-v<this> (the release workflow refuses a tag that does not match) and auto-update
 // compares against it.
 
-export const GATEWAY_VERSION = '0.2.0';
+export const GATEWAY_VERSION = '0.2.1';
 
 /** "0.10.1" > "0.9.3". Missing or malformed parts count as 0. */
 export function compareVersions(a: string, b: string): number {

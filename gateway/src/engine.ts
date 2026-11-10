@@ -12,7 +12,7 @@ import { searchReads } from './catchUp.ts';
 import type { GatewayConfig } from './config.ts';
 import { log } from './log.ts';
 import { NvrClient } from './nvr.ts';
-import { resolveDirection, toCapturePayload } from './pipeline.ts';
+import { countDirection, resolveDirection, toCapturePayload, type DirectionCounts } from './pipeline.ts';
 import { ReadQueue } from './queue.ts';
 import { CloudSender } from './sender.ts';
 
@@ -36,6 +36,7 @@ const SWEEP_AFTER_MS = 10 * MINUTE;
 const STATE_LAST_ALIVE = 'last_alive_at';
 const STATE_CATCH_UP_FROM = 'catch_up_from';
 const STATE_SWEPT_UNTIL = 'swept_until';
+const STATE_DIRECTION_COUNTS = 'camera_direction_counts';
 
 export type EngineStatus = {
   running: boolean;
@@ -215,11 +216,26 @@ export class Engine {
     }
   }
 
+  private directionCountsCache: DirectionCounts | null = null;
+
+  /** Per-camera forward/reverse counts, kept in the queue database so they survive restarts. */
+  private directionCounts(queue: NonNullable<typeof this.queue>): DirectionCounts {
+    if (!this.directionCountsCache) {
+      try {
+        this.directionCountsCache = JSON.parse(queue.getState(STATE_DIRECTION_COUNTS) ?? '{}') as DirectionCounts;
+      } catch {
+        this.directionCountsCache = {};
+      }
+    }
+    return this.directionCountsCache;
+  }
+
   /** Shared by live reads and catch-up. Returns true when the read was queued. */
   private handleRead(read: AnprRead): boolean {
     const queue = this.queue;
     if (!queue) return false;
-    const direction = resolveDirection(read, this.config);
+    const counts = this.directionCounts(queue);
+    const direction = resolveDirection(read, this.config, counts);
     if (!direction) {
       if (!this.warnedChannels.has(read.channelId)) {
         this.warnedChannels.add(read.channelId);
@@ -229,6 +245,10 @@ export class Engine {
     }
     if (!queue.recordRead(read.plateNorm, read.channelId, Date.parse(read.occurredAt), this.config.dedupeSeconds * 1000)) {
       return false;
+    }
+    if (read.cameraDirection) {
+      countDirection(counts, read);
+      queue.setState(STATE_DIRECTION_COUNTS, JSON.stringify(counts));
     }
 
     this.rollDay();

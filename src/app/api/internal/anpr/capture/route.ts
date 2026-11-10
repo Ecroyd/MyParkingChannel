@@ -16,6 +16,9 @@ import { authenticateGatewayRequest, touchGatewayDevice } from '@/lib/anpr/gatew
 // Where the read came from (gate_events.source). Defaults to 'videofit' for the existing relay.
 const SOURCE_RE = /^[a-z0-9_-]{1,32}$/;
 
+// An unmatched departure may close a never-arrived booking that ended up to this long ago.
+const OPEN_STAY_UNARRIVED_MS = 7 * 24 * 60 * 60 * 1000;
+
 /**
  * Compute event_hash = sha256(tenantId|plate_norm|occurred_at|direction|camera_id|lane)
  */
@@ -216,6 +219,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Staff vehicles are logged and labelled, never matched to a customer booking.
+    const { data: staffVehicle, error: staffError } = await supabase
+      .from('staff_vehicles')
+      .select('id, description')
+      .eq('tenant_id', tenantId)
+      .eq('plate', plateNorm)
+      .eq('is_active', true)
+      .limit(1)
+      .maybeSingle();
+    if (staffError) console.error('[ANPR Capture] Staff vehicle lookup failed:', staffError);
+    if (staffVehicle) {
+      const staffReason = staffVehicle.description ? `staff vehicle: ${staffVehicle.description}` : 'staff vehicle';
+      await supabase
+        .from('gate_events')
+        .update({ processed_at: new Date().toISOString(), result: 'allow', reason: staffReason })
+        .eq('id', insertedEvent.id);
+      return NextResponse.json({ ok: true, duplicate: false, eventId: insertedEvent.id, bookingId: null, result: 'allow', reason: staffReason });
+    }
+
     // Match booking by tenant + plate_norm + overlap window (±6h around start/end)
     const windowStart = new Date(occurredAt.getTime() - 6 * 60 * 60 * 1000); // -6 hours
     const windowEnd = new Date(occurredAt.getTime() + 6 * 60 * 60 * 1000); // +6 hours
@@ -240,14 +262,16 @@ export async function POST(req: NextRequest) {
     let matchedBooking = pickCaptureBooking(bookings ?? [], plateNorm, body.direction, occurredAt);
 
     // Overstay: a departure more than 6h after the booked end falls outside the window above.
-    // Check the vehicle out of the most recent booking it arrived on and never left.
+    // Check the vehicle out of the most recent booking it never left: one it arrived on, or one
+    // that ended in the last week (the car may have come in before ANPR recorded arrivals).
     if (!matchedBooking && body.direction === 'out') {
+      const recentEnd = new Date(occurredAt.getTime() - OPEN_STAY_UNARRIVED_MS).toISOString();
       const { data: openStays, error: openStayError } = await supabase
         .from('bookings')
         .select('id, start_at, end_at, status, arrived_at, departed_at, ops_status, plate')
         .eq('tenant_id', tenantId)
         .ilike('plate', platePattern)
-        .not('arrived_at', 'is', null)
+        .or(`arrived_at.not.is.null,end_at.gte.${recentEnd}`)
         .is('departed_at', null)
         .lte('start_at', occurredAtIso)
         .neq('status', 'cancelled')

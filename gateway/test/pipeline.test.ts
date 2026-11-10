@@ -104,3 +104,30 @@ test('config: requires cloud settings for run, not for probe; validates device i
     /MPC_DEVICE_ID/
   );
 });
+
+test('direction: a car reversing in through the exit camera is an arrival', () => {
+  const channelDirections = parseDirectionMap('CHANNEL_DIRECTIONS', '1:in,2:out');
+  const cfg = { channelDirections, cameraDirections: new Map() };
+  assert.equal(resolveDirection({ ...read, channelId: '2', cameraDirection: 'reverse' }, cfg), 'in');
+  assert.equal(resolveDirection({ ...read, channelId: '2', cameraDirection: 'forward' }, cfg), 'out');
+  assert.equal(resolveDirection({ ...read, channelId: '2', cameraDirection: null }, cfg), 'out');
+  assert.equal(resolveDirection({ ...read, channelId: '1', cameraDirection: 'reverse' }, cfg), 'in');
+});
+
+test('direction: learns each camera’s normal travel direction, so wrong-way cars flip both ways', async () => {
+  const { countDirection } = await import('../src/pipeline.ts');
+  const channelDirections = parseDirectionMap('CHANNEL_DIRECTIONS', '1:in,2:out');
+  const cfg = { channelDirections, cameraDirections: new Map() };
+  const counts = {};
+  // Entrance camera happens to call arrivals "reverse"; exit camera calls departures "forward".
+  for (let i = 0; i < 12; i++) {
+    countDirection(counts, { ...read, channelId: '1', cameraDirection: 'reverse' });
+    countDirection(counts, { ...read, channelId: '2', cameraDirection: 'forward' });
+  }
+  assert.equal(resolveDirection({ ...read, channelId: '1', cameraDirection: 'reverse' }, cfg, counts), 'in');
+  assert.equal(resolveDirection({ ...read, channelId: '1', cameraDirection: 'forward' }, cfg, counts), 'out'); // left via entrance
+  assert.equal(resolveDirection({ ...read, channelId: '2', cameraDirection: 'forward' }, cfg, counts), 'out');
+  assert.equal(resolveDirection({ ...read, channelId: '2', cameraDirection: 'reverse' }, cfg, counts), 'in'); // came in via exit
+  // Not enough history yet on the entrance: keep the camera's configured direction.
+  assert.equal(resolveDirection({ ...read, channelId: '1', cameraDirection: 'forward' }, cfg, {}), 'in');
+});
