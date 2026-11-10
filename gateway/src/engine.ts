@@ -1,5 +1,10 @@
-// The gateway proper: live alertStream reads + catch-up after gaps → durable queue → /capture,
-// plus the heartbeat. Startable and stoppable so the set-up page can restart it with new settings.
+// The gateway proper: plate reads → durable queue → /capture, plus the heartbeat. Reads come
+// three ways, all deduplicated by the queue's seen table:
+//   - the sweep: every minute, search the NVR's stored reads for the last few minutes. This is
+//     the dependable path (the search format is verified on the site NVR; the live stream did not
+//     deliver plates there), at the cost of up to a minute's delay;
+//   - the live alertStream, instant when the NVR pushes plate events;
+//   - catch-up after a gap (PC off or asleep, network drop), for up to 3 days back. Startable and stoppable so the set-up page can restart it with new settings.
 
 import { join } from 'node:path';
 import { parseAnprNotification, type AnprRead } from './anprEvent.ts';
@@ -20,9 +25,17 @@ const CATCH_UP_MAX_MS = 3 * 24 * 60 * MINUTE;
 const ALIVE_WRITE_MS = 30_000;
 /** A reconnect after less than this is not treated as a gap. */
 const GAP_THRESHOLD_MS = 15_000;
+const SWEEP_EVERY_MS = 60_000;
+/**
+ * Each sweep re-reads this far before the previous one and this far past now, so reads the NVR
+ * files late, or an NVR clock a few minutes off this PC's, are still caught. Repeats are dropped.
+ */
+const SWEEP_BEFORE_MS = 15 * MINUTE;
+const SWEEP_AFTER_MS = 10 * MINUTE;
 
 const STATE_LAST_ALIVE = 'last_alive_at';
 const STATE_CATCH_UP_FROM = 'catch_up_from';
+const STATE_SWEPT_UNTIL = 'swept_until';
 
 export type EngineStatus = {
   running: boolean;
@@ -33,7 +46,20 @@ export type EngineStatus = {
   sentToday: number;
   pending: number;
   startedAt: string | null;
+  /** The most recent catch-up search after a gap. */
+  lastCatchUp: { at: string; reads: number; queued: number } | null;
+  catchUpError: string | null;
+  /** Reads waiting for a catch-up search (a gap was seen and not yet searched). */
+  catchUpPending: boolean;
+  /** NVR channel -> direction, as configured. */
+  cameras: Record<string, string>;
+  /** The last successful sweep of the NVR's stored reads. */
+  lastSweepAt: string | null;
+  sweepError: string | null;
 };
+
+/** Status pushes on recorder connect/disconnect, at most this often. */
+const STATUS_PUSH_MS = 30_000;
 
 export class Engine {
   private readonly config: GatewayConfig;
@@ -46,10 +72,12 @@ export class Engine {
   private loop: Promise<void> | null = null;
   private draining = false;
   private catchingUp = false;
+  private sweeping = false;
   private lastAliveWrite = 0;
   private readonly warnedChannels = new Set<string>();
   private readonly channels: number[];
   private statusDay = '';
+  private lastStatusPush = 0;
   private readonly state: EngineStatus = {
     running: false,
     nvrConnected: false,
@@ -59,19 +87,51 @@ export class Engine {
     sentToday: 0,
     pending: 0,
     startedAt: null,
+    lastCatchUp: null,
+    catchUpError: null,
+    catchUpPending: false,
+    cameras: {},
+    lastSweepAt: null,
+    sweepError: null,
   };
 
-  constructor(config: GatewayConfig, opts: { dryRun?: boolean } = {}) {
+  /** Extra fields for the status (and heartbeat), e.g. the allow-list sync's. */
+  private readonly extraStatus: () => Record<string, unknown>;
+
+  constructor(config: GatewayConfig, opts: { dryRun?: boolean; extraStatus?: () => Record<string, unknown> } = {}) {
     this.config = config;
     this.dryRun = opts.dryRun ?? false;
+    this.extraStatus = opts.extraStatus ?? (() => ({}));
     this.nvr = new NvrClient(config.nvrUrl, config.nvrUsername, config.nvrPassword);
     this.sender = new CloudSender(config);
     this.channels = [...config.channelDirections.keys()].map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    this.state.cameras = Object.fromEntries(config.channelDirections);
   }
 
-  status(): EngineStatus {
+  status(): EngineStatus & Record<string, unknown> {
     this.rollDay();
-    return { ...this.state, pending: this.queue?.pendingCount() ?? 0 };
+    return {
+      ...this.extraStatus(),
+      ...this.state,
+      pending: this.queue?.pendingCount() ?? 0,
+      catchUpPending: Number(this.queue?.getState(STATE_CATCH_UP_FROM)) > 0,
+    };
+  }
+
+  /** For the allow-list sync, which uses the same My Parking Channel credentials. */
+  cloud(): CloudSender {
+    return this.sender;
+  }
+
+  private heartbeat(): void {
+    if (this.dryRun) return;
+    this.lastStatusPush = Date.now();
+    void this.sender.heartbeat(this.status());
+  }
+
+  /** Tell My Parking Channel promptly when the recorder connection changes. */
+  private pushStatus(): void {
+    if (Date.now() - this.lastStatusPush >= STATUS_PUSH_MS) this.heartbeat();
   }
 
   start(): void {
@@ -96,11 +156,13 @@ export class Engine {
     if (this.channels.length === 0) log.warn('Catch-up disabled: it needs numeric NVR channels in the channel map.');
 
     this.timers.push(setInterval(() => void this.catchUp(), 5 * MINUTE));
+    this.timers.push(setInterval(() => void this.sweep(), SWEEP_EVERY_MS));
+    void this.sweep();
     if (!this.dryRun) {
       this.timers.push(setInterval(() => void this.drain(), 5000));
-      this.timers.push(setInterval(() => void this.sender.heartbeat(), config.heartbeatSeconds * 1000));
+      this.timers.push(setInterval(() => this.heartbeat(), config.heartbeatSeconds * 1000));
       this.timers.push(setInterval(() => this.queue?.pruneSeen(CATCH_UP_MAX_MS + 24 * 60 * MINUTE), 60 * MINUTE));
-      void this.sender.heartbeat();
+      this.heartbeat();
       void this.drain();
     }
 
@@ -121,6 +183,7 @@ export class Engine {
                 ? `Can't reach the recorder at ${config.nvrUrl}. Check this computer is on the car park network.`
                 : err.message;
             }
+            this.pushStatus();
           },
         }
       )
@@ -224,7 +287,41 @@ export class Engine {
     }
     this.lastAliveWrite = 0;
     this.markAlive();
+    this.pushStatus();
     void this.catchUp();
+  }
+
+  /**
+   * Search the NVR's stored reads since the last sweep. The first sweep of an existing install
+   * starts from its oldest remembered read, so reads the live stream missed since set-up are
+   * recovered; a new install starts from now.
+   */
+  async sweep(nowMs = Date.now()): Promise<void> {
+    const queue = this.queue;
+    if (!queue || this.sweeping || this.channels.length === 0) return;
+    this.sweeping = true;
+    try {
+      let from = Number(queue.getState(STATE_SWEPT_UNTIL));
+      if (!(from > 0)) from = (queue.earliestSeen() ?? nowMs) - CATCH_UP_MARGIN_MS;
+      from = Math.max(from - SWEEP_BEFORE_MS, nowMs - CATCH_UP_MAX_MS);
+      const reads = await searchReads(this.nvr.http, new Date(from), new Date(nowMs + SWEEP_AFTER_MS), this.channels);
+      let queued = 0;
+      for (const read of reads) {
+        delete read.raw.catchUp;
+        read.raw.sweep = 'true';
+        if (this.handleRead(read)) queued++;
+      }
+      if (this.queue) this.queue.setState(STATE_SWEPT_UNTIL, String(nowMs));
+      if (queued > 0) log.info(`Sweep: ${queued} new plate reads from the NVR`);
+      this.state.lastSweepAt = new Date(nowMs).toISOString();
+      this.state.sweepError = null;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (this.state.sweepError !== message) log.warn('Sweep of the NVR\'s stored reads failed; will retry', message);
+      this.state.sweepError = message;
+    } finally {
+      this.sweeping = false;
+    }
   }
 
   private async catchUp(): Promise<void> {
@@ -242,7 +339,10 @@ export class Engine {
         this.queue.setState(STATE_CATCH_UP_FROM, '0');
       }
       log.info(`Catch-up ${new Date(fromMs).toISOString()} → now: ${reads.length} stored reads, ${recovered} were missed and are now queued`);
+      this.state.lastCatchUp = { at: new Date().toISOString(), reads: reads.length, queued: recovered };
+      this.state.catchUpError = null;
     } catch (err) {
+      this.state.catchUpError = err instanceof Error ? err.message : String(err);
       log.warn('Catch-up search failed; will retry', err);
     } finally {
       this.catchingUp = false;

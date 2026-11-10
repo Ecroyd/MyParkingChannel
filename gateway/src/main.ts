@@ -7,7 +7,7 @@
 // In development: `node src/main.ts …` with the same arguments.
 
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseAnprNotification } from './anprEvent.ts';
@@ -17,7 +17,17 @@ import { Engine } from './engine.ts';
 import { initLogFile, log } from './log.ts';
 import { NvrClient } from './nvr.ts';
 import { GatewayApp, UI_PORT } from './ui/server.ts';
-import { buildInstallScript, defaultWindowsDataDir, launchElevatedInstall } from './windowsInstall.ts';
+import { loadSettings } from './settings.ts';
+import { cleanUpOldExe, Updater } from './updater.ts';
+import { compareVersions, GATEWAY_VERSION } from './version.ts';
+import {
+  buildInstallScript,
+  buildTaskRefreshScript,
+  defaultWindowsDataDir,
+  launchElevatedInstall,
+  runPowerShell,
+  TASK_NAME,
+} from './windowsInstall.ts';
 
 /** True for the single-file mpc-gateway.exe; false when run as `node src/main.ts`. */
 const PACKAGED = !/^node(\.exe)?$/i.test(basename(process.execPath));
@@ -27,6 +37,66 @@ const IS_WINDOWS = process.platform === 'win32';
 function option(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
+}
+
+const HOUR = 3_600_000;
+/** Marks a startup task already given the repeat trigger (see buildTaskRefreshScript). */
+const TASK_REFRESHED_FILE = 'task-refreshed-v2';
+
+/** Start a URL after this process has gone (the page needs the background gateway to be back). */
+function openBrowserLater(url: string, seconds: number): void {
+  if (!IS_WINDOWS) return openBrowser(url);
+  spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', `Start-Sleep -Seconds ${seconds}; Start-Process '${url}'`], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  }).unref();
+}
+
+/** Version of the gateway already serving the page; null for builds before 0.2.0 (no version). */
+async function runningVersion(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${url}/api/state`, { headers: { 'x-mpc-gateway': '1' }, signal: AbortSignal.timeout(5000) });
+    const state = (await res.json()) as { version?: unknown };
+    return typeof state.version === 'string' ? state.version : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The background (Windows service) copy keeps itself current: removes the exe an update left
+ * behind, gives an older startup task its repeat trigger, and checks for releases every 6 hours.
+ */
+function startServiceMaintenance(dataDir: string, onUpdated: () => Promise<void>): Updater | null {
+  if (!PACKAGED || !IS_WINDOWS) return null;
+  try {
+    cleanUpOldExe(process.execPath);
+  } catch (err) {
+    log.warn('Could not remove the previous version', err);
+  }
+
+  const marker = join(dataDir, TASK_REFRESHED_FILE);
+  if (!existsSync(marker)) {
+    runPowerShell(buildTaskRefreshScript())
+      .then(() => {
+        writeFileSync(marker, new Date().toISOString());
+        log.info('Startup task updated: it now also starts at sign-in and every 5 minutes if stopped');
+      })
+      .catch((err) => log.warn('Could not update the startup task', err));
+  }
+
+  if (loadSettings(dataDir)?.autoUpdate === false) {
+    log.info('Auto-update is turned off in settings.json');
+    return null;
+  }
+  const updater = new Updater(process.execPath);
+  const check = async () => {
+    if (await updater.checkAndInstall()) await onUpdated();
+  };
+  setTimeout(() => void check(), 2 * 60_000);
+  setInterval(() => void check(), 6 * HOUR);
+  return updater;
 }
 
 function openBrowser(url: string): void {
@@ -59,10 +129,24 @@ async function runApp(args: string[]): Promise<void> {
 
   const url = `http://127.0.0.1:${port}`;
   let app: GatewayApp;
+  let updater: Updater | null = null;
   const shutdown = async () => {
     await app.stopEngine();
     await app.close();
     process.exit(0);
+  };
+  const installElevated = () => {
+    const launch = PACKAGED ? [process.execPath] : [process.execPath, fileURLToPath(import.meta.url)];
+    return launchElevatedInstall(
+      buildInstallScript({
+        installDir: defaultWindowsDataDir(),
+        dataDir,
+        launch,
+        packagedExe: PACKAGED ? process.execPath : null,
+        waitForPid: process.pid,
+        port,
+      })
+    );
   };
 
   app = new GatewayApp({
@@ -72,30 +156,47 @@ async function runApp(args: string[]): Promise<void> {
     dryRun,
     canInstall: IS_WINDOWS && !service,
     install: async () => {
-      const launch = PACKAGED ? [process.execPath] : [process.execPath, fileURLToPath(import.meta.url)];
-      await launchElevatedInstall(
-        buildInstallScript({
-          installDir: defaultWindowsDataDir(),
-          dataDir,
-          launch,
-          packagedExe: PACKAGED ? process.execPath : null,
-          waitForPid: process.pid,
-          port,
-        })
-      );
+      await installElevated();
       log.info('Handing over to the background service');
       setTimeout(() => void shutdown(), 500);
     },
+    updateStatus: () => updater?.status ?? { lastCheckAt: null, latestVersion: null, lastError: null },
   });
 
   if (!(await app.listen())) {
-    // Another copy (usually the background service) already owns the page.
-    log.info(`The gateway is already running; opening ${url}`);
-    if (!noBrowser) openBrowser(url);
+    // Another copy (usually the background service) already owns the page. If it is an older
+    // version, this download is an upgrade: install it over the background copy (one UAC prompt).
+    const running = await runningVersion(url);
+    if (PACKAGED && IS_WINDOWS && !service && (running === null || compareVersions(GATEWAY_VERSION, running) > 0)) {
+      log.info(`Upgrading the background gateway from ${running ?? 'an older version'} to ${GATEWAY_VERSION}`);
+      try {
+        await installElevated();
+        if (!noBrowser) openBrowserLater(url, 15);
+      } catch (err) {
+        log.warn('Upgrade not installed', err);
+        if (!noBrowser) openBrowser(url);
+      }
+    } else {
+      log.info(`The gateway is already running; opening ${url}`);
+      if (!noBrowser) openBrowser(url);
+    }
     setTimeout(() => process.exit(0), 1000);
     return;
   }
 
+  if (service) {
+    updater = startServiceMaintenance(dataDir, async () => {
+      // Ask for the new exe straight away; the task's 5-minute repeat is the fallback.
+      spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', `Start-Sleep -Seconds 5; Start-ScheduledTask -TaskName '${TASK_NAME}'`], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      }).unref();
+      await shutdown();
+    });
+  }
+
+  log.info(`Gateway ${GATEWAY_VERSION}${service ? ' (background)' : ''}`);
   await app.applySettings();
   if (!noBrowser) openBrowser(url);
   process.on('SIGINT', () => void shutdown());

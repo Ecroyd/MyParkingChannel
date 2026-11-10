@@ -29,6 +29,15 @@ jobs:
       - name: Tests
         run: node --test "test/*.test.ts"
 
+      # Installed gateways update themselves to the newest gateway-v* release by comparing versions,
+      # so the tag must match the version built into the exe.
+      - name: Tag matches the gateway version
+        if: startsWith(github.ref, 'refs/tags/gateway-v')
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path src/version.ts -Pattern "GATEWAY_VERSION = '([^']+)'").Matches[0].Groups[1].Value
+          if ("gateway-v$version" -ne "${{ github.ref_name }}") { throw "Tag ${{ github.ref_name }} does not match src/version.ts ($version)" }
+
       - name: Build mpc-gateway.exe
         run: node scripts/build-exe.mjs
 
@@ -45,16 +54,24 @@ jobs:
           if ($r.Content -notmatch '"phase":"pair"') { throw "Unexpected state: $($r.Content)" }
           if ($r.Content -notmatch '"canInstall":true') { throw "Background install not offered on Windows: $($r.Content)" }
 
+      - name: Checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 dist\mpc-gateway.exe).Hash.ToLower()
+          Set-Content -Path dist\mpc-gateway.exe.sha256 -Value "$hash  mpc-gateway.exe" -NoNewline -Encoding ascii
+
       - uses: actions/upload-artifact@v4
         with:
           name: mpc-gateway
-          path: gateway/dist/mpc-gateway.exe
+          path: |
+            gateway/dist/mpc-gateway.exe
+            gateway/dist/mpc-gateway.exe.sha256
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/gateway-v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
-          gh release create "${{ github.ref_name }}" dist/mpc-gateway.exe
+          gh release create "${{ github.ref_name }}" dist/mpc-gateway.exe dist/mpc-gateway.exe.sha256
           --title "ANPR gateway ${{ github.ref_name }}"
-          --notes "Windows gateway for My Parking Channel. Install it from Admin → Settings → ANPR → On-site gateway. Windows may warn that the app is unrecognised: click More info → Run anyway."
+          --notes "Windows gateway for My Parking Channel. Install it from Admin → Settings → ANPR → On-site gateway. Windows may warn that the app is unrecognised: click More info → Run anyway. Installed gateways (0.2.0 and later) update themselves to this release within a few hours."

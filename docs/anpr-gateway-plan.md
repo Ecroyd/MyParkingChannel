@@ -1,6 +1,6 @@
 # Fly Parks Exeter — ANPR gateway plan
 
-Status: plan, not started. Written 30 Oct 2026 after a remote survey of the site over Tailscale.
+Written 30 Oct 2026 after a remote survey of the site over Tailscale. Phase 1 is live in a shadow run (from 9 Nov 2026); phase 2 is built and awaiting an on-site test.
 
 ## Goal and phasing
 
@@ -89,15 +89,48 @@ Reads show up in Admin → ANPR → Events, and arrivals and departures reach th
 
 ---
 
-## Phase 2: barrier control (later)
+### Shadow run findings (10 Nov 2026)
 
-Outline only; it gets a detailed plan once phase 1 is stable.
+- Gateway 0.1.0 installed on Nic's PC on 9 Nov. It stayed connected to the NVR's `alertStream` overnight but received **no plate events**; the only read (EK25GSO, 14:54) came from the catch-up search when it moved to the background. Cars passing since were not recorded.
+- Gateway 0.2.0 therefore **searches the NVR's stored reads every minute** (the search verified on 30 Oct) instead of relying on the live stream, and recovers everything since set-up on its first run.
+- Still worth checking on site: whether the cameras' plate events are linked to "Notify Surveillance Center" on the NVR, which is what feeds the live stream.
 
-- **Already built:** `GET /outbox` (5-minute lease; `plate`, `valid_from`, `valid_until`, `action: upsert|delete`), `POST /outbox/ack` (failures requeue), `GET /snapshot` and `GET /staff-vehicles` for reconciliation. Bookings already enqueue outbox rows (`src/lib/videofit/bookingSync.ts`).
-- **Gateway addition:** poll the outbox and write plates, with their start and end dates, to both cameras' allow-lists (up to 10,000 plates, dates supported). Acknowledge once both cameras accept. Reconcile nightly from the snapshot.
-- **Technical risk to settle first:** the NVR must pass ISAPI list management through to the PoE cameras. If it doesn't, the gateway needs a route to `192.168.254.0/24` (a spare NVR PoE port with a static address, or NVR port forwarding).
-- **Enforcement switch (on site, with Cameron):** on D1 and D2, untick the relays and Wiegand under **Others** and **Blocklist** and keep them under **Allowlist**. Rollback is re-ticking Others.
-- **To confirm beforehand:** which relay drives which barrier, what the Wiegand output is wired to, whether "open for everyone" is deliberate today, and what happens for unbooked or unread vehicles (the QR/intercom route).
+## Phase 2: barrier control
+
+Status: **built (gateway 0.2.0), not yet tested on site.** Nothing changes at the barrier until the camera linkage is switched (step 4 below).
+
+### How it works
+
+- **The camera decides.** Booked plates sit in each ANPR camera's own allow-list with validity dates, so the barrier opens instantly for expected cars, whether or not the gateway PC or the internet is up at that moment. The gateway only keeps the list current.
+- **Desired-state sync, not a queue.** Every 5 minutes the gateway fetches the whole list from `GET /api/internal/anpr/allowlist` (gateway key auth; built by `src/lib/anpr/allowList.ts`) and makes each camera match it. The older outbox (`/outbox`, `/outbox/ack`, `/snapshot`) is a leased queue for the Videofit relay, so a second consumer would steal its items; it is left as it is.
+- **What is on the list:** bookings that aren't cancelled or departed, from **12 h before start to 12 h after end**, up to **7 days ahead**; cars that arrived and haven't left stay allowed (at least 2 days ahead) however overdue, so they can always get out; active staff vehicles for a year. One entry per plate, widest window. The camera holds **dates only** (London days), so a booking is valid all day on its start and end dates.
+- **Only its own plates.** The gateway remembers what it added per camera (`allowlist.db`) and only ever removes those; entries typed into the camera by hand are left alone. Every 6 hours it reads each camera back and re-adds anything missing.
+- **Fails safe:** if the list can't be fetched nothing changes on the cameras; a sync that would remove more than half of its plates at once (and more than 20) is refused and shown as an error.
+- **PC switched off overnight:** the cameras keep working from what they already hold, and because the list runs a week ahead almost every booking is already there. Only bookings made, changed or cancelled while the PC is off wait until it is back on. Those cars need the intercom/QR route until then, or a PC that stays on.
+- **Visible remotely:** the heartbeat reports plates expected, plates on each camera, last sync and errors; Admin → Settings → ANPR → On-site gateway shows it.
+
+### Camera calls (to verify on site)
+
+| Operation | Call | Source |
+|---|---|---|
+| Read the list | `POST /ISAPI/Traffic/channels/1/searchLPListAudit` (`LPListAuditSearchDescription`, paged; result has `id`, `LicensePlate`, `type` = `whitelist`/`blackList`) | Hikvision "How to integrate with Hikvision LPR function via ISAPI" |
+| Add / re-date | `PUT /ISAPI/Traffic/channels/1/licensePlateAuditData/record?format=json` with `LicensePlateInfoList[]` (`LicensePlate`, `listType: whiteList`, `effectiveStartDate`, `effectiveTime`) | **Unverified**: best-known 7-series format |
+| Delete | `PUT /ISAPI/Traffic/channels/1/DelLicensePlateAuditData?format=json` with `{ "id": [...] }` | **Unverified**: community reports |
+
+All three live in `gateway/src/allowList.ts` (`CameraAllowList`). If the add or delete call is wrong, capture the real requests from the camera's own web page (Configuration → Road Traffic → Allowlist, browser dev tools) and adjust that class; nothing else depends on the format.
+
+### Reaching the cameras
+
+D1 and D2 sit on the NVR's PoE network (`192.168.254.0/24`), not the LAN. The plan is the NVR's **Virtual Host** (Configuration → Network → Advanced → Other; the NVR reboots), which serves each PoE camera's HTTP interface at `http://192.168.1.88:65001`, `:65002`, … in channel order. If ISAPI calls don't pass through it, the fallback is a LAN route to `192.168.254.0/24` (a static route via the NVR, or a PC on a spare PoE port with a static address).
+
+### Turning it on (on site, with Cameron)
+
+1. Enable Virtual Host on the NVR and note D1's and D2's ports (the camera management page links them).
+2. Gateway page → **Barrier allow-list → Set up**: enter both camera addresses (blank login = the CCTV login) and click **Test cameras**. The test adds plate `MPCTEST1`, finds it as an allow-list entry, deletes it and confirms it is gone, showing each raw response. **Turn on** is only offered after a clean test.
+3. Watch for a day: each camera's allow-list (camera web page) should hold today's and the coming week's bookings, and Admin should show the sync healthy.
+4. **Enforcement switch:** on D1 and D2, untick the relays and Wiegand under **Others** and **Blocklist** and keep them under **Allowlist**. Rollback is re-ticking **Others**. Until this step the barrier behaves exactly as today.
+
+**To confirm beforehand:** which relay drives which barrier, what the Wiegand output is wired to, whether "open for everyone" is deliberate today, whether the exit should also be allow-list only (overdue cars stay listed, but unbooked visitors would then be held at the exit), and what happens for unbooked or unread vehicles (the QR/intercom route).
 
 ## Housekeeping found during the survey
 

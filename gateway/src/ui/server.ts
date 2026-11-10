@@ -5,16 +5,21 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { hostname } from 'node:os';
+import { join } from 'node:path';
+import { AllowListSync, testCamera, type CameraConfig } from '../allowList.ts';
 import { countStoredReads } from '../catchUp.ts';
 import { configFromSettings, DEFAULT_MPC_BASE_URL, type Direction } from '../config.ts';
 import { Engine } from '../engine.ts';
 import { log } from '../log.ts';
 import { NvrClient } from '../nvr.ts';
-import { isComplete, loadSettings, saveSettings, type PartialSettings } from '../settings.ts';
+import { isComplete, loadSettings, saveSettings, type AllowListSettings, type PartialSettings } from '../settings.ts';
+import type { UpdaterStatus } from '../updater.ts';
+import { GATEWAY_VERSION } from '../version.ts';
 import { PAGE_HTML } from './page.ts';
 
 export const UI_PORT = 5719;
 const MAX_BODY = 64 * 1024;
+const ALLOW_LIST_SYNC_MS = 5 * 60_000;
 
 export type AppContext = {
   dataDir: string;
@@ -25,6 +30,8 @@ export type AppContext = {
   canInstall: boolean;
   install: () => Promise<void>;
   dryRun: boolean;
+  /** Auto-update state, when this copy updates itself (the Windows service). */
+  updateStatus?: () => UpdaterStatus;
 };
 
 class HttpError extends Error {
@@ -38,6 +45,8 @@ class HttpError extends Error {
 export class GatewayApp {
   private readonly ctx: AppContext;
   private engine: Engine | null = null;
+  private allowSync: AllowListSync | null = null;
+  private allowTimers: NodeJS.Timeout[] = [];
   private server: Server | null = null;
 
   constructor(ctx: AppContext) {
@@ -50,15 +59,34 @@ export class GatewayApp {
 
   /** (Re)start the engine from saved settings; stop it when they are incomplete. */
   async applySettings(): Promise<void> {
-    await this.engine?.stop();
-    this.engine = null;
+    await this.stopEngine();
     const s = this.settings();
     if (!isComplete(s)) return;
-    this.engine = new Engine(configFromSettings(s, this.ctx.dataDir), { dryRun: this.ctx.dryRun });
+    this.engine = new Engine(configFromSettings(s, this.ctx.dataDir), {
+      dryRun: this.ctx.dryRun,
+      extraStatus: () => ({ allowList: this.allowSync?.status() ?? null }),
+    });
     this.engine.start();
+
+    const cameras = resolveCameras(s.allowList, s);
+    if (s.allowList?.enabled && cameras.length > 0 && !this.ctx.dryRun) {
+      const engine = this.engine;
+      const sync = new AllowListSync({
+        cameras,
+        storePath: join(this.ctx.dataDir, 'allowlist.db'),
+        fetchDesired: () => engine.cloud().allowList(),
+      });
+      this.allowSync = sync;
+      this.allowTimers.push(setTimeout(() => void sync.run(), 30_000), setInterval(() => void sync.run(), ALLOW_LIST_SYNC_MS));
+      log.info(`Allow-list sync on for ${cameras.map((c) => c.name).join(', ')}`);
+    }
   }
 
   async stopEngine(): Promise<void> {
+    this.allowTimers.forEach((t) => clearTimeout(t));
+    this.allowTimers = [];
+    this.allowSync?.close();
+    this.allowSync = null;
     await this.engine?.stop();
     this.engine = null;
   }
@@ -136,10 +164,16 @@ export class GatewayApp {
           nvrUsername: s.nvrUsername ?? null,
           hasNvrPassword: Boolean(s.nvrPassword),
           channelDirections: s.channelDirections ?? {},
+          allowList: {
+            enabled: Boolean(s.allowList?.enabled),
+            cameras: (s.allowList?.cameras ?? []).map((c) => ({ name: c.name, url: c.url, username: c.username, hasPassword: Boolean(c.password) })),
+          },
         },
         status: this.engine?.status() ?? null,
         service: this.ctx.service,
         canInstall: this.ctx.canInstall,
+        version: GATEWAY_VERSION,
+        update: this.ctx.updateStatus?.() ?? null,
       };
     }
 
@@ -228,6 +262,27 @@ export class GatewayApp {
       return { ok: true };
     }
 
+    if (method === 'POST' && (path === '/api/allowlist/test' || path === '/api/allowlist/save')) {
+      if (this.phase(s) !== 'running') throw new HttpError(400, 'Finish set-up first');
+      const cameras = mergeCameraInput(body?.cameras, s.allowList?.cameras ?? []);
+      if (cameras.length === 0) throw new HttpError(400, 'Enter at least one camera address');
+
+      if (path === '/api/allowlist/test') {
+        const results = [];
+        for (const camera of resolveCameras({ enabled: true, cameras }, s)) {
+          results.push({ name: camera.name, steps: await testCamera(camera) });
+        }
+        return { results };
+      }
+
+      const enabled = body?.enabled === true;
+      await this.stopEngine();
+      saveSettings(this.ctx.dataDir, { ...this.settings(), allowList: { enabled, cameras } });
+      log.info(`Allow-list settings saved: sync ${enabled ? 'on' : 'off'}`, cameras.map((c) => `${c.name} ${c.url}`));
+      await this.applySettings();
+      return { ok: true };
+    }
+
     if (method === 'POST' && path === '/api/install') {
       if (!this.ctx.canInstall) throw new HttpError(400, 'Background mode is only available on Windows');
       if (!isComplete(this.settings())) throw new HttpError(400, 'Finish set-up first');
@@ -237,6 +292,35 @@ export class GatewayApp {
 
     throw new HttpError(404, 'Not found');
   }
+}
+
+/** Cameras as typed on the page; a blank password keeps the saved one. */
+function mergeCameraInput(input: unknown, saved: AllowListSettings['cameras']): AllowListSettings['cameras'] {
+  if (!Array.isArray(input)) return saved;
+  const out: AllowListSettings['cameras'] = [];
+  for (const raw of input.slice(0, 8) as Record<string, unknown>[]) {
+    const url = normaliseNvrUrl(String(raw?.url ?? ''));
+    if (!url) continue;
+    const name = String(raw?.name ?? '').trim() || `Camera ${out.length + 1}`;
+    const previous = saved.find((c) => c.url === url || c.name === name);
+    out.push({
+      name,
+      url,
+      username: String(raw?.username ?? '').trim(),
+      password: String(raw?.password ?? '') || previous?.password || '',
+    });
+  }
+  return out;
+}
+
+/** A blank camera login means "the same as the recorder's" (the NVR usually sets its cameras up so). */
+function resolveCameras(list: AllowListSettings | undefined, s: PartialSettings): CameraConfig[] {
+  return (list?.cameras ?? []).map((c) => ({
+    name: c.name,
+    url: c.url,
+    username: c.username || s.nvrUsername || '',
+    password: c.password || (c.username ? '' : s.nvrPassword || ''),
+  }));
 }
 
 function normaliseNvrUrl(input: string): string {

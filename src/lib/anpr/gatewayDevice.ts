@@ -88,6 +88,38 @@ export function isGatewayDeviceId(value: unknown): value is string {
   return typeof value === 'string' && UUID_RE.test(value);
 }
 
+/** Largest status object a gateway may store (it is a small summary, never images or logs). */
+const MAX_GATEWAY_STATUS_BYTES = 8 * 1024;
+
+/**
+ * Store what a gateway reported about itself (version and status) on its gate device. Best
+ * effort: never fails the heartbeat, and is skipped quietly until the columns exist
+ * (migration 20261110_gate_devices_gateway_status).
+ */
+export async function recordGatewayStatus(
+  supabase: SupabaseClient,
+  tenantId: string,
+  deviceId: string,
+  report: { version?: unknown; status?: unknown },
+  at: Date = new Date()
+): Promise<void> {
+  const version = typeof report.version === 'string' ? report.version.slice(0, 32) : null;
+  const status =
+    report.status && typeof report.status === 'object' && JSON.stringify(report.status).length <= MAX_GATEWAY_STATUS_BYTES
+      ? report.status
+      : null;
+  if (!version && !status) return;
+
+  const { error } = await supabase
+    .from('gate_devices')
+    .update({ gateway_version: version, gateway_status: status, gateway_status_at: at.toISOString() })
+    .eq('id', deviceId)
+    .eq('tenant_id', tenantId);
+  if (error && error.code !== '42703' && error.code !== 'PGRST204') {
+    console.error('[ANPR gateway] status update failed:', error);
+  }
+}
+
 export type TouchGatewayDeviceResult =
   | { ok: true }
   | { ok: false; status: 400 | 404 | 500; error: string };

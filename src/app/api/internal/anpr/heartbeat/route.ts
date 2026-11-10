@@ -1,11 +1,12 @@
 // POST /api/internal/anpr/heartbeat - Keep an on-site ANPR gateway marked connected
 // Authenticated with the gateway's own key (x-gateway-key; the device is implied), or with the
 // tenant relay token plus body { device_id }. Reads sent to /capture also count, so this only
-// matters when no vehicles are moving.
+// matters when no vehicles are moving. Gateways 0.2.0+ also send { version, status }, kept on the
+// device for the admin ANPR page.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { authenticateGatewayRequest, touchGatewayDevice } from '@/lib/anpr/gatewayDevice';
+import { authenticateGatewayRequest, recordGatewayStatus, touchGatewayDevice } from '@/lib/anpr/gatewayDevice';
 
 export async function POST(req: NextRequest) {
   try {
@@ -24,6 +25,7 @@ export async function POST(req: NextRequest) {
     if (!touched.ok) {
       return NextResponse.json({ error: touched.error }, { status: touched.status });
     }
+    await recordGatewayStatus(supabase, tenantId, deviceId, { version: body?.version, status: body?.status });
 
     return NextResponse.json({ ok: true });
   } catch (error: unknown) {

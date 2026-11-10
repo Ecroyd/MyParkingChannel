@@ -9,7 +9,15 @@ Background and the overall plan: [`docs/anpr-gateway-plan.md`](../docs/anpr-gate
 
 ## How it works
 
-- One long-lived ISAPI `alertStream` connection to the NVR (digest auth), reconnecting with backoff.
+- **Every minute it searches the NVR's stored plate reads** (the catch-up search below) for the
+  last few minutes, overlapping the previous search by 15 minutes. This is the dependable path:
+  at Fly Parks the live stream connected but delivered no plates (10 Nov 2026), while the search
+  format is verified there. Reads reach My Parking Channel within about a minute. On an existing
+  install the first sweep goes back to its oldest remembered read (up to 3 days), so reads missed
+  since set-up are recovered.
+- One long-lived ISAPI `alertStream` connection to the NVR (digest auth), reconnecting with
+  backoff: instant reads when the NVR pushes plate events. The same plate on the same camera
+  within `DEDUPE_SECONDS` counts once, whichever path found it.
 - ANPR notifications (XML or JSON) become plate reads. Heartbeats, images and non-plate events
   are ignored.
 - **Direction** comes from `CHANNEL_DIRECTIONS` (NVR channel → `in`/`out`), or from the camera's own
@@ -24,13 +32,28 @@ Background and the overall plan: [`docs/anpr-gateway-plan.md`](../docs/anpr-gate
   queues the reads it missed. Every read, live or caught up, is remembered in a `seen` table, so
   overlap never double-counts. A search that fails is retried every 5 minutes until it succeeds.
   Stored reads carry no travel direction, so catch-up uses `CHANNEL_DIRECTIONS`.
-- A **heartbeat** every `HEARTBEAT_SECONDS` keeps the gateway's gate device "connected" on the admin
-  ANPR page.
+- A **heartbeat** every `HEARTBEAT_SECONDS` keeps the gateway's gate device "connected" and reports
+  its status (version, recorder connected, plates today, waiting to send, last plate, last
+  catch-up, last error). It is also sent within 30 seconds of the recorder connecting or dropping.
+  Admin → Settings → ANPR → On-site gateway shows it per gateway (needs migration
+  `20261110_gate_devices_gateway_status`; without it the heartbeat still works, status is skipped).
+- **Auto-update** (background copy on Windows, 0.2.0+): 2 minutes after start and every 6 hours it
+  checks GitHub for the newest `gateway-v*` release. A newer one is downloaded, checked against the
+  release's `mpc-gateway.exe.sha256`, swapped in (the running exe becomes `mpc-gateway.old.exe`,
+  removed on the next start) and started. Set `"autoUpdate": false` in `settings.json` to turn it off.
 - Logs go to the console and `data/gateway.log` (rotated at 5 MB).
+
+- **Barrier allow-list (Phase 2, off until turned on):** every 5 minutes it fetches the plates
+  expected over the next week from `GET /api/internal/anpr/allowlist` and makes each ANPR camera's
+  allow-list match, so the camera opens the barrier for booked cars by itself. Only plates the
+  gateway added are removed; the camera is read back every 6 hours. Set up and tested from the
+  gateway page (**Barrier allow-list → Set up → Test cameras**). The add and delete calls are not
+  yet verified on the Fly Parks cameras; see [`docs/anpr-gateway-plan.md`](../docs/anpr-gateway-plan.md#phase-2-barrier-control).
 
 ## Install at a car park (the normal way)
 
-1. **Computer:** wired to the same network as the recorder (NVR), always on, sleep set to Never.
+1. **Computer:** on the same network as the recorder (NVR). It can be switched off or asleep at
+   night: the gateway starts again by itself and catches up on what it missed (up to 3 days).
 2. **My Parking Channel → Admin → Settings → ANPR → On-site gateway:** click **Download gateway
    (Windows)** on that computer and run `mpc-gateway.exe`. If Windows says it protected your PC,
    click **More info → Run anyway** (the app isn't code-signed yet).
@@ -44,6 +67,8 @@ Background and the overall plan: [`docs/anpr-gateway-plan.md`](../docs/anpr-gate
    4. **Run in the background:** one Windows permission prompt. The gateway moves to
       `C:\ProgramData\MPC Gateway` (locked to SYSTEM and Administrators, because it holds the NVR
       password and device key), and from then on runs as a startup task, with nobody signed in.
+      The task fires at start-up, at sign-in and every 5 minutes (a no-op while it is running), so
+      it also comes back after Fast Startup, sleep, a crash or an update.
 4. Opening `mpc-gateway.exe` again (or `http://127.0.0.1:5719`) shows the status page: connection,
    plates today, sent today and waiting to send. Cameras and the recorder login can be changed there.
 5. **Shadow run:** for a few days, compare Admin → ANPR → Events with the NVR's own vehicle
@@ -56,11 +81,18 @@ gateway sends it. Check the NVR accepts that many event connections; some models
 To remove it: Administrator PowerShell, `Unregister-ScheduledTask -TaskName 'MPC ANPR Gateway'`, then
 delete `C:\ProgramData\MPC Gateway`.
 
+**Upgrading a 0.1.0 install** (it can't update itself): download the new `mpc-gateway.exe` on
+that computer and open it. Seeing an older gateway already running, it installs itself over it
+(one Windows permission prompt, settings kept) and opens the status page. From 0.2.0 on, updates
+are automatic.
+
 ## Releasing
 
-Push a tag like `gateway-v0.1.0`. `.github/workflows/gateway-release.yml` runs the tests, builds
+Bump `GATEWAY_VERSION` in `src/version.ts` and `version` in `package.json`, then push a tag like
+`gateway-v0.2.0` (the workflow refuses a tag that doesn't match). `.github/workflows/gateway-release.yml` runs the tests, builds
 `mpc-gateway.exe` on Windows (Node 24 single executable application: no Node install needed on site),
-smoke-tests it and publishes a GitHub release. The admin download button points at
+smoke-tests it and publishes a GitHub release with the exe and its SHA-256. Installed gateways pick
+it up within about 6 hours, so treat a release as a deploy to every site. The admin download button points at
 `releases/latest/download/mpc-gateway.exe` (override with `ANPR_GATEWAY_DOWNLOAD_URL`).
 `node scripts/build-exe.mjs` builds the same thing locally for the current OS.
 

@@ -60,6 +60,8 @@ export const ADMIN_ANPR_CONFIG_SELECT = [
 ].join(', ');
 
 export const ADMIN_GATE_DEVICES_SELECT = 'id, name, kind, status, last_seen';
+/** Plus what on-site gateways report (needs migration 20261110_gate_devices_gateway_status). */
+export const ADMIN_GATE_DEVICES_WITH_GATEWAY_SELECT = `${ADMIN_GATE_DEVICES_SELECT}, gateway_version, gateway_status, gateway_status_at`;
 
 export function assertAnprListSelectSafe(select: string): void {
   const normalized = select.trim();

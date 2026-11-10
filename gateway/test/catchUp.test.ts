@@ -96,3 +96,67 @@ test('pages through results and returns them oldest first', async () => {
   assert.deepEqual(bodies.map((b) => b.EventSearchDescription.searchResultPosition), [0, 2]);
   assert.equal(bodies[0].EventSearchDescription.searchID, bodies[1].EventSearchDescription.searchID);
 });
+
+test('the every-minute sweep queues new stored reads once and overlaps the previous window', async () => {
+  const { createServer } = await import('node:http');
+  const { Engine } = await import('../src/engine.ts');
+  const windows: { startTime: string; endTime: string }[] = [];
+  let stored = [target(1, 1, 'AB12CDE', '2026-11-10T09:00:05+00:00')];
+  const nvr = createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      if (req.url?.startsWith('/ISAPI/ContentMgmt/eventRecordSearch')) {
+        windows.push(JSON.parse(body).EventSearchDescription.timeSpanList[0]);
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ EventSearchResult: { responseStatusStrg: 'OK', numOfMatches: stored.length, Targets: stored } }));
+      } else {
+        res.writeHead(404).end();
+      }
+    });
+  });
+  await new Promise<void>((r) => nvr.listen(0, '127.0.0.1', () => r()));
+  const port = (nvr.address() as { port: number }).port;
+  const engine = new Engine(
+    {
+      nvrUrl: `http://127.0.0.1:${port}`,
+      nvrUsername: 'u',
+      nvrPassword: 'p',
+      mpcBaseUrl: 'http://127.0.0.1:9',
+      tenantId: 't',
+      deviceKey: 'k',
+      relayToken: null,
+      deviceId: null,
+      channelDirections: new Map([['1', 'in' as const]]),
+      cameraDirections: new Map(),
+      dedupeSeconds: 60,
+      heartbeatSeconds: 300,
+      dataDir: '.',
+    },
+    { dryRun: true }
+  );
+  try {
+    engine.start();
+    // start() runs a first sweep straight away; let it finish so the ones below aren't skipped.
+    for (let i = 0; i < 100 && !engine.status().lastSweepAt; i++) await new Promise((r) => setTimeout(r, 10));
+    const t0 = Date.parse('2026-11-10T09:01:00Z');
+    await engine.sweep(t0);
+    await engine.sweep(t0 + 60_000);
+    assert.equal(engine.status().readsToday, 1); // same stored read twice → counted once
+    assert.equal(engine.status().lastRead?.plate, 'AB12CDE');
+    assert.equal(engine.status().lastRead?.catchUp, false);
+
+    stored = [...stored, target(2, 1, 'XY34ZZZ', '2026-11-10T09:01:30+00:00')];
+    await engine.sweep(t0 + 120_000);
+    assert.equal(engine.status().readsToday, 2);
+    assert.equal(engine.status().sweepError, null);
+
+    // Each sweep starts 15 minutes before the previous one ended, and looks 10 minutes ahead.
+    const last = windows[windows.length - 1];
+    assert.equal(last.startTime, toNvrTime(new Date(t0 + 60_000 - 15 * 60_000)));
+    assert.equal(last.endTime, toNvrTime(new Date(t0 + 120_000 + 10 * 60_000)));
+  } finally {
+    await engine.stop();
+    nvr.close();
+  }
+});

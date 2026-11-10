@@ -17,6 +17,16 @@ export type StoredSettings = {
   nvrPassword: string;
   /** NVR channel id -> direction, e.g. { "1": "in", "2": "out" } */
   channelDirections: Record<string, Direction>;
+  /** false turns off auto-update (background gateway only). Absent = on. */
+  autoUpdate?: boolean;
+  /** Phase 2: keep these cameras' allow-lists in step with My Parking Channel. */
+  allowList?: AllowListSettings;
+};
+
+export type AllowListSettings = {
+  enabled: boolean;
+  /** Each ANPR camera, e.g. through the NVR's Virtual Host (http://192.168.1.88:65001). */
+  cameras: { name: string; url: string; username: string; password: string }[];
 };
 
 /** Pairing done but NVR not saved yet. */

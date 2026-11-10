@@ -2,7 +2,9 @@
 // gateway's gate device marked connected (POST /api/internal/anpr/heartbeat).
 
 import type { GatewayConfig } from './config.ts';
+import type { AllowEntry } from './allowList.ts';
 import { log } from './log.ts';
+import { GATEWAY_VERSION } from './version.ts';
 import type { CapturePayload, ReadQueue } from './queue.ts';
 
 export type SendOutcome =
@@ -91,10 +93,26 @@ export class CloudSender {
     return delivered;
   }
 
-  async heartbeat(): Promise<void> {
+  /** Keeps the device "connected" and reports how the gateway is doing (shown in admin). */
+  /** The plates the cameras' allow-lists should hold (Phase 2). Throws on any failure. */
+  async allowList(): Promise<AllowEntry[]> {
+    const auth: Record<string, string> = this.config.deviceKey
+      ? { 'x-gateway-key': this.config.deviceKey }
+      : { 'x-relay-token': this.config.relayToken ?? '' };
+    const res = await this.fetchImpl(this.url('allowlist'), { headers: auth, signal: AbortSignal.timeout(30_000) });
+    const json = (await res.json().catch(() => null)) as { entries?: unknown } | null;
+    if (!res.ok || !Array.isArray(json?.entries)) throw new Error(`Allow-list request returned HTTP ${res.status}`);
+    return (json.entries as AllowEntry[]).filter((e) => e && typeof e.plate === 'string' && e.validFrom && e.validUntil);
+  }
+
+  async heartbeat(gatewayStatus?: unknown): Promise<void> {
     if (!this.config.deviceId && !this.config.deviceKey) return;
     try {
-      const { status, json } = await this.post('heartbeat', { device_id: this.config.deviceId });
+      const { status, json } = await this.post('heartbeat', {
+        device_id: this.config.deviceId,
+        version: GATEWAY_VERSION,
+        status: gatewayStatus ?? null,
+      });
       if (status !== 200) log.warn(`Heartbeat failed (${status})`, json);
     } catch (err) {
       log.warn('Heartbeat failed', err);

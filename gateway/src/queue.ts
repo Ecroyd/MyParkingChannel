@@ -61,11 +61,22 @@ export class ReadQueue {
    * barrier keeps its window open, and catch-up can overlap live reads without double counting.
    */
   recordRead(plateNorm: string, channel: string, atMs: number, windowMs: number): boolean {
+    // The sweep returns the same stored read every minute for a while: don't pile up copies.
+    const exact = this.db
+      .prepare('SELECT 1 AS x FROM seen WHERE plate_norm = ? AND channel = ? AND at_ms = ? LIMIT 1')
+      .get(plateNorm, channel, atMs);
+    if (exact) return false;
     const nearby = this.db
       .prepare('SELECT 1 AS x FROM seen WHERE plate_norm = ? AND channel = ? AND at_ms BETWEEN ? AND ? LIMIT 1')
       .get(plateNorm, channel, atMs - windowMs, atMs + windowMs);
     this.db.prepare('INSERT INTO seen (plate_norm, channel, at_ms) VALUES (?, ?, ?)').run(plateNorm, channel, atMs);
     return !nearby;
+  }
+
+  /** When the oldest remembered read happened, or null (a new install). */
+  earliestSeen(): number | null {
+    const v = this.db.prepare('SELECT MIN(at_ms) AS t FROM seen').get()?.t;
+    return v == null ? null : Number(v);
   }
 
   /** Forget reads older than the given age (catch-up never looks back further). */

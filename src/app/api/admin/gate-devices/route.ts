@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveAuthorizedAnprAdmin } from '@/lib/anpr/adminAnprAuth';
-import { ADMIN_GATE_DEVICES_SELECT } from '@/lib/anpr/adminAnprEventsSelect';
+import { ADMIN_GATE_DEVICES_SELECT, ADMIN_GATE_DEVICES_WITH_GATEWAY_SELECT } from '@/lib/anpr/adminAnprEventsSelect';
 import { withQueryTelemetryContext } from '@/lib/supabase/queryTelemetry';
 
 export async function GET(req: NextRequest) {
@@ -16,11 +16,14 @@ export async function GET(req: NextRequest) {
 
         const { tenantId, adminClient } = auth.ctx;
 
-        const { data: devices, error: devicesError } = await adminClient
-          .from('gate_devices')
-          .select(ADMIN_GATE_DEVICES_SELECT)
-          .eq('tenant_id', tenantId)
-          .order('created_at', { ascending: false });
+        const list = (select: string) =>
+          adminClient.from('gate_devices').select(select).eq('tenant_id', tenantId).order('created_at', { ascending: false });
+
+        // Gateway status columns arrive with a migration; until then list devices without them.
+        let { data: devices, error: devicesError } = await list(ADMIN_GATE_DEVICES_WITH_GATEWAY_SELECT);
+        if (devicesError?.code === '42703') {
+          ({ data: devices, error: devicesError } = await list(ADMIN_GATE_DEVICES_SELECT));
+        }
 
         if (devicesError) {
           console.error('Error fetching gate devices:', devicesError);
