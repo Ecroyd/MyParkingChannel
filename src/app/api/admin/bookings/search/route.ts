@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { createServerClient } from '@/lib/supabase/server';
+import { escapePostgrestFilterValue, plateSearchPattern } from '@/lib/bookings/adminBookingListParams';
 
 export async function GET(req: NextRequest) {
   try {
@@ -44,14 +45,16 @@ export async function GET(req: NextRequest) {
     }
 
     // Search bookings by reference, customer name, email, or plate
-    const searchTerm = q.trim();
+    const searchTerm = escapePostgrestFilterValue(q.trim());
+    const platePattern = plateSearchPattern(q.trim());
     const { data: bookings, error } = await adminClient
       .from('bookings')
       .select('id, reference, customer_name, customer_email, plate, start_at, end_at')
       .eq('tenant_id', tenantId)
       .neq('status', 'cancelled')
       .or(
-        `reference.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%,customer_email.ilike.%${searchTerm}%,plate.ilike.%${searchTerm}%`
+        `reference.ilike.%${searchTerm}%,customer_name.ilike.%${searchTerm}%,customer_email.ilike.%${searchTerm}%,plate.ilike.%${searchTerm}%` +
+          (platePattern ? `,plate.ilike.${platePattern}` : '')
       )
       .order('start_at', { ascending: false })
       .limit(20);

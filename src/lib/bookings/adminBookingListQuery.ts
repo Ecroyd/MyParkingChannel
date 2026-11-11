@@ -3,6 +3,7 @@ import {
   type AdminBookingListQueryParams,
   type AdminBookingListResponse,
   escapePostgrestFilterValue,
+  plateSearchPattern,
 } from '@/lib/bookings/adminBookingListParams';
 import {
   ADMIN_BOOKING_LIST_SELECT,
@@ -52,6 +53,7 @@ function applyListFilters(
   if (params.search) {
     const term = escapePostgrestFilterValue(params.search);
     const pattern = `%${term}%`;
+    const platePattern = plateSearchPattern(params.search);
     q = q.or(
       [
         `reference.ilike.${pattern}`,
@@ -59,6 +61,8 @@ function applyListFilters(
         `customer_email.ilike.${pattern}`,
         `customer_phone.ilike.${pattern}`,
         `plate.ilike.${pattern}`,
+        // Plates are saved with or without spaces; match either way.
+        ...(platePattern ? [`plate.ilike.${platePattern}`] : []),
       ].join(',')
     );
   }

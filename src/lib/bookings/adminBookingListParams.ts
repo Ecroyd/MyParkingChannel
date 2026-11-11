@@ -203,3 +203,16 @@ export function resolveAdminBookingListParams(
 export function escapePostgrestFilterValue(value: string): string {
   return value.replace(/[,()]/g, '').replace(/%/g, '');
 }
+
+/**
+ * An ilike pattern that finds a number plate however it was typed on the booking, so a search
+ * for "WG15TZZ" also matches "WG15 TZZ" and "wg15-tzz". Only for plate-like terms (letters and
+ * digits, 2–10 characters once spaces and dashes are dropped); null otherwise.
+ */
+export function plateSearchPattern(value: string): string | null {
+  const compact = value.replace(/[\s\-.]/g, '');
+  if (!/^[A-Za-z0-9]{2,10}$/.test(compact) || !/\d/.test(compact) || !/[A-Za-z]/.test(compact)) {
+    return null;
+  }
+  return `%${compact.split('').join('%')}%`;
+}

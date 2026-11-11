@@ -6,6 +6,7 @@ import {
   enforceMaxPageSize,
   getDefaultAdminBookingDateWindow,
   resolveAdminBookingListParams,
+  plateSearchPattern,
   addCalendarDays,
   DEFAULT_DATE_LOOKBACK_DAYS,
   DEFAULT_DATE_LOOKAHEAD_DAYS,
@@ -87,5 +88,17 @@ describe('admin booking list params', () => {
     expect(params.sortField).toBe('created_at');
     expect(params.sortDirection).toBe('desc');
     expect(params.usedDefaultDateWindow).toBe(false);
+  });
+});
+
+describe('plateSearchPattern', () => {
+  it('matches a plate however it was spaced', () => {
+    expect(plateSearchPattern('WG15TZZ')).toBe('%W%G%1%5%T%Z%Z%');
+    expect(plateSearchPattern('wg15 tzz')).toBe('%w%g%1%5%t%z%z%');
+  });
+  it('is null for terms that are not plates', () => {
+    expect(plateSearchPattern('Smith')).toBeNull();
+    expect(plateSearchPattern('jo@example.com')).toBeNull();
+    expect(plateSearchPattern('12345')).toBeNull();
   });
 });

@@ -9,6 +9,7 @@ import DateRangeModal from '@/components/admin/DateRangeModal';
 import { useDateRangeModal } from '@/hooks/useDateRangeModal';
 import { Calendar, Plus } from 'lucide-react';
 import ExemptionsPanel from '../_components/ExemptionsPanel';
+import UnmatchedVehiclesPanel from '../_components/UnmatchedVehiclesPanel';
 import { BookingHighlightIcon } from '@/components/bookings/BookingHighlightIcon';
 import { Button } from '@/components/ui/button';
 import { useRouter } from 'next/navigation';
@@ -156,6 +157,9 @@ export default function DashboardClient({
 
       {/* Exemptions Panel */}
       <ExemptionsPanel />
+
+      {/* Cars the cameras saw with no booking */}
+      <UnmatchedVehiclesPanel />
 
       {/* Today's Arrivals and Departures */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
