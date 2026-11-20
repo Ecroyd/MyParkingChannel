@@ -606,6 +606,8 @@ export type AnprConfig = {
   has_videofit_password?: boolean;
   has_relay_token?: boolean;
   has_credentials?: boolean;
+  /** A paired gateway has reported in (read-only). */
+  has_active_gateway?: boolean;
   /** Write-only; never returned by the API after save. */
   videofit_password?: string;
   videofit_site_client_license?: number | null;

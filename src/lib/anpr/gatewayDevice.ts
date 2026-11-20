@@ -84,6 +84,25 @@ export async function verifyGatewayDeviceKey(
   return { ok: true, deviceId: data.id };
 }
 
+/**
+ * Whether a paired gateway has reported in for this tenant. Such a gateway sends gate events
+ * whether or not the ANPR "enabled" switch was ever turned on, so admin pages treat it as live.
+ */
+export async function hasActiveGateway(supabase: SupabaseClient, tenantId: string): Promise<boolean> {
+  const { count, error } = await supabase
+    .from('gate_devices')
+    .select('id', { count: 'exact', head: true })
+    .eq('tenant_id', tenantId)
+    .eq('kind', 'anpr')
+    .eq('status', 'active')
+    .not('last_seen', 'is', null);
+  if (error) {
+    console.error('[ANPR gateway] active gateway check failed:', error);
+    return false;
+  }
+  return (count ?? 0) > 0;
+}
+
 export function isGatewayDeviceId(value: unknown): value is string {
   return typeof value === 'string' && UUID_RE.test(value);
 }

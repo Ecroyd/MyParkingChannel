@@ -6,6 +6,7 @@ import {
   assertEventPollInterval,
   canPollAnprEvents,
   isAnprConfigured,
+  isAnprLive,
   resolveAnprLifecycleState,
 } from '@/lib/anpr/adminAnprLifecycle';
 import {
@@ -67,6 +68,26 @@ describe('ANPR lifecycle states', () => {
         now
       )
     ).toBe('enabled_disconnected');
+  });
+});
+
+describe('paired gateway without the enabled switch', () => {
+  it('counts as live so gate events are shown', () => {
+    expect(isAnprLive({ enabled: false, has_active_gateway: true })).toBe(true);
+    expect(isAnprLive({ enabled: false })).toBe(false);
+    expect(isAnprLive({ enabled: true })).toBe(true);
+    expect(isAnprLive(null)).toBe(false);
+  });
+
+  it('reports connected from the gateway heartbeat', () => {
+    const now = Date.now();
+    expect(
+      resolveAnprLifecycleState(
+        { enabled: false, has_active_gateway: true },
+        [{ id: '1', name: 'gateway', status: 'active', last_seen: new Date(now - 60_000).toISOString() }],
+        now
+      )
+    ).toBe('enabled_connected');
   });
 });
 

@@ -32,7 +32,9 @@ export function detectTenantFromEmail(email: {
     if (
       subjectLower.includes("flyparks") ||
       subjectLower.includes("payment successful") ||
-      subjectLower.includes("booking confirmation")
+      subjectLower.includes("booking confirmation") ||
+      // Flyparks website notification (Nov 2026): "New Website Booking: <ref>"
+      subjectLower.includes("new website booking")
     ) {
       if (email.raw_rfc822_base64) {
         try {

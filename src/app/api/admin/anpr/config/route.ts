@@ -6,6 +6,7 @@ import { resolveAuthorizedAnprAdmin } from '@/lib/anpr/adminAnprAuth';
 import { canManageSettings } from '@/lib/auth/permissions';
 import { ADMIN_ANPR_CONFIG_SELECT } from '@/lib/anpr/adminAnprEventsSelect';
 import { withQueryTelemetryContext } from '@/lib/supabase/queryTelemetry';
+import { hasActiveGateway } from '@/lib/anpr/gatewayDevice';
 
 export async function GET(req: NextRequest) {
   return withQueryTelemetryContext(
@@ -106,6 +107,7 @@ export async function GET(req: NextRequest) {
 
         const responseConfig = {
           ...mergedConfig,
+          has_active_gateway: await hasActiveGateway(adminClient, tenantId),
           // Never expose password / token material to the browser
           videofit_password: undefined,
           has_videofit_password: hasPassword,
@@ -438,6 +440,7 @@ export async function PUT(req: NextRequest) {
 
     const responseConfig = {
       ...(config as unknown as Record<string, unknown>),
+      has_active_gateway: await hasActiveGateway(adminClient, tenantId),
       videofit_password: undefined,
       has_videofit_password: Boolean(
         fetchedVideofitSecrets?.find((s) => s.key === 'videofit_password')?.value_ciphertext

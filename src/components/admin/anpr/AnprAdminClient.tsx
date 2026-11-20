@@ -10,6 +10,7 @@ import {
   assertEventPollInterval,
   canPollAnprDevices,
   canPollAnprEvents,
+  isAnprLive,
   resolveAnprLifecycleState,
   type AnprLifecycleState,
 } from '@/lib/anpr/adminAnprLifecycle';
@@ -97,7 +98,7 @@ export default function AnprAdminClient({ tenantId }: Props) {
 
   const eventsController = useRef(new AnprRequestController());
   const devicesController = useRef(new AnprRequestController());
-  const enabled = Boolean(config?.enabled);
+  const enabled = isAnprLive(config);
 
   const lifecycle = useMemo(
     () => resolveAnprLifecycleState(config, devices),
@@ -556,7 +557,7 @@ export default function AnprAdminClient({ tenantId }: Props) {
           tenantId={tenantId}
           onConfigSaved={(next) => {
             setConfig(next);
-            if (!next.enabled) {
+            if (!isAnprLive(next)) {
               setView('overview');
             }
           }}

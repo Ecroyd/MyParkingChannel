@@ -22,6 +22,8 @@ export type AnprConfigSummary = {
   videofit_mode?: string | null;
   has_credentials?: boolean;
   has_relay_token?: boolean;
+  /** A paired gateway has reported in — it sends events even if `enabled` was never switched on. */
+  has_active_gateway?: boolean;
   offline_after_minutes?: number | null;
   default_group?: string | null;
   camera_direction_map?: Record<string, string> | null;
@@ -36,7 +38,7 @@ export type AnprDeviceSummary = {
 
 export function isAnprConfigured(config: AnprConfigSummary | null | undefined): boolean {
   if (!config) return false;
-  if (config.has_credentials || config.has_relay_token) return true;
+  if (config.has_credentials || config.has_relay_token || config.has_active_gateway) return true;
   if (config.ingest_method && config.ingest_method.trim()) return true;
   if (config.videofit_api_url || config.videofit_base_url) return true;
   if (config.videofit_username) return true;
@@ -49,12 +51,17 @@ export function isAnprConfigured(config: AnprConfigSummary | null | undefined): 
   return false;
 }
 
+/** ANPR is live when switched on, or when an on-site gateway is already sending events. */
+export function isAnprLive(config: AnprConfigSummary | null | undefined): boolean {
+  return Boolean(config?.enabled || config?.has_active_gateway);
+}
+
 export function resolveAnprLifecycleState(
   config: AnprConfigSummary | null | undefined,
   devices: AnprDeviceSummary[] = [],
   nowMs: number = Date.now()
 ): AnprLifecycleState {
-  if (!config?.enabled) {
+  if (!config || !isAnprLive(config)) {
     return isAnprConfigured(config) ? 'configured_disabled' : 'not_configured';
   }
 

@@ -7,6 +7,7 @@ import {
   ANPR_EVENT_POLL_MS,
   assertEventPollInterval,
   canPollAnprEvents,
+  isAnprLive,
 } from '@/lib/anpr/adminAnprLifecycle';
 import type { AnprConfig } from '@/components/admin/anpr/AnprSettingsPanels';
 
@@ -50,7 +51,7 @@ export default function AnprEventsClient({ tenantId }: { tenantId: string }) {
   const [liveMonitoring, setLiveMonitoring] = useState(false);
   const controller = useRef(new AnprRequestController());
 
-  const enabled = Boolean(config?.enabled);
+  const enabled = isAnprLive(config);
 
   useEffect(() => {
     let cancelled = false;
