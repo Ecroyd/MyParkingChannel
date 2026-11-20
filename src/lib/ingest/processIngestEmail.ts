@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { normalizeInboundToAddress } from "@/lib/ingest/normalizeInboundToAddress";
 // @ts-ignore - mailparser types may not be fully compatible
 import { simpleParser } from "mailparser";
 import { isImageFile } from "@/lib/ingest/fileTypeUtils";
@@ -76,11 +77,13 @@ async function resolveTenantFromInbox(
   supabase: SupabaseClient,
   toAddress: string | null | undefined
 ): Promise<string | null> {
-  if (!toAddress) return null;
+  // Senders type the address in any case (Flyparks forwards to BOOKINGS@…); inboxes are stored lowercase.
+  const normalized = normalizeInboundToAddress(toAddress);
+  if (!normalized) return null;
   const { data: inboxRow, error: inboxErr } = await supabase
     .from("tenant_inbound_inboxes")
     .select("tenant_id")
-    .eq("to_address", toAddress)
+    .eq("to_address", normalized)
     .maybeSingle();
   if (inboxErr) {
     console.error("[process-ingest] tenant inbox lookup failed", inboxErr);

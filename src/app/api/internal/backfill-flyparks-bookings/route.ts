@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { normalizeInboundToAddress } from "@/lib/ingest/normalizeInboundToAddress";
 import { getServiceSupabase } from "@/lib/supabase/service";
 import { upsertBookingFromFlyparksParse } from "@/lib/ingest/flyparksBookingUpsert";
 
@@ -63,7 +64,7 @@ export async function POST(req: NextRequest) {
       const { data: inboxRow, error: inboxErr } = await supabase
         .from("tenant_inbound_inboxes")
         .select("tenant_id")
-        .eq("to_address", toAddress)
+        .eq("to_address", normalizeInboundToAddress(toAddress))
         .maybeSingle();
 
       if (inboxErr || !inboxRow?.tenant_id) {

@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { normalizeInboundToAddress } from "@/lib/ingest/normalizeInboundToAddress";
 import { getServiceSupabase } from "@/lib/supabase/service";
 import {
   processIngestEmail,
@@ -66,7 +67,7 @@ export async function POST(req: Request) {
       .from("ingest_emails")
       .insert({
         received_at: receivedAt.toISOString(),
-        to_address: body.to || null,
+        to_address: normalizeInboundToAddress(body.to),
         from_address: body.from || null,
         subject: body.subject || null,
         message_id: body.message_id || null,
@@ -137,7 +138,7 @@ export async function POST(req: Request) {
       pipelineResult = await processIngestEmail(supabase, {
         emailId,
         raw_rfc822_base64: raw,
-        to_address: body.to,
+        to_address: normalizeInboundToAddress(body.to),
         from_address: body.from,
         subject: body.subject,
         message_id: body.message_id,
