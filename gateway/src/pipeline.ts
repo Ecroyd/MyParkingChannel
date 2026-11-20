@@ -67,5 +67,6 @@ export function toCapturePayload(
     source: 'hikvision',
     ...(config.deviceId ? { device_id: config.deviceId } : {}),
     raw: read.raw,
+    ...(read.pictures ? { pictures: read.pictures } : {}),
   };
 }

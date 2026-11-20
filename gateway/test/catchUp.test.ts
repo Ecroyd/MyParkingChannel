@@ -61,7 +61,7 @@ test('parses stored reads', () => {
   assert.equal(page.total, 5);
   assert.equal(page.reads.length, 1); // unreadable plate dropped
   assert.deepEqual(
-    { ...page.reads[0], raw: undefined },
+    { ...page.reads[0], raw: undefined, pictures: undefined },
     {
       plate: 'AB12CDE',
       plateNorm: 'AB12CDE',
@@ -72,6 +72,7 @@ test('parses stored reads', () => {
       confidence: null,
       eventType: 'vehicleMatchResult',
       raw: undefined,
+      pictures: undefined,
     }
   );
   assert.equal(page.reads[0].raw.catchUp, 'true');
@@ -169,4 +170,12 @@ test('stored reads pick up a travel direction when the NVR includes one', () => 
   assert.equal(r.raw.pictureUrl, undefined);
   assert.equal(findDirection({ a: { vehicleDirection: 'forward' } }), 'forward');
   assert.equal(findDirection({ direction: 'unknown' }), null);
+});
+
+test('stored reads keep their picture links (close-up and full shot) out of raw', () => {
+  const [r] = parseSearchResponse({
+    EventSearchResult: { responseStatusStrg: 'OK', numOfMatches: 1, Targets: [target(1, 2, 'AB12CDE', '2026-11-20T12:00:00+00:00')] },
+  }).reads;
+  assert.deepEqual(r.pictures, { plate: 'http://example.invalid/small', scene: 'http://example.invalid/pic' });
+  assert.equal(r.raw.smallPictureUrl, undefined);
 });

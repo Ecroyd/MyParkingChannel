@@ -13,6 +13,7 @@ import {
   type DismissedPlate,
   type UnmatchedRead,
 } from '@/lib/anpr/unmatchedVehicles';
+import { fetchPictureFlags } from '@/lib/anpr/pictures';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_READS = 1000;
@@ -68,12 +69,16 @@ export async function GET(req: NextRequest) {
       dismissed.error ? [] : ((dismissed.data ?? []) as DismissedPlate[])
     );
 
+    // Picture of each car's latest read, when the site keeps pictures.
+    const flags = await fetchPictureFlags(adminClient, tenantId, vehicles.map((v) => v.lastEventId));
+    const withPictures = vehicles.map((v) => ({ ...v, picture: flags.get(v.lastEventId) ?? null }));
+
     return NextResponse.json({
       range,
       since: since.toISOString(),
       hasAnpr: (anyRead.data?.length ?? 0) > 0,
       truncated: (reads.data?.length ?? 0) >= MAX_READS,
-      vehicles,
+      vehicles: withPictures,
     });
   } catch (error: unknown) {
     console.error('[ANPR Unmatched] Error:', error);

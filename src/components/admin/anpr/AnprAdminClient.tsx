@@ -21,6 +21,7 @@ import {
   SnapRelayPanel,
   type AnprConfig,
 } from './AnprSettingsPanels';
+import AnprPictureThumb from './AnprPictureThumb';
 
 type GateEvent = {
   id: string;
@@ -33,6 +34,7 @@ type GateEvent = {
   device_name: string;
   booking_reference: string | null;
   booking_status: string | null;
+  pictures?: { plate: boolean; scene: boolean } | null;
 };
 
 type GateDevice = {
@@ -525,7 +527,16 @@ export default function AnprAdminClient({ tenantId }: Props) {
                         <td className="px-3 py-2 whitespace-nowrap">{ev.device_name}</td>
                         <td className="px-3 py-2 whitespace-nowrap">{ev.mode}</td>
                         <td className="px-3 py-2 whitespace-nowrap font-mono">
-                          {ev.plate || (ev.qr_code ? `QR: ${ev.qr_code}` : '—')}
+                          <div className="flex items-center gap-2">
+                            <AnprPictureThumb
+                              tenantId={tenantId}
+                              eventId={ev.id}
+                              pictures={ev.pictures}
+                              label={ev.plate ?? undefined}
+                              className="h-8 w-12"
+                            />
+                            {ev.plate || (ev.qr_code ? `QR: ${ev.qr_code}` : '—')}
+                          </div>
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">
                           <span

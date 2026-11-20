@@ -132,6 +132,18 @@ D1 and D2 sit on the NVR's PoE network (`192.168.254.0/24`), not the LAN. The pl
 
 **To confirm beforehand:** which relay drives which barrier, what the Wiegand output is wired to, whether "open for everyone" is deliberate today, whether the exit should also be allow-list only (overdue cars stay listed, but unbooked visitors would then be held at the exit), and what happens for unbooked or unread vehicles (the QR/intercom route).
 
+## Pictures (branch `feat/anpr-pictures`, not released)
+
+Built on request so Fly Parks can decide whether they want it. Off for every site until switched on.
+
+- **What:** each stored read on the recorder has a close-up (`smallPictureUrl`) and a full shot (`pictureUrl`). Gateway 0.3.0 downloads both with the recorder login after the read is accepted and uploads them to `POST /api/internal/anpr/picture`. They go in the private `anpr-pictures` bucket; the gate event keeps the paths (`plate_picture_path`, `scene_picture_path`).
+- **Where they show:** a thumbnail on Admin → ANPR → Gate Events and on the dashboard "Cars without a booking" card; click for the full shot. Staff (ops role and above) only, through short-lived signed links.
+- **Retention:** `/api/internal/cron/anpr-pictures` (daily, 03:30) deletes pictures older than 90 days. Gate events are kept.
+- **Switch:** `tenant_anpr_config.capture_pictures`. The gateway learns it from the heartbeat reply (every 5 minutes) and stops if an upload is refused.
+- **To ship:** merge the branch, run `20261120_anpr_pictures.sql`, tag `gateway-v0.3.0` (the site PC updates itself within 6 hours), then set `capture_pictures = true` for the site.
+- **Unverified on site:** that the picture links download with the recorder login, which picture is which, their size, and how long the recorder keeps them. Live alertStream pictures are not handled (no live events arrive on this recorder).
+- **Before switching on:** ANPR/CCTV signage and a stated retention period (UK GDPR).
+
 ## Housekeeping found during the survey
 
 - NVR "Device Remote Configuration" was switched on during the survey (Device Access → More). Turn it off if it isn't needed.

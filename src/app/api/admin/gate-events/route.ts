@@ -10,6 +10,7 @@ import {
   assertAnprListSelectSafe,
 } from '@/lib/anpr/adminAnprEventsSelect';
 import { withQueryTelemetryContext } from '@/lib/supabase/queryTelemetry';
+import { fetchPictureFlags } from '@/lib/anpr/pictures';
 
 export async function GET(req: NextRequest) {
   return withQueryTelemetryContext(
@@ -67,7 +68,14 @@ export async function GET(req: NextRequest) {
           console.error('Error fetching anpr events:', anprRes.error);
         }
 
-        const transformedGateEvents = ((gateRes.data || []) as unknown as Record<string, unknown>[]).map((event) => {
+        const gateRows = (gateRes.data || []) as unknown as Record<string, unknown>[];
+        const pictureFlags = await fetchPictureFlags(
+          adminClient,
+          tenantId,
+          gateRows.map((e) => String(e.id))
+        );
+
+        const transformedGateEvents = gateRows.map((event) => {
           const device = Array.isArray(event.gate_devices)
             ? event.gate_devices[0]
             : event.gate_devices;
@@ -94,6 +102,7 @@ export async function GET(req: NextRequest) {
             device_name: deviceObj?.name || 'Unknown',
             booking_reference: bookingObj?.reference || null,
             booking_status: bookingObj?.status || null,
+            pictures: pictureFlags.get(String(event.id)) ?? null,
           };
         });
 

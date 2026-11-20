@@ -5,10 +5,10 @@ import type { GatewayConfig } from './config.ts';
 import type { AllowEntry } from './allowList.ts';
 import { log } from './log.ts';
 import { GATEWAY_VERSION } from './version.ts';
-import type { CapturePayload, ReadQueue } from './queue.ts';
+import type { CapturePayload, QueuedRead, ReadQueue } from './queue.ts';
 
 export type SendOutcome =
-  | { kind: 'sent'; duplicate: boolean; result?: string; bookingId?: string | null }
+  | { kind: 'sent'; duplicate: boolean; result?: string; bookingId?: string | null; eventId?: string | null }
   | { kind: 'retry'; error: string }
   | { kind: 'reject'; error: string };
 
@@ -26,6 +26,7 @@ export function classifyResponse(status: number, body: unknown): SendOutcome {
       duplicate: b.duplicate === true,
       result: typeof b.result === 'string' ? b.result : undefined,
       bookingId: typeof b.bookingId === 'string' ? b.bookingId : null,
+      eventId: typeof b.eventId === 'string' ? b.eventId : null,
     };
   }
   if (status === 400) return { kind: 'reject', error };
@@ -45,10 +46,14 @@ export class CloudSender {
     return `${this.config.mpcBaseUrl}/api/internal/anpr/${path}?tenantId=${encodeURIComponent(this.config.tenantId)}`;
   }
 
-  private async post(path: string, body: unknown): Promise<{ status: number; json: unknown }> {
-    const auth: Record<string, string> = this.config.deviceKey
+  private auth(): Record<string, string> {
+    return this.config.deviceKey
       ? { 'x-gateway-key': this.config.deviceKey }
       : { 'x-relay-token': this.config.relayToken ?? '' };
+  }
+
+  private async post(path: string, body: unknown): Promise<{ status: number; json: unknown }> {
+    const auth = this.auth();
     const res = await this.fetchImpl(this.url(path), {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...auth },
@@ -61,15 +66,44 @@ export class CloudSender {
 
   async sendCapture(payload: CapturePayload): Promise<SendOutcome> {
     try {
-      const { status, json } = await this.post('capture', payload);
+      // Picture links are the gateway's own business; /capture gets the read only.
+      const { pictures: _pictures, ...read } = payload;
+      void _pictures;
+      const { status, json } = await this.post('capture', read);
       return classifyResponse(status, json);
     } catch (err) {
       return { kind: 'retry', error: err instanceof Error ? err.message : String(err) };
     }
   }
 
+  /**
+   * Upload one picture for an accepted read (POST /picture). 'off' when the site doesn't keep
+   * pictures (409), so the caller can stop until the next heartbeat says otherwise.
+   */
+  async uploadPicture(eventId: string, kind: 'plate' | 'scene', image: Uint8Array, contentType: string): Promise<'ok' | 'off' | string> {
+    const url = `${this.url('picture')}&eventId=${encodeURIComponent(eventId)}&kind=${kind}`;
+    try {
+      const res = await this.fetchImpl(url, {
+        method: 'POST',
+        headers: { 'content-type': contentType, ...this.auth() },
+        body: image,
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (res.ok) return 'ok';
+      if (res.status === 409) return 'off';
+      const json = (await res.json().catch(() => null)) as { error?: string } | null;
+      return `HTTP ${res.status}${json?.error ? `: ${json.error}` : ''}`;
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+  }
+
   /** Send everything that is due; returns how many reads were delivered. */
-  async drain(queue: ReadQueue, batch = 25): Promise<number> {
+  async drain(
+    queue: ReadQueue,
+    batch = 25,
+    onSent?: (item: QueuedRead, outcome: Extract<SendOutcome, { kind: 'sent' }>) => Promise<void>
+  ): Promise<number> {
     let delivered = 0;
     for (const item of queue.due(batch)) {
       const outcome = await this.sendCapture(item.payload);
@@ -81,6 +115,7 @@ export class CloudSender {
           `Sent ${label}`,
           outcome.duplicate ? 'duplicate' : { result: outcome.result, bookingId: outcome.bookingId }
         );
+        if (onSent) await onSent(item, outcome).catch((err) => log.warn(`Picture upload for ${label} failed`, err));
       } else if (outcome.kind === 'reject') {
         queue.bury(item.id, outcome.error);
         log.error(`Rejected ${label}; parked in dead table`, outcome.error);
@@ -105,17 +140,23 @@ export class CloudSender {
     return (json.entries as AllowEntry[]).filter((e) => e && typeof e.plate === 'string' && e.validFrom && e.validUntil);
   }
 
-  async heartbeat(gatewayStatus?: unknown): Promise<void> {
-    if (!this.config.deviceId && !this.config.deviceKey) return;
+  /** Returns the site's feature switches from the reply ({ pictures }), or null when it failed. */
+  async heartbeat(gatewayStatus?: unknown): Promise<{ pictures: boolean } | null> {
+    if (!this.config.deviceId && !this.config.deviceKey) return null;
     try {
       const { status, json } = await this.post('heartbeat', {
         device_id: this.config.deviceId,
         version: GATEWAY_VERSION,
         status: gatewayStatus ?? null,
       });
-      if (status !== 200) log.warn(`Heartbeat failed (${status})`, json);
+      if (status !== 200) {
+        log.warn(`Heartbeat failed (${status})`, json);
+        return null;
+      }
+      return { pictures: (json as { pictures?: unknown } | null)?.pictures === true };
     } catch (err) {
       log.warn('Heartbeat failed', err);
+      return null;
     }
   }
 }

@@ -2,11 +2,13 @@
 // Authenticated with the gateway's own key (x-gateway-key; the device is implied), or with the
 // tenant relay token plus body { device_id }. Reads sent to /capture also count, so this only
 // matters when no vehicles are moving. Gateways 0.2.0+ also send { version, status }, kept on the
-// device for the admin ANPR page.
+// device for the admin ANPR page. The reply tells the gateway which optional features are on
+// for the site ({ pictures }).
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { authenticateGatewayRequest, recordGatewayStatus, touchGatewayDevice } from '@/lib/anpr/gatewayDevice';
+import { picturesEnabled } from '@/lib/anpr/pictures';
 
 export async function POST(req: NextRequest) {
   try {
@@ -27,7 +29,7 @@ export async function POST(req: NextRequest) {
     }
     await recordGatewayStatus(supabase, tenantId, deviceId, { version: body?.version, status: body?.status });
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, pictures: await picturesEnabled(supabase, tenantId) });
   } catch (error: unknown) {
     console.error('[ANPR Heartbeat] Unexpected error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

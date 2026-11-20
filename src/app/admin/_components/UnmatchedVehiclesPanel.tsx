@@ -14,6 +14,7 @@ import { useTenant } from "@/hooks/useTenant";
 import { toast } from "@/hooks/use-toast";
 import { Loader2, RefreshCw, Search, UserCheck, ArrowDownLeft, ArrowUpRight, X } from "lucide-react";
 import type { UnmatchedVehicle } from "@/lib/anpr/unmatchedVehicles";
+import AnprPictureThumb from "@/components/admin/anpr/AnprPictureThumb";
 
 const POLL_MS = 120_000;
 type Range = "today" | "7d";
@@ -29,7 +30,7 @@ function formatTime(iso: string, range: Range): string {
 export default function UnmatchedVehiclesPanel() {
   const { tenantId } = useTenant();
   const [range, setRange] = useState<Range>("today");
-  const [vehicles, setVehicles] = useState<UnmatchedVehicle[]>([]);
+  const [vehicles, setVehicles] = useState<(UnmatchedVehicle & { picture?: { plate: boolean; scene: boolean } | null })[]>([]);
   const [hasAnpr, setHasAnpr] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -164,6 +165,8 @@ export default function UnmatchedVehiclesPanel() {
             {vehicles.map((v) => (
               <li key={v.plate} className="py-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                  <AnprPictureThumb tenantId={tenantId} eventId={v.lastEventId} pictures={v.picture} label={v.plate} />
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-mono font-semibold tracking-wide bg-yellow-100 border border-yellow-300 rounded px-2 py-0.5 text-gray-900">
@@ -188,6 +191,7 @@ export default function UnmatchedVehiclesPanel() {
                         </span>
                       )}
                     </p>
+                  </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button asChild size="sm" variant="outline">

@@ -13,6 +13,8 @@ export type CapturePayload = {
   source: string;
   device_id?: string;
   raw: Record<string, string>;
+  /** Gateway-only: recorder picture links, uploaded after the read is accepted. Not sent to /capture. */
+  pictures?: { plate?: string; scene?: string };
 };
 
 export type QueuedRead = { id: number; payload: CapturePayload; attempts: number };

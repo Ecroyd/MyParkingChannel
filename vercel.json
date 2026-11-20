@@ -9,6 +9,7 @@
     { "path": "/api/internal/cron/ingest-maintenance", "schedule": "*/15 * * * *" },
     { "path": "/api/internal/cron/ingest-canary", "schedule": "0 7,19 * * *" },
     { "path": "/api/internal/suppliers/cavu/cron", "schedule": "*/15 * * * *" },
-    { "path": "/api/admin/jobs/aph/export", "schedule": "0 4 * * *" }
+    { "path": "/api/admin/jobs/aph/export", "schedule": "0 4 * * *" },
+    { "path": "/api/internal/cron/anpr-pictures", "schedule": "30 3 * * *" }
   ]
 }

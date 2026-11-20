@@ -15,7 +15,7 @@
 // fields are kept in raw so gate_events shows what the NVR actually sends.
 
 import { randomUUID } from 'node:crypto';
-import { normalizePlate, type AnprRead } from './anprEvent.ts';
+import { normalizePlate, type AnprRead, type ReadPictures } from './anprEvent.ts';
 import type { DigestClient } from './digest.ts';
 
 export const SEARCH_PATH = '/ISAPI/ContentMgmt/eventRecordSearch?format=json';
@@ -58,6 +58,8 @@ type SearchTarget = {
   alarmStartTime?: string;
   startTime?: string;
   eventType?: string;
+  pictureUrl?: string;
+  smallPictureUrl?: string;
 };
 
 type SearchResult = {
@@ -96,6 +98,17 @@ export function findDirection(obj: unknown, depth = 0): 'forward' | 'reverse' | 
   return null;
 }
 
+/** The picture links of a stored read: pictureUrl is the full shot, smallPictureUrl the close-up. */
+export function readPictures(t: SearchTarget): ReadPictures | undefined {
+  const link = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+  const pictures: ReadPictures = {};
+  const plate = link(t.smallPictureUrl);
+  const scene = link(t.pictureUrl);
+  if (plate) pictures.plate = plate;
+  if (scene) pictures.scene = scene;
+  return plate || scene ? pictures : undefined;
+}
+
 export function parseSearchResponse(json: unknown): SearchPage {
   const result: SearchResult = (json as { EventSearchResult?: SearchResult } | null)?.EventSearchResult ?? {};
   const targets = Array.isArray(result.Targets) ? result.Targets : [];
@@ -120,6 +133,7 @@ export function parseSearchResponse(json: unknown): SearchPage {
       confidence: null,
       eventType: 'vehicleMatchResult',
       raw,
+      pictures: readPictures(t),
     });
   }
 

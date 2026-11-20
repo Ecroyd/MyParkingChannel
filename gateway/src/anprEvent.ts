@@ -15,7 +15,11 @@ export type AnprRead = {
   eventType: string;
   /** Small, image-free summary kept with the gate event for debugging. */
   raw: Record<string, string>;
+  /** Links to the read's pictures on the recorder (stored reads only), for upload when enabled. */
+  pictures?: ReadPictures;
 };
+
+export type ReadPictures = { plate?: string; scene?: string };
 
 const UNREADABLE = new Set(['', 'UNKNOWN', 'NOPLATE', 'NONE']);
 

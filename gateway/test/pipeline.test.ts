@@ -87,6 +87,7 @@ test('classifies /capture responses', () => {
     duplicate: true,
     result: undefined,
     bookingId: null,
+    eventId: null,
   });
   assert.equal(classifyResponse(400, { error: 'plate is required' }).kind, 'reject');
   for (const status of [401, 403, 404, 429, 500, 503]) {

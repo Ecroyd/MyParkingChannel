@@ -12,6 +12,7 @@ import { searchReads } from './catchUp.ts';
 import type { GatewayConfig } from './config.ts';
 import { log } from './log.ts';
 import { NvrClient } from './nvr.ts';
+import { PictureUploader } from './pictures.ts';
 import { countDirection, resolveDirection, toCapturePayload, type DirectionCounts } from './pipeline.ts';
 import { ReadQueue } from './queue.ts';
 import { CloudSender } from './sender.ts';
@@ -67,6 +68,7 @@ export class Engine {
   private readonly dryRun: boolean;
   private readonly nvr: NvrClient;
   private readonly sender: CloudSender;
+  private readonly pictures: PictureUploader;
   private queue: ReadQueue | null = null;
   private stopController = new AbortController();
   private timers: NodeJS.Timeout[] = [];
@@ -105,6 +107,7 @@ export class Engine {
     this.extraStatus = opts.extraStatus ?? (() => ({}));
     this.nvr = new NvrClient(config.nvrUrl, config.nvrUsername, config.nvrPassword);
     this.sender = new CloudSender(config);
+    this.pictures = new PictureUploader(this.nvr.http, this.sender);
     this.channels = [...config.channelDirections.keys()].map(Number).filter((n) => Number.isInteger(n) && n > 0);
     this.state.cameras = Object.fromEntries(config.channelDirections);
   }
@@ -114,6 +117,7 @@ export class Engine {
     return {
       ...this.extraStatus(),
       ...this.state,
+      pictures: this.pictures.status(),
       pending: this.queue?.pendingCount() ?? 0,
       catchUpPending: Number(this.queue?.getState(STATE_CATCH_UP_FROM)) > 0,
     };
@@ -127,7 +131,9 @@ export class Engine {
   private heartbeat(): void {
     if (this.dryRun) return;
     this.lastStatusPush = Date.now();
-    void this.sender.heartbeat(this.status());
+    void this.sender.heartbeat(this.status()).then((reply) => {
+      if (reply) this.pictures.setEnabled(reply.pictures);
+    });
   }
 
   /** Tell My Parking Channel promptly when the recorder connection changes. */
@@ -272,7 +278,7 @@ export class Engine {
       for (;;) {
         const queue = this.queue;
         if (!queue || this.stopController.signal.aborted) break;
-        const sent = await this.sender.drain(queue);
+        const sent = await this.sender.drain(queue, 25, (item, outcome) => this.pictures.afterSent(item, outcome));
         this.rollDay();
         this.state.sentToday += sent;
         if (sent === 0) break;
