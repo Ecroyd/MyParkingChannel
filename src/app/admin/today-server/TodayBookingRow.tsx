@@ -17,6 +17,8 @@ import {
 import { BookingHighlightCode } from '@/types/bookings';
 import { formatBookingDateTimeForTenant } from '@/lib/datetime/parse';
 import { departureFlightDisplay } from '@/lib/ops/parkedState';
+import BookingPicturesButton from '@/components/admin/anpr/BookingPicturesButton';
+import type { BookingPictures } from '@/lib/anpr/pictures';
 
 export type TodayOpsAction =
   | 'reserved'
@@ -162,6 +164,10 @@ export type TodayBookingRowProps = {
   onSelectChange: (bookingId: string, checked: boolean) => void;
   onQuickAction: (bookingId: string, action: TodayOpsAction) => void;
   onHighlightSelect: (bookingId: string, code: BookingHighlightCode) => void;
+  /** Needed for camera pictures; no camera icon without it. */
+  tenantId?: string;
+  /** This booking's pictured camera reads, when the site keeps pictures. */
+  pictures?: BookingPictures;
 };
 
 function TodayBookingRow({
@@ -177,6 +183,8 @@ function TodayBookingRow({
   onSelectChange,
   onQuickAction,
   onHighlightSelect,
+  tenantId,
+  pictures,
 }: TodayBookingRowProps) {
   const timeField = booking.start_at;
   const timeLabel = useMemo(
@@ -281,6 +289,16 @@ function TodayBookingRow({
     </div>
   );
 
+  const cameraButton = tenantId ? (
+    <BookingPicturesButton
+      tenantId={tenantId}
+      timezone={timezone}
+      plate={booking.plate}
+      reference={booking.reference}
+      pictures={pictures}
+    />
+  ) : null;
+
   return (
     <>
       {/* Desktop/wide row — only at lg+ so resized narrow windows use the card layout below */}
@@ -335,7 +353,10 @@ function TodayBookingRow({
           <span className="font-mono text-xs font-medium tabular-nums">{booking.reference || '—'}</span>
         </td>
         <td className="px-2 py-2 align-middle cursor-pointer" onClick={handleRowClick}>
-          <PlateBadge plate={booking.plate} emphasize={plateEmphasize} />
+          <div className="flex items-center gap-1.5">
+            <PlateBadge plate={booking.plate} emphasize={plateEmphasize} />
+            {cameraButton}
+          </div>
         </td>
         <td className="px-2 py-2 align-middle whitespace-nowrap">
           <PhoneCell phone={booking.customer_phone} />
@@ -380,7 +401,10 @@ function TodayBookingRow({
                   </div>
                 </div>
               </div>
-              <PlateBadge plate={booking.plate} emphasize={plateEmphasize} />
+              <div className="flex shrink-0 items-center gap-1.5">
+                <PlateBadge plate={booking.plate} emphasize={plateEmphasize} />
+                {cameraButton}
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
               <PhoneCell phone={booking.customer_phone} />

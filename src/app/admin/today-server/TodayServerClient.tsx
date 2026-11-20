@@ -7,6 +7,7 @@ import NewBookingModal from '@/components/bookings/NewBookingModal';
 import DateRangeSelector from '@/components/admin/DateRangeSelector';
 import TodayBookingRow, { type TodayBoardBooking, type TodayOpsAction } from './TodayBookingRow';
 import type { TodayBookingRow as TodayBooking } from '@/lib/today/bookingSelect';
+import type { BookingPictures } from '@/lib/anpr/pictures';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
@@ -102,6 +103,39 @@ export default function TodayServerClient({
   const [arrivals, setArrivals] = useState(initialArrivals);
   const [departures, setDepartures] = useState(initialDepartures);
   const [currentlyParked, setCurrentlyParked] = useState(initialCurrentlyParked);
+  const [bookingPictures, setBookingPictures] = useState<Record<string, BookingPictures>>({});
+  const pictureBookingKey = useMemo(
+    () =>
+      [...new Set([...arrivals, ...departures, ...currentlyParked].map((b) => b.id))]
+        .sort()
+        .join(','),
+    [arrivals, departures, currentlyParked]
+  );
+
+  // Camera pictures for the bookings on the board (only sites that keep pictures have any).
+  useEffect(() => {
+    if (!pictureBookingKey) return;
+    let cancelled = false;
+    const load = () =>
+      fetch('/api/admin/anpr/booking-pictures', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ tenantId: tenant.id, bookingIds: pictureBookingKey.split(',') }),
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (!cancelled && data?.pictures) setBookingPictures(data.pictures);
+        })
+        .catch(() => {});
+    void load();
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') void load();
+    }, 120_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [pictureBookingKey, tenant.id]);
   const [arrivalsSort, setArrivalsSort] = useState<'closest' | 'most_recent'>('closest');
   const [departuresSort, setDeparturesSort] = useState<'closest' | 'most_recent'>('closest');
   const [parkedSort, setParkedSort] = useState<'closest' | 'most_recent'>('closest');
@@ -685,6 +719,7 @@ export default function TodayServerClient({
 
   const rowProps = useMemo(
     () => ({
+      tenantId: tenant.id,
       timezone: tenantTz,
       highlightMode,
       showHidden,
@@ -695,6 +730,7 @@ export default function TodayServerClient({
       onHighlightSelect: updateHighlight,
     }),
     [
+      tenant.id,
       tenantTz,
       highlightMode,
       showHidden,
@@ -1060,6 +1096,7 @@ export default function TodayServerClient({
                                       {...rowProps}
                                       booking={booking}
                                       section="arrivals"
+                                      pictures={bookingPictures[booking.id]}
                                       isSelected={selectedBookingIds.has(booking.id)}
                                       isPending={Boolean(pendingById[booking.id])}
                                     />
@@ -1087,6 +1124,7 @@ export default function TodayServerClient({
                                       {...rowProps}
                                       booking={booking}
                                       section="departures"
+                                      pictures={bookingPictures[booking.id]}
                                       isSelected={selectedBookingIds.has(booking.id)}
                                       isPending={Boolean(pendingById[booking.id])}
                                     />
@@ -1160,6 +1198,7 @@ export default function TodayServerClient({
                       {...rowProps}
                       booking={booking}
                       section="parked"
+                      pictures={bookingPictures[booking.id]}
                       isSelected={selectedBookingIds.has(booking.id)}
                       isPending={Boolean(pendingById[booking.id])}
                     />

@@ -137,7 +137,7 @@ D1 and D2 sit on the NVR's PoE network (`192.168.254.0/24`), not the LAN. The pl
 Built on request so Fly Parks can decide whether they want it. Off for every site until switched on.
 
 - **What:** each stored read on the recorder has a close-up (`smallPictureUrl`) and a full shot (`pictureUrl`). Gateway 0.3.0 downloads both with the recorder login after the read is accepted and uploads them to `POST /api/internal/anpr/picture`. They go in the private `anpr-pictures` bucket; the gate event keeps the paths (`plate_picture_path`, `scene_picture_path`).
-- **Where they show:** a thumbnail on Admin → ANPR → Gate Events and on the dashboard "Cars without a booking" card; click for the full shot. Staff (ops role and above) only, through short-lived signed links.
+- **Where they show:** a thumbnail on Admin → ANPR → Gate Events and on the dashboard "Cars without a booking" card (click for the full shot), and a camera icon next to the plate on the Today board that opens the booking's arrival and departure pictures. Staff (ops role and above) only, through short-lived signed links.
 - **Retention:** `/api/internal/cron/anpr-pictures` (daily, 03:30) deletes pictures older than 90 days. Gate events are kept.
 - **Switch:** `tenant_anpr_config.capture_pictures`. The gateway learns it from the heartbeat reply (every 5 minutes) and stops if an upload is refused.
 - **To ship:** merge the branch, run `20261120_anpr_pictures.sql`, tag `gateway-v0.3.0` (the site PC updates itself within 6 hours), then set `capture_pictures = true` for the site.

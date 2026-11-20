@@ -81,3 +81,57 @@ export async function fetchPictureFlags(
   }
   return flags;
 }
+
+export type BookingPictureRead = { eventId: string; at: string; plate: boolean; scene: boolean };
+export type BookingPictures = { in?: BookingPictureRead; out?: BookingPictureRead };
+
+type PictureEventRow = {
+  id: string;
+  booking_id: string | null;
+  event_at: string;
+  direction: string | null;
+  plate_picture_path: string | null;
+  scene_picture_path: string | null;
+};
+
+/** The latest pictured arrival and departure read for each booking (rows newest first). */
+export function latestPicturesByBooking(rows: PictureEventRow[]): Record<string, BookingPictures> {
+  const out: Record<string, BookingPictures> = {};
+  for (const r of rows) {
+    if (!r.booking_id || (r.direction !== 'in' && r.direction !== 'out')) continue;
+    if (!r.plate_picture_path && !r.scene_picture_path) continue;
+    const entry = (out[r.booking_id] ??= {});
+    if (entry[r.direction]) continue;
+    entry[r.direction] = {
+      eventId: r.id,
+      at: r.event_at,
+      plate: Boolean(r.plate_picture_path),
+      scene: Boolean(r.scene_picture_path),
+    };
+  }
+  return out;
+}
+
+/** Pictured camera reads for these bookings. Empty before the picture columns exist. */
+export async function fetchBookingPictures(
+  supabase: SupabaseClient,
+  tenantId: string,
+  bookingIds: string[]
+): Promise<Record<string, BookingPictures>> {
+  const ids = [...new Set(bookingIds.filter(Boolean))];
+  const rows: PictureEventRow[] = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await supabase
+      .from('gate_events')
+      .select('id, booking_id, event_at, direction, plate_picture_path, scene_picture_path')
+      .eq('tenant_id', tenantId)
+      .in('booking_id', ids.slice(i, i + 200))
+      .or('plate_picture_path.not.is.null,scene_picture_path.not.is.null')
+      .order('event_at', { ascending: false })
+      .limit(1000);
+    if (error) return {};
+    rows.push(...((data ?? []) as PictureEventRow[]));
+  }
+  rows.sort((a, b) => b.event_at.localeCompare(a.event_at));
+  return latestPicturesByBooking(rows);
+}
