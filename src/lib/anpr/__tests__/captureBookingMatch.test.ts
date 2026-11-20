@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  correctDirectionFromBooking,
   findDuplicateCapture,
   normalizePlate,
   pickCaptureBooking,
@@ -89,5 +90,41 @@ describe('pickCaptureBooking', () => {
     const late = booking('late', 'AB12CDE', '2026-10-30T09:00:00Z', '2026-11-02T10:00:00Z');
     expect(pickCaptureBooking([early, late], 'AB12CDE', 'in', at)?.id).toBe('late');
     expect(pickCaptureBooking([early, late], 'AB12CDE', 'out', at)?.id).toBe('early');
+  });
+});
+
+describe('correctDirectionFromBooking', () => {
+  const booking = (b: Partial<Parameters<typeof correctDirectionFromBooking>[0]>) => ({
+    id: 'b1',
+    plate: 'HU60AAA',
+    start_at: '2026-11-20T10:00:00Z',
+    end_at: '2026-11-27T10:00:00Z',
+    arrived_at: null,
+    departed_at: null,
+    ...b,
+  });
+  const at = (iso: string) => new Date(iso);
+
+  it('treats an exit read of a car that has not arrived, near its start, as an arrival', () => {
+    expect(correctDirectionFromBooking(booking({}), 'out', at('2026-11-20T09:40:00Z')).direction).toBe('in');
+    expect(correctDirectionFromBooking(booking({}), 'out', at('2026-11-20T18:00:00Z')).direction).toBe('in');
+  });
+
+  it('leaves an exit read alone well after the start or once arrived', () => {
+    expect(correctDirectionFromBooking(booking({}), 'out', at('2026-11-21T09:00:00Z')).direction).toBe('out');
+    expect(
+      correctDirectionFromBooking(booking({ arrived_at: '2026-11-20T09:30:00Z' }), 'out', at('2026-11-27T09:00:00Z'))
+    ).toEqual({ direction: 'out', reason: null });
+  });
+
+  it('treats an entrance read of a parked car as a departure, but not a repeat read on arrival', () => {
+    const parked = booking({ arrived_at: '2026-11-20T09:30:00Z' });
+    expect(correctDirectionFromBooking(parked, 'in', at('2026-11-27T09:00:00Z')).direction).toBe('out');
+    expect(correctDirectionFromBooking(parked, 'in', at('2026-11-20T09:35:00Z')).direction).toBe('in');
+  });
+
+  it('never changes a booking that has already departed', () => {
+    const gone = booking({ arrived_at: '2026-11-20T09:30:00Z', departed_at: '2026-11-27T09:00:00Z' });
+    expect(correctDirectionFromBooking(gone, 'in', at('2026-11-28T09:00:00Z')).direction).toBe('in');
   });
 });

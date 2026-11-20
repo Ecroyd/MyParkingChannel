@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import crypto from 'crypto';
 import { applyBookingOccupancyAction } from '@/lib/ops/occupancyAction';
 import {
+  correctDirectionFromBooking,
   findDuplicateCapture,
   normalizePlate,
   pickCaptureBooking,
@@ -264,17 +265,25 @@ export async function POST(req: NextRequest) {
     // Overstay: a departure more than 6h after the booked end falls outside the window above.
     // Check the vehicle out of the most recent booking it never left: one it arrived on, or one
     // that ended in the last week (the car may have come in before ANPR recorded arrivals).
-    if (!matchedBooking && body.direction === 'out') {
+    // An entrance read of an overstaying car that's already parked is also a departure (wrong way
+    // out), so look for an open stay it arrived on.
+    let fromOpenStay = false;
+    if (!matchedBooking) {
+      fromOpenStay = true;
       const recentEnd = new Date(occurredAt.getTime() - OPEN_STAY_UNARRIVED_MS).toISOString();
-      const { data: openStays, error: openStayError } = await supabase
+      let openStayQuery = supabase
         .from('bookings')
         .select('id, start_at, end_at, status, arrived_at, departed_at, ops_status, plate')
         .eq('tenant_id', tenantId)
         .ilike('plate', platePattern)
-        .or(`arrived_at.not.is.null,end_at.gte.${recentEnd}`)
         .is('departed_at', null)
         .lte('start_at', occurredAtIso)
-        .neq('status', 'cancelled')
+        .neq('status', 'cancelled');
+      openStayQuery =
+        body.direction === 'out'
+          ? openStayQuery.or(`arrived_at.not.is.null,end_at.gte.${recentEnd}`)
+          : openStayQuery.not('arrived_at', 'is', null);
+      const { data: openStays, error: openStayError } = await openStayQuery
         .order('start_at', { ascending: false })
         .limit(10);
 
@@ -290,19 +299,32 @@ export async function POST(req: NextRequest) {
     let reason: string | null = 'no booking match';
     const now = new Date().toISOString();
 
+    // Stored NVR reads have no travel direction, so a car going the wrong way through a gate is
+    // read backwards; correct it from the booking (not arrived yet → arriving, parked → leaving).
+    let direction = body.direction;
+    let directionNote: string | null = null;
+    if (matchedBooking) {
+      const corrected = correctDirectionFromBooking(matchedBooking, body.direction, occurredAt);
+      direction = corrected.direction;
+      directionNote = corrected.reason;
+      // An entrance read only borrows an open stay when it is that car leaving; a fresh repeat
+      // read of a car that has just arrived is left unmatched rather than re-marking it.
+      if (fromOpenStay && direction === 'in') matchedBooking = null;
+    }
+
     if (matchedBooking) {
       bookingId = matchedBooking.id;
 
       try {
         await applyBookingOccupancyAction({
           bookingId: matchedBooking.id,
-          action: body.direction === 'in' ? 'arrived' : 'departed',
+          action: direction === 'in' ? 'arrived' : 'departed',
           source: 'anpr',
           eventAt: occurredAtIso,
           metadata: { provider: 'internal_capture', capture_source: source },
         });
         result = 'allow';
-        reason = null;
+        reason = directionNote;
       } catch (err) {
         console.error('[ANPR Capture] Occupancy action failed:', err);
       }
@@ -317,6 +339,9 @@ export async function POST(req: NextRequest) {
 
     if (bookingId) {
       updateData.booking_id = bookingId;
+    }
+    if (direction !== body.direction) {
+      updateData.direction = direction;
     }
 
     const { error: updateEventError } = await supabase
@@ -336,6 +361,7 @@ export async function POST(req: NextRequest) {
       bookingId,
       result,
       reason,
+      direction,
     });
   } catch (error: any) {
     console.error('[ANPR Capture] Error:', error);

@@ -91,3 +91,46 @@ export function pickCaptureBooking<T extends CaptureBookingCandidate>(
   }
   return best;
 }
+
+/** An arrival can come through the exit up to this long before the booked start… */
+export const WRONG_WAY_IN_BEFORE_START_MS = 24 * 60 * 60 * 1000;
+/** …or this long after it. Later than that, an exit read is a real departure. */
+export const WRONG_WAY_IN_AFTER_START_MS = 12 * 60 * 60 * 1000;
+/** A parked car read by the entrance camera at least this long after arriving is leaving. */
+export const WRONG_WAY_OUT_MIN_STAY_MS = 30 * 60 * 1000;
+
+export type BookingStayState = CaptureBookingCandidate & {
+  arrived_at: string | null;
+  departed_at: string | null;
+};
+
+/**
+ * The NVR's stored reads carry no travel direction, so the direction is the camera's (entrance =
+ * in, exit = out) and a car driving the wrong way through a gate is read backwards. Correct it
+ * from the booking: a car that hasn't arrived can't be leaving, and a car that's parked can't be
+ * arriving. Returns the direction to record and why it was changed (null when it wasn't).
+ */
+export function correctDirectionFromBooking(
+  booking: BookingStayState,
+  cameraDirection: CaptureDirection,
+  occurredAt: Date
+): { direction: CaptureDirection; reason: string | null } {
+  const t = occurredAt.getTime();
+  if (booking.departed_at) return { direction: cameraDirection, reason: null };
+
+  if (cameraDirection === 'out' && !booking.arrived_at) {
+    const start = Date.parse(booking.start_at);
+    const end = Date.parse(booking.end_at);
+    if (t >= start - WRONG_WAY_IN_BEFORE_START_MS && t <= start + WRONG_WAY_IN_AFTER_START_MS && t < end) {
+      return { direction: 'in', reason: 'came in via the exit (booking not yet arrived)' };
+    }
+  }
+
+  if (cameraDirection === 'in' && booking.arrived_at) {
+    if (t - Date.parse(booking.arrived_at) >= WRONG_WAY_OUT_MIN_STAY_MS) {
+      return { direction: 'out', reason: 'left via the entrance (car already parked)' };
+    }
+  }
+
+  return { direction: cameraDirection, reason: null };
+}
