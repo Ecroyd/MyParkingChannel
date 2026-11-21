@@ -100,6 +100,9 @@ export const ADMIN_NAV: NavNode[] = [
     ],
   },
   { key: "payments", label: "Payments", href: "/admin/payments", section: "Settings", minRole: "admin", requiresFinancials: true },
+
+  // ——— Help ———
+  { key: "wishlist", label: "Wishlist and bugs", href: "/admin/wishlist", section: "Help" },
 ];
 
 

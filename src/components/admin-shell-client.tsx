@@ -11,6 +11,7 @@ import { IngestCanaryHealthBanner, type IngestCanaryHealthResult } from './admin
 import Sidebar from '@/components/admin/Sidebar';
 import MobileSidebar from '@/components/admin/MobileSidebar';
 import InstallPWAButton from '@/components/InstallPWAButton';
+import ReportProblemButton from '@/components/admin/wishlist/ReportProblemButton';
 import { MoneyVisibilityProvider } from '@/lib/auth/money-visibility';
 import { canViewMoney } from '@/lib/auth/permissions';
 import { useEdgeSwipeOpen } from '@/hooks/useEdgeSwipeOpen';
@@ -206,6 +207,7 @@ export default function AdminShellClient({
               </div>
               <div className="flex items-center space-x-2 md:space-x-4">
                 <DynamicPricingBadge />
+                <ReportProblemButton />
                 <span className="text-xs md:text-sm text-gray-600 hidden sm:block">Welcome, {user?.email}</span>
                 <button
                   onClick={handleLogout}
