@@ -30,6 +30,21 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
+/** Panel icon for the collapse / expand button; the arrow points the way the sidebar will move. */
+function PanelIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <rect x="2.5" y="3.5" width="15" height="13" rx="2" />
+      <path d="M7.5 3.5v13" />
+      <path
+        d={collapsed ? "M11 8l2 2-2 2" : "M13 8l-2 2 2 2"}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /** Nested nav folder — collapsed by default; auto-opens when a child route is active. */
 function NavFolder({
   node,
@@ -143,6 +158,22 @@ export default function Sidebar({ features = [] as string[], userRole }: { featu
 
   const [open, setOpen] = React.useState<Record<string, boolean>>({});
 
+  // Whole sidebar collapsed to a thin rail (desktop only; phones use the slide-out menu).
+  const COLLAPSED_KEY = "admin.sidebar.collapsed";
+  const [collapsed, setCollapsed] = React.useState(false);
+  React.useEffect(() => {
+    try {
+      setCollapsed(localStorage.getItem(COLLAPSED_KEY) === "1");
+    } catch {}
+  }, []);
+  function toggleCollapsed() {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try { localStorage.setItem(COLLAPSED_KEY, next ? "1" : "0"); } catch {}
+      return next;
+    });
+  }
+
   React.useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -172,14 +203,46 @@ export default function Sidebar({ features = [] as string[], userRole }: { featu
     });
   }
 
+  if (collapsed) {
+    return (
+      <aside className="hidden md:flex w-14 shrink-0 flex-col items-center gap-3 border-r border-gray-200 bg-white/80 py-4 backdrop-blur-md">
+        <div className="h-6 w-6 bg-gray-200 rounded flex items-center justify-center text-xs" aria-hidden="true">
+          🅿️
+        </div>
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          aria-label="Expand sidebar"
+          aria-expanded={false}
+          title="Expand sidebar"
+          className="rounded-lg p-2 text-black/60 hover:bg-gray-100 hover:text-black"
+        >
+          <PanelIcon collapsed />
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <aside className="hidden md:flex w-64 shrink-0 border-r border-gray-200 bg-white/80 backdrop-blur-md">
-      <div className="w-full p-4">
-        <div className="text-xl font-semibold mb-6 text-gray-900 flex items-center gap-2">
-          <div className="h-6 w-6 bg-gray-200 rounded flex items-center justify-center text-xs">
-            🅿️
+      <div className="w-full p-4 overflow-y-auto">
+        <div className="mb-6 flex items-center justify-between gap-2">
+          <div className="text-xl font-semibold text-gray-900 flex items-center gap-2 min-w-0">
+            <div className="h-6 w-6 shrink-0 bg-gray-200 rounded flex items-center justify-center text-xs">
+              🅿️
+            </div>
+            <span className="truncate">My Parking Channel</span>
           </div>
-          My Parking Channel
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label="Collapse sidebar"
+            aria-expanded={true}
+            title="Collapse sidebar"
+            className="shrink-0 rounded-lg p-1.5 text-black/50 hover:bg-gray-100 hover:text-black"
+          >
+            <PanelIcon collapsed={false} />
+          </button>
         </div>
         <nav className="w-full">
         {Object.entries(groups).map(([section, nodes]) => {
