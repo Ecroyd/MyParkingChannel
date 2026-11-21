@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Plus, Edit, Trash2, Calendar, DollarSign, Ban } from 'lucide-react'
+import { Plus, Edit, Trash2, Calendar, PoundSterling, Ban } from 'lucide-react'
 import { BookingRule, CreateBookingRule } from '@/lib/validation/booking-rules'
 import { getRuleDescription } from '@/lib/booking-rules/evaluation'
 import BookingRuleDialog from './BookingRuleDialog'
@@ -167,7 +167,7 @@ export default function BookingRulesPageClient({ tenant }: BookingRulesPageClien
                     {rule.rule_kind === 'blackout' ? (
                       <Ban className="h-5 w-5 text-red-500" />
                     ) : (
-                      <DollarSign className="h-5 w-5 text-green-500" />
+                      <PoundSterling className="h-5 w-5 text-green-500" />
                     )}
                     <div>
                       <CardTitle className="text-base">

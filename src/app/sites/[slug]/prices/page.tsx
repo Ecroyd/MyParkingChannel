@@ -1,6 +1,6 @@
 import { getSiteContext } from "@/lib/site";
 import { Header, Footer } from "../_components/SiteChrome";
-import { DollarSign, Check, X, Shield, Wifi } from "lucide-react";
+import { PoundSterling, Check, X, Shield, Wifi } from "lucide-react";
 import type { Metadata } from "next";
 import {
   generateTenantPageMetadata,
@@ -87,7 +87,7 @@ export default async function PricesPage({ params }: PageProps) {
       <main className="max-w-4xl mx-auto px-4 pt-14 pb-10">
         <div className="mb-8">
           <h1 className="text-3xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-            <DollarSign className="h-8 w-8 text-sky-600" />
+            <PoundSterling className="h-8 w-8 text-sky-600" />
             {h1}
           </h1>
           <p className="text-slate-600">

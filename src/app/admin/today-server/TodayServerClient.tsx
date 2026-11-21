@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useTransition, useRef, useCallback } from 'react';
-import { LogIn, LogOut, Car, DollarSign, ArrowUpDown, ChevronDown, ChevronUp, KeyRound, Plus } from 'lucide-react';
+import { LogIn, LogOut, Car, PoundSterling, ArrowUpDown, ChevronDown, ChevronUp, KeyRound, Plus } from 'lucide-react';
 import BookingDetailsModal from '@/components/bookings/BookingDetailsModal';
 import NewBookingModal from '@/components/bookings/NewBookingModal';
 import DateRangeSelector from '@/components/admin/DateRangeSelector';
@@ -833,7 +833,7 @@ export default function TodayServerClient({
           <StatCard 
             label="Capacity Remaining" 
             value={capacityRemaining}
-            rightSlot={<DollarSign className="h-4 w-4 text-green-500" />}
+            rightSlot={<PoundSterling className="h-4 w-4 text-green-500" />}
           />
         </div>
 
