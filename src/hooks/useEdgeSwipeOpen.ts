@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 type Options = {
   enabled: boolean;
@@ -9,30 +9,47 @@ type Options = {
   edgeWidth?: number;
   /** Minimum horizontal travel to count as open (px). */
   minDistance?: number;
+  /** Only claim edge swipes below this viewport width (px), where the drawer exists. */
+  maxViewportWidth?: number;
 };
+
+const INTERACTIVE = "a, button, input, select, textarea, label, [role='button'], [contenteditable='true']";
 
 /**
  * Opens a left drawer when the user swipes right from the screen's left edge.
  * Ignores multi-touch and mostly-vertical gestures.
+ *
+ * The touchstart listener is non-passive so it can preventDefault on edge
+ * touches: that stops iOS Safari / standalone PWAs from treating the swipe as
+ * "go back". Touches that start on an interactive element are left alone so
+ * taps on controls near the edge still click.
  */
 export function useEdgeSwipeOpen({
   enabled,
   onOpen,
   edgeWidth = 28,
   minDistance = 48,
+  maxViewportWidth = 768,
 }: Options) {
-  useEffect(() => {
-    if (!enabled) return;
+  const onOpenRef = useRef(onOpen);
+  onOpenRef.current = onOpen;
 
+  useEffect(() => {
     let startX = 0;
     let startY = 0;
     let tracking = false;
 
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 1) return;
+      if (window.innerWidth >= maxViewportWidth) return;
       const t = e.touches[0];
       if (t.clientX > edgeWidth) return;
-      tracking = true;
+      const target = e.target as Element | null;
+      if (target?.closest?.(INTERACTIVE)) return;
+
+      // Claim the gesture so the browser doesn't navigate back.
+      if (e.cancelable) e.preventDefault();
+      tracking = enabled;
       startX = t.clientX;
       startY = t.clientY;
     };
@@ -48,7 +65,7 @@ export function useEdgeSwipeOpen({
       }
       if (dx >= minDistance && Math.abs(dy) < 60) {
         tracking = false;
-        onOpen();
+        onOpenRef.current();
       }
     };
 
@@ -56,7 +73,7 @@ export function useEdgeSwipeOpen({
       tracking = false;
     };
 
-    document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchstart", onTouchStart, { passive: false });
     document.addEventListener("touchmove", onTouchMove, { passive: true });
     document.addEventListener("touchend", onTouchEnd, { passive: true });
     document.addEventListener("touchcancel", onTouchEnd, { passive: true });
@@ -67,5 +84,5 @@ export function useEdgeSwipeOpen({
       document.removeEventListener("touchend", onTouchEnd);
       document.removeEventListener("touchcancel", onTouchEnd);
     };
-  }, [enabled, onOpen, edgeWidth, minDistance]);
+  }, [enabled, edgeWidth, minDistance, maxViewportWidth]);
 }
