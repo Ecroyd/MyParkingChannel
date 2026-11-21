@@ -34,6 +34,8 @@
 /* ====== Base ====== */
 html, body {
   height: 100%;
+  /* Stop browser swipe-to-go-back/forward; the left edge opens the nav drawer instead. */
+  overscroll-behavior-x: none;
 }
 
 body {
