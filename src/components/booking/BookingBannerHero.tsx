@@ -1,5 +1,6 @@
 "use client";
 import { useState, useMemo, useEffect } from "react";
+import { redirectToCheckout } from "@/lib/utils/redirect";
 
 interface BookingBannerHeroProps {
   slug: string;
@@ -103,22 +104,47 @@ export default function BookingBannerHero({ slug, tenantId }: BookingBannerHeroP
     setLoading(true);
     
     // Validate required fields
-    if (!phone.trim()) {
-      setError("Contact number is required");
+    const fail = (msg: string) => {
+      setError(msg);
       setLoading(false);
-      return;
-    }
-    
+    };
+    if (!tenantId) return fail("Online booking is unavailable right now. Please try again later.");
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    if (!(startDate < endDate)) return fail("Pick-up must be after drop-off.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return fail("Please enter a valid email address.");
+    if (!phone.trim()) return fail("Contact number is required");
+
+    // Go straight to Stripe checkout (same flow as BookingWidget). The old
+    // /api/booking/start route 307'd to the admin app on another origin, which
+    // fetch() can't follow (CORS) and surfaced as "TypeError: Failed to fetch".
     try {
-      const qs = new URLSearchParams({ slug, start, end, email, phone, plate }).toString();
-      const res = await fetch(`/api/booking/start?${qs}`, { redirect: "follow" });
-      // If the API responds with a redirect, the browser will follow automatically (Next route returns 307).
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setError(data.error || "Unable to continue to booking.");
+      const res = await fetch("/api/payments/public-checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          start_at: startDate.toISOString(),
+          end_at: endDate.toISOString(),
+          customer_email: email.trim(),
+          customer_phone: phone.trim(),
+          plate: plate.trim() ? plate.trim().toUpperCase() : undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.url) {
+        const fieldMsg = data.field_errors ? Object.values(data.field_errors)[0] : null;
+        setError(
+          (typeof fieldMsg === "string" && fieldMsg) ||
+            (Array.isArray(data.details) && data.details.join(". ")) ||
+            data.error ||
+            "Unable to continue to payment. Please try again."
+        );
+        return;
       }
-    } catch (e: any) {
-      setError(String(e));
+      redirectToCheckout(data.url);
+    } catch {
+      setError("Couldn't reach the booking service. Please check your connection and try again.");
     } finally {
       setLoading(false);
     }
@@ -235,7 +261,7 @@ export default function BookingBannerHero({ slug, tenantId }: BookingBannerHeroP
         {/* Additional fields below in a second row on desktop, stacked on mobile */}
         <div className="grid grid-cols-1 gap-2 mt-4 md:grid-cols-3 md:gap-3">
           <div>
-            <label className="block text-sm font-medium mb-1">Email</label>
+            <label className="block text-sm font-medium mb-1">Email *</label>
             <input 
               type="email" 
               value={email} 
