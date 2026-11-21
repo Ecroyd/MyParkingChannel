@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
 import { redirectToCheckout } from "@/lib/utils/redirect";
+import { trackSiteEvent } from "@/lib/visitors/client";
 
 interface BookingWidgetProps {
   tenantSlug: string;
@@ -388,6 +389,7 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
       }
 
       if (paymentResult.url) {
+        trackSiteEvent("checkout");
         redirectToCheckout(paymentResult.url);
       } else {
         toast({

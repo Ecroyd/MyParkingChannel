@@ -1,6 +1,7 @@
 "use client";
 import { useState, useMemo, useEffect } from "react";
 import { redirectToCheckout } from "@/lib/utils/redirect";
+import { trackSiteEvent } from "@/lib/visitors/client";
 
 interface BookingBannerHeroProps {
   slug: string;
@@ -142,6 +143,7 @@ export default function BookingBannerHero({ slug, tenantId }: BookingBannerHeroP
         );
         return;
       }
+      trackSiteEvent("checkout");
       redirectToCheckout(data.url);
     } catch {
       setError("Couldn't reach the booking service. Please check your connection and try again.");

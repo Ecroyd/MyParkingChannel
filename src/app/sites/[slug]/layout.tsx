@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next";
 import { Manrope } from "next/font/google";
 import { getSiteContext } from "@/lib/site";
 import { TenantIntegrations } from "@/components/site/TenantIntegrations";
+import { SiteTracker } from "@/components/site/SiteTracker";
 import { createServerClient } from "@/lib/supabase/server";
 
 const tenantFont = Manrope({
@@ -92,6 +93,7 @@ export default async function SiteLayout({
       className={`${tenantFont.variable} ${tenantFont.className} tenant-site flex min-h-screen flex-col bg-[#f8fafc] text-slate-800 antialiased`}
     >
       <TenantIntegrations slug={slug} />
+      <SiteTracker slug={slug} />
       {children}
     </div>
   );
