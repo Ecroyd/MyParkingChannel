@@ -307,7 +307,7 @@ export default function DashboardClient({
                   )}
                   <p className="text-xs text-gray-500">
                     {new Date(booking.start_at).toLocaleString('en-GB', { 
-                      timeZone: 'UTC',
+                      timeZone: 'Europe/London',
                       day: '2-digit',
                       month: '2-digit',
                       year: 'numeric',

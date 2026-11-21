@@ -135,7 +135,10 @@ export default async function DashboardServerPage() {
       .from('bookings')
       .select('*')
       .eq('tenant_id', tenant.id)
-      .order('start_at', { ascending: false })
+      // Newest bookings first. Ordering by arrival surfaced whatever was booked furthest ahead
+      // (often cancellations years out at £0), not what had just come in.
+      .neq('status', 'cancelled')
+      .order('created_at', { ascending: false })
       .limit(10),
     
     adminClient
