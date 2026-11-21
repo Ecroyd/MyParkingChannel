@@ -1,0 +1,13 @@
+{
+  "note": "Fly Parks Exeter LOS price grid before the Direct channel was set to £10 per day (2026-11-21). Direct had no prices of its own and used the 'all' grid below. To undo: in Admin > Pricing, pick each season, choose the Direct channel and set its prices back to the 'all' values (or remove the Direct override), and set the display daily rate back to 7.",
+  "takenAt": "2026-11-21T20:44:37.365Z",
+  "tenant": "bab45dab-19e8-4230-b18e-ee1f663608e5",
+  "tenant_pricing": { "daily_rate": 7, "billing_type": "day", "currency": "GBP" },
+  "seasons": [
+    {"id":"54d998cb-f552-42b5-a603-395566af86cc","name":"26/06 - 17/07","all":[35,59,78,98,105,120,127.2,131.4,147.6,160.79,165.6,170.4,177.6,186,193.2,201.6,216,224.4,232.8,255,265,275,285,295,305,315,325,335,345,355],"allExtra":null,"directExtra":null,"directHadOwnPrices":false},
+    {"id":"b8c6630c-b260-4919-a18f-89308404b6b1","name":"SUMMER #2 2026","all":[35,59,78,98,105,120,131,149,153,156,161,166,173,180,199,210,225,230,240,255,265,275,285,295,305,315,325,335,345,355],"allExtra":null,"directExtra":null,"directHadOwnPrices":false},
+    {"id":"75e49f91-bdef-43c5-876e-012e7f5c56fa","name":"Summer 26","all":[29,39.1,56.35,73.6,90.85,108.1,118.45,136,143,156,161,166,173,180,199,210,225,230,240,255,260,270,280,290,300,310,320,330,340,350],"allExtra":null,"directExtra":null,"directHadOwnPrices":false},
+    {"id":"76e82f7d-0d9f-4bf1-826d-bbdb2cc5a305","name":"Winter 25/26","all":[33,49,63,75,79,92,101,106,112,125,128,129.5,135,141,147,153,164.5,170,176,194,199,210,220,230,240,250,260,270,280,290],"allExtra":null,"directExtra":null,"directHadOwnPrices":false},
+    {"id":"ed99019c-7522-48a2-8c8d-9844a73363bd","name":"Winter 26/27","all":[29,39.1,56.35,73.6,90.85,108.1,118.45,136,143,156,161,166,173,180,199,210,225,230,240,255,260,270,280,290,300,310,320,330,340,350],"allExtra":null,"directExtra":null,"directHadOwnPrices":false}
+  ]
+}
