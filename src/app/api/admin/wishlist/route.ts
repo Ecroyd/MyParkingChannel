@@ -5,7 +5,7 @@
 // every car park's.
 
 import { after, NextRequest, NextResponse } from 'next/server';
-import { filePath } from '@/lib/wishlist/fields';
+import { filePath, type WishlistItem } from '@/lib/wishlist/fields';
 import { parseItemForm } from '@/lib/wishlist/formData';
 import {
   createItem,
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
   const form = await parseItemForm(req);
   if (!form.ok) return NextResponse.json({ error: form.error }, { status: 400 });
 
-  let item;
+  let item: WishlistItem;
   try {
     item = await createItem(viewer, form.input);
   } catch (err) {
