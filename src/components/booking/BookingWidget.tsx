@@ -34,6 +34,15 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
   const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
   const [step, setStep] = useState<BookingStep>("search");
   const [hasQuoted, setHasQuoted] = useState(false);
+  const [promoInput, setPromoInput] = useState("");
+  const [appliedPromo, setAppliedPromo] = useState<{
+    code: string;
+    label: string;
+    discount: number;
+    finalAmount: number;
+  } | null>(null);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [applyingPromo, setApplyingPromo] = useState(false);
 
   const [errors, setErrors] = useState<{
     startDate?: string;
@@ -78,6 +87,9 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
       setHasQuoted(false);
       setCalculatedPrice(null);
       setStep("search");
+      // A discount was worked out for the old dates; the customer applies the code again.
+      setAppliedPromo(null);
+      setPromoError(null);
       setErrors((prev) => ({ ...prev, general: undefined }));
     }
   };
@@ -188,6 +200,51 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
     }
   };
 
+  const handleApplyPromo = async () => {
+    const code = promoInput.trim();
+    if (!code) {
+      setPromoError("Enter a promo code.");
+      return;
+    }
+    setApplyingPromo(true);
+    setPromoError(null);
+    try {
+      const res = await fetch("/api/promo/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenantId,
+          code,
+          startAt: new Date(startDate).toISOString(),
+          endAt: new Date(endDate).toISOString(),
+        }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (result.ok) {
+        setAppliedPromo({
+          code: result.code,
+          label: result.label,
+          discount: result.discount,
+          finalAmount: result.finalAmount,
+        });
+        setPromoInput(result.code);
+      } else {
+        setAppliedPromo(null);
+        setPromoError(result.reason || "That code isn't valid.");
+      }
+    } catch {
+      setPromoError("Couldn't check that code. Please try again.");
+    } finally {
+      setApplyingPromo(false);
+    }
+  };
+
+  const removePromo = () => {
+    setAppliedPromo(null);
+    setPromoInput("");
+    setPromoError(null);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrors({});
@@ -250,7 +307,7 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
           customer_phone: customerPhone,
           plate: vehicleReg.toUpperCase(),
           flight_number: flightNumber || null,
-          application_fee_cents: Math.round(calculatedPrice * 0.1 * 100),
+          promo_code: appliedPromo?.code ?? null,
         }),
       });
 
@@ -276,6 +333,17 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
             }
             if (paymentResult.field_errors.end_at) {
               fieldErrors.endDate = paymentResult.field_errors.end_at;
+            }
+            if (paymentResult.field_errors.promo_code) {
+              // The code stopped applying since it was checked (expired or used up).
+              setAppliedPromo(null);
+              setPromoError(paymentResult.field_errors.promo_code);
+              toast({
+                title: "Promo code no longer applies",
+                description: paymentResult.field_errors.promo_code,
+                variant: "destructive",
+              });
+              return;
             }
             if (Object.keys(fieldErrors).length > 0) {
               setErrors(fieldErrors);
@@ -482,9 +550,21 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
               aria-live="polite"
             >
               <p className="text-[15px] font-medium text-slate-600">Your parking price</p>
-              <p className="mt-1 text-4xl font-semibold tracking-tight text-slate-900">
-                £{calculatedPrice!.toFixed(2)}
-              </p>
+              {appliedPromo ? (
+                <>
+                  <p className="mt-1 text-4xl font-semibold tracking-tight text-slate-900">
+                    £{appliedPromo.finalAmount.toFixed(2)}
+                  </p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    <span className="line-through">£{calculatedPrice!.toFixed(2)}</span>{" "}
+                    · {appliedPromo.code} ({appliedPromo.label}): −£{appliedPromo.discount.toFixed(2)}
+                  </p>
+                </>
+              ) : (
+                <p className="mt-1 text-4xl font-semibold tracking-tight text-slate-900">
+                  £{calculatedPrice!.toFixed(2)}
+                </p>
+              )}
             </div>
           ) : null}
 
@@ -619,6 +699,63 @@ export default function BookingWidget({ tenantSlug: _tenantSlug, tenantId }: Boo
                   onChange={(e) => setFlightNumber(e.target.value.toUpperCase())}
                   className="h-12 text-base uppercase"
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="promoCode" className="text-[15px]">
+                  Promo code (optional)
+                </Label>
+                {appliedPromo ? (
+                  <div className="flex items-center justify-between rounded-lg border border-green-200 bg-green-50 px-3 py-2.5">
+                    <p className="text-sm text-green-800">
+                      <span className="font-semibold">{appliedPromo.code}</span> applied ·{" "}
+                      {appliedPromo.label} (−£{appliedPromo.discount.toFixed(2)})
+                    </p>
+                    <button
+                      type="button"
+                      onClick={removePromo}
+                      className="text-sm font-medium text-green-900 underline hover:no-underline"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <Input
+                      id="promoCode"
+                      type="text"
+                      value={promoInput}
+                      onChange={(e) => {
+                        setPromoInput(e.target.value.toUpperCase());
+                        setPromoError(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void handleApplyPromo();
+                        }
+                      }}
+                      autoComplete="off"
+                      aria-invalid={promoError ? true : undefined}
+                      aria-describedby={promoError ? "promoCodeError" : undefined}
+                      className={`h-12 text-base uppercase ${promoError ? "border-red-500" : ""}`}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-12 shrink-0 px-5"
+                      disabled={applyingPromo || !promoInput.trim()}
+                      onClick={() => void handleApplyPromo()}
+                    >
+                      {applyingPromo ? "Checking…" : "Apply"}
+                    </Button>
+                  </div>
+                )}
+                {promoError ? (
+                  <p id="promoCodeError" className="text-sm text-red-600" role="alert">
+                    {promoError}
+                  </p>
+                ) : null}
               </div>
 
               <Button

@@ -52,6 +52,7 @@ export const ADMIN_NAV: NavNode[] = [
     minRole: "admin",
     children: [
       { key: "dynamic-pricing", label: "Dynamic Pricing", href: "/admin/settings/dynamic-pricing", minRole: "admin" },
+      { key: "promo-codes", label: "Promo Codes", href: "/admin/promo-codes", minRole: "admin" },
     ],
   },
   { key: "analytics", label: "Analytics", href: "/admin/analytics", section: "Core", minRole: "admin", requiresFinancials: true },

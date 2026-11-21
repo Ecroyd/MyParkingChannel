@@ -189,6 +189,11 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session, 
       reference: reference,
       stripe_payment_intent_id: paymentIntentId,
       stripe_checkout_session_id: session.id,
+      ...(piMetadata.promo_code
+        ? {
+            notes: `Promo code ${piMetadata.promo_code}: £${piMetadata.promo_discount} off (full price £${piMetadata.full_price})`,
+          }
+        : {}),
     };
 
     const { data: booking, error } = await admin
@@ -209,6 +214,13 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session, 
       throw new Error(`Failed to create booking ${reference} for paid ${paymentIntentId}: ${error.message}`);
     } else {
       console.log('Booking created successfully:', booking?.reference);
+
+      // Count the promo code's use now the booking is paid (once: retries stop at the
+      // payment-intent check above).
+      if (piMetadata.promo_code_id) {
+        const { recordPromoCodeUse } = await import('@/lib/promo/promoCodeStore');
+        await recordPromoCodeUse(admin, piMetadata.promo_code_id);
+      }
       
       // Queue customer confirmation + tenant notification
       if (booking) {

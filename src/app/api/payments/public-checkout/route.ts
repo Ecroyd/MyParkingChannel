@@ -5,6 +5,8 @@ import { getServerSupabase, getTenantStripeAccountId } from '@/lib/supabase-serv
 import { siteUrlForTenantSlug } from '@/lib/sites/domain';
 import { randomBytes } from 'crypto';
 import { storeTempBooking } from '@/lib/bookings/tempBookingStore';
+import { evaluatePromoCode } from '@/lib/promo/promoCodes';
+import { findPromoCode } from '@/lib/promo/promoCodeStore';
 
 const PLATFORM_FEE_RATE = 0.1;
 
@@ -17,6 +19,7 @@ const PLATFORM_FEE_RATE = 0.1;
  *   customer_email?: string,         // customer email for Stripe checkout
  *   customer_phone?: string,         // customer phone number
  *   plate?: string,                 // vehicle registration
+ *   promo_code?: string,            // optional; re-checked here, never trusted from the widget
  * }
  */
 export async function POST(req: Request) {
@@ -31,6 +34,7 @@ export async function POST(req: Request) {
       customer_phone,
       plate,
       flight_number,
+      promo_code,
     } = body;
 
     // Comprehensive validation
@@ -97,8 +101,26 @@ export async function POST(req: Request) {
       currency: 'GBP',
       channel: 'direct',
     });
-    const amount_cents = Math.round(availability.pricing.total_price * 100);
+    const fullPrice = availability.pricing.total_price;
     const currency = availability.currency.toUpperCase();
+
+    // Promo code: checked again here (the widget only previews it) so the charge always matches
+    // the code's current rules. A code that no longer applies stops checkout with the reason.
+    let promo: { id: string; code: string; discount: number } | null = null;
+    let chargePounds = fullPrice;
+    if (typeof promo_code === 'string' && promo_code.trim()) {
+      const found = await findPromoCode(supabase, tenant_id, promo_code);
+      const result = evaluatePromoCode(found, fullPrice);
+      if (!result.ok || !found) {
+        return NextResponse.json(
+          { error: result.ok ? "That code isn't valid." : result.reason, field_errors: { promo_code: result.ok ? "That code isn't valid." : result.reason } },
+          { status: 400 }
+        );
+      }
+      promo = { id: found.id, code: result.code, discount: result.discount };
+      chargePounds = result.finalAmount;
+    }
+    const amount_cents = Math.round(chargePounds * 100);
 
     if (amount_cents <= 0) return NextResponse.json({ error: 'Invalid amount' }, { status: 400 });
 
@@ -131,7 +153,11 @@ export async function POST(req: Request) {
     const bookingReference = generateReference();
     const tempBookingId = `${tenant_id}_${bookingReference}`;
     const productName = `Parking (${bookingReference})`;
-    const descName = customer_name ? `Customer: ${customer_name}` : undefined;
+    const descParts = [
+      customer_name ? `Customer: ${customer_name}` : null,
+      promo ? `Promo ${promo.code}: -£${promo.discount.toFixed(2)}` : null,
+    ].filter(Boolean);
+    const descName = descParts.length ? descParts.join(' · ') : undefined;
 
     // Store booking data temporarily before creating Stripe session
     const tempStored = await storeTempBooking({
@@ -180,6 +206,14 @@ export async function POST(req: Request) {
             plate: plate || '',
             start_at: start_at,
             end_at: end_at,
+            ...(promo
+              ? {
+                  promo_code_id: promo.id,
+                  promo_code: promo.code,
+                  promo_discount: promo.discount.toFixed(2),
+                  full_price: fullPrice.toFixed(2),
+                }
+              : {}),
           },
         },
         success_url: `${ROOT_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
