@@ -63,6 +63,61 @@ export default function BookingBannerHero({ slug, tenantId }: BookingBannerHeroP
   const [error, setError] = useState<string | null>(null);
   const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
   const [calculatingPrice, setCalculatingPrice] = useState(false);
+  const [promoInput, setPromoInput] = useState("");
+  const [appliedPromo, setAppliedPromo] = useState<{
+    code: string;
+    label: string;
+    discount: number;
+    finalAmount: number;
+  } | null>(null);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [applyingPromo, setApplyingPromo] = useState(false);
+
+  // A discount is worked out for specific dates; changing them means applying the code again.
+  useEffect(() => {
+    setAppliedPromo(null);
+    setPromoError(null);
+  }, [start, end]);
+
+  async function applyPromo() {
+    const code = promoInput.trim();
+    if (!code) return setPromoError("Enter a promo code.");
+    if (!tenantId) return setPromoError("Online booking is unavailable right now.");
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    if (!(startDate < endDate)) return setPromoError("Choose your dates first.");
+    setApplyingPromo(true);
+    setPromoError(null);
+    try {
+      const res = await fetch("/api/promo/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenantId,
+          code,
+          startAt: startDate.toISOString(),
+          endAt: endDate.toISOString(),
+        }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (result.ok) {
+        setAppliedPromo({
+          code: result.code,
+          label: result.label,
+          discount: result.discount,
+          finalAmount: result.finalAmount,
+        });
+        setPromoInput(result.code);
+      } else {
+        setAppliedPromo(null);
+        setPromoError(result.reason || "That code isn't valid.");
+      }
+    } catch {
+      setPromoError("Couldn't check that code. Please try again.");
+    } finally {
+      setApplyingPromo(false);
+    }
+  }
 
   // Fetch quote when dates change (same as card – price appears once dates are set)
   useEffect(() => {
@@ -130,10 +185,16 @@ export default function BookingBannerHero({ slug, tenantId }: BookingBannerHeroP
           customer_email: email.trim(),
           customer_phone: phone.trim(),
           plate: plate.trim() ? plate.trim().toUpperCase() : undefined,
+          promo_code: appliedPromo?.code ?? undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.url) {
+        if (data.field_errors?.promo_code) {
+          // The code stopped applying since it was checked (expired or used up).
+          setAppliedPromo(null);
+          setPromoError(data.field_errors.promo_code);
+        }
         const fieldMsg = data.field_errors ? Object.values(data.field_errors)[0] : null;
         setError(
           (typeof fieldMsg === "string" && fieldMsg) ||
@@ -245,9 +306,19 @@ export default function BookingBannerHero({ slug, tenantId }: BookingBannerHeroP
                 <span className="text-sm text-slate-600">Calculating price…</span>
               )}
               {!calculatingPrice && calculatedPrice != null && calculatedPrice > 0 && (
-                <span className="text-sm font-semibold text-slate-900">
-                  Total: £{calculatedPrice.toFixed(2)}
-                </span>
+                appliedPromo ? (
+                  <span className="text-sm text-slate-900">
+                    <span className="font-semibold">Total: £{appliedPromo.finalAmount.toFixed(2)}</span>{" "}
+                    <span className="text-slate-500 line-through">£{calculatedPrice.toFixed(2)}</span>{" "}
+                    <span className="text-green-700">
+                      {appliedPromo.code} ({appliedPromo.label})
+                    </span>
+                  </span>
+                ) : (
+                  <span className="text-sm font-semibold text-slate-900">
+                    Total: £{calculatedPrice.toFixed(2)}
+                  </span>
+                )
               )}
             </div>
           )}
@@ -261,7 +332,7 @@ export default function BookingBannerHero({ slug, tenantId }: BookingBannerHeroP
         </form>
 
         {/* Additional fields below in a second row on desktop, stacked on mobile */}
-        <div className="grid grid-cols-1 gap-2 mt-4 md:grid-cols-3 md:gap-3">
+        <div className="grid grid-cols-1 gap-2 mt-4 md:grid-cols-4 md:gap-3">
           <div>
             <label className="block text-sm font-medium mb-1">Email *</label>
             <input 
@@ -293,6 +364,63 @@ export default function BookingBannerHero({ slug, tenantId }: BookingBannerHeroP
               onChange={(e) => setPlate(e.target.value)} 
               className="w-full rounded-md border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
             />
+          </div>
+          <div>
+            <label htmlFor="banner-promo" className="block text-sm font-medium mb-1">Promo code</label>
+            {appliedPromo ? (
+              <div className="flex items-center justify-between rounded-md border border-green-200 bg-green-50 px-3 py-2">
+                <span className="text-sm text-green-800">
+                  <span className="font-semibold">{appliedPromo.code}</span> −£{appliedPromo.discount.toFixed(2)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAppliedPromo(null);
+                    setPromoInput("");
+                    setPromoError(null);
+                  }}
+                  className="text-sm font-medium text-green-900 underline hover:no-underline"
+                >
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  id="banner-promo"
+                  value={promoInput}
+                  onChange={(e) => {
+                    setPromoInput(e.target.value.toUpperCase());
+                    setPromoError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void applyPromo();
+                    }
+                  }}
+                  autoComplete="off"
+                  aria-invalid={promoError ? true : undefined}
+                  aria-describedby={promoError ? "banner-promo-error" : undefined}
+                  className={`w-full min-w-0 rounded-md border px-3 py-2 uppercase focus:outline-none focus:ring-2 ${
+                    promoError ? "border-red-300 focus:ring-red-500" : "border-slate-300 focus:ring-slate-400"
+                  }`}
+                />
+                <button
+                  type="button"
+                  onClick={() => void applyPromo()}
+                  disabled={applyingPromo || !promoInput.trim()}
+                  className="shrink-0 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {applyingPromo ? "Checking…" : "Apply"}
+                </button>
+              </div>
+            )}
+            {promoError && (
+              <p id="banner-promo-error" className="mt-1 text-sm text-red-600" role="alert">
+                {promoError}
+              </p>
+            )}
           </div>
         </div>
       </div>
