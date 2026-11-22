@@ -2,10 +2,43 @@ import { getSiteContext } from "@/lib/site";
 import { Header, Footer } from "../_components/SiteChrome";
 import { PoundSterling, Check, X, Shield, Wifi } from "lucide-react";
 import type { Metadata } from "next";
+import { calculateAvailability } from "@/lib/availability/engine";
 import {
   generateTenantPageMetadata,
   getTenantPageRenderData,
 } from "@/lib/seo/page-render";
+
+const EXAMPLE_DAYS = [1, 3, 7, 14];
+
+const gbp = (n: number) => `£${n.toFixed(2)}`;
+
+/** What the website charges for 1, 3, 7 and 14 days starting tomorrow; stays with no price are left out. */
+async function examplePrices(tenantId: string): Promise<Array<{ days: number; price: number }>> {
+  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const day = (offset: number, time: string) => {
+    const d = new Date(`${tomorrow}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + offset);
+    return `${d.toISOString().slice(0, 10)}T${time}Z`;
+  };
+  const results = await Promise.all(
+    EXAMPLE_DAYS.map(async (days) => {
+      try {
+        const a = await calculateAvailability({
+          tenantId,
+          startAt: day(0, "10:00:00"),
+          endAt: day(days - 1, "18:00:00"),
+          currency: "GBP",
+          channel: "direct",
+        });
+        const price = Number(a.pricing.total_price);
+        return Number.isFinite(price) && price > 0 ? { days, price } : null;
+      } catch {
+        return null;
+      }
+    })
+  );
+  return results.filter((r): r is { days: number; price: number } => r !== null);
+}
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -50,16 +83,10 @@ export default async function PricesPage({ params }: PageProps) {
     "Airport Parking";
   const h1 = seo?.page?.h1 || "Transparent Pricing";
 
-  const { getServerSupabase } = await import("@/lib/supabase/server");
-  const supabase = await getServerSupabase();
-
-  const { data: pricing } = await supabase
-    .from("tenant_pricing")
-    .select("daily_rate")
-    .eq("tenant_id", ctx.tenant.id)
-    .single();
-
-  const dailyRate = pricing?.daily_rate || 7.0;
+  // Real website prices from the length-of-stay grid (Direct channel, dynamic pricing included)
+  // for stays starting tomorrow, so this page always matches what checkout charges.
+  const examples = await examplePrices(ctx.tenant.id);
+  const fromPrice = examples[0]?.price ?? null;
 
   const features = [
     { icon: Shield, text: "24/7 CCTV Monitoring", included: true },
@@ -67,7 +94,7 @@ export default async function PricesPage({ params }: PageProps) {
     { icon: Check, text: "Secure Payment", included: true },
     { icon: Check, text: "Free Cancellation (24h)", included: true },
     { icon: Check, text: "Extension Available", included: true },
-    { icon: X, text: "No Hidden Fees", included: false },
+    { icon: Check, text: "No Hidden Fees", included: true },
   ];
 
   return (
@@ -100,42 +127,34 @@ export default async function PricesPage({ params }: PageProps) {
         <div className="grid lg:grid-cols-2 gap-8">
           <div className="rounded-2xl border bg-white/70 backdrop-blur shadow-lg p-8">
             <div className="text-center mb-6">
-              <h2 className="text-2xl font-semibold text-slate-900 mb-2">Daily Rate</h2>
+              <h2 className="text-2xl font-semibold text-slate-900 mb-2">Parking from</h2>
               <div className="text-4xl font-bold text-sky-600 mb-2">
-                £{Number(dailyRate).toFixed(2)}
+                {fromPrice != null ? gbp(fromPrice) : "See booking form"}
               </div>
-              <p className="text-slate-600">per day</p>
+              <p className="text-slate-600">for 1 day, and the longer you stay the less you pay per day</p>
             </div>
 
-            <div className="space-y-4 mb-6">
-              <div className="text-center">
-                <p className="text-sm text-slate-600 mb-2">Example pricing:</p>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span>1 day</span>
-                    <span className="font-medium">£{Number(dailyRate).toFixed(2)}</span>
+            {examples.length > 0 ? (
+              <div className="space-y-4 mb-6">
+                <div className="text-center">
+                  <p className="text-sm text-slate-600 mb-2">Example prices for stays starting tomorrow:</p>
+                  <div className="space-y-2 text-sm">
+                    {examples.map((e) => (
+                      <div key={e.days} className="flex justify-between">
+                        <span>
+                          {e.days} {e.days === 1 ? "day" : "days"}
+                        </span>
+                        <span className="font-medium">{gbp(e.price)}</span>
+                      </div>
+                    ))}
                   </div>
-                  <div className="flex justify-between">
-                    <span>3 days</span>
-                    <span className="font-medium">
-                      £{(Number(dailyRate) * 3).toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>7 days</span>
-                    <span className="font-medium">
-                      £{(Number(dailyRate) * 7).toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>14 days</span>
-                    <span className="font-medium">
-                      £{(Number(dailyRate) * 14).toFixed(2)}
-                    </span>
-                  </div>
+                  <p className="mt-3 text-xs text-slate-500">
+                    Days are counted from your drop-off date to your pick-up date, both included. Prices can vary by
+                    date; the booking form shows the exact price for your dates.
+                  </p>
                 </div>
               </div>
-            </div>
+            ) : null}
 
             <a
               href="/book"
